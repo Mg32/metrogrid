@@ -71,36 +71,37 @@ function draw(): void {
   renderer.begin();
   // 結果画面では止まった時点の様子を表示する
   const songTime = scene === 'play' ? conductor.songTime() : sim ? Math.max(sim.tick, 0) * tickSec : 0;
-  if (sim && scene !== 'title') renderer.world(sim, Math.max(songTime, 0), tickSec);
-  renderer.present();
+  if (sim && scene !== 'title') {
+    renderer.world(sim, Math.max(songTime, 0), tickSec);
+    if (scene !== 'loading') renderer.hud(sim, songTime, tickSec);
+  }
 
   if (scene === 'title') {
     renderer.overlay([
-      { text: 'metrogrid', size: 20 },
-      { text: '試作版 / テストステージ', color: '#8d857a' },
+      { text: 'METROGRID', scale: 3 },
+      { text: 'PROTOTYPE / TEST STAGE', color: '#8d857a' },
       { text: '' },
-      { text: '方向キー（WASD）を押しっぱなしで、拍ごとに1マス進む' },
-      { text: '景色の薄い場所ほど速く進む（♩ → ♪ → ♬）', color: '#8d857a' },
+      { text: 'HOLD ARROWS (WASD) TO WALK' },
+      { text: 'ONE STEP PER COUNT' },
+      { text: 'FADED ROADS ARE FASTER: 1/4 1/8 1/16', color: '#8d857a' },
       { text: '' },
-      { text: 'Enter / Space / クリックで開始', color: '#e3c56e' },
-      { text: 'プレイ中　R: やり直し　Esc: タイトル', size: 7, color: '#8d857a' },
+      { text: 'ENTER / SPACE / CLICK TO START', color: '#e3c56e' },
+      { text: 'R: RETRY   ESC: TITLE', color: '#8d857a' },
     ]);
-    return;
-  }
-  if (!sim) return;
-  if (scene !== 'loading') renderer.hud(sim, songTime, tickSec);
-  if (scene === 'result') {
+  } else if (sim && scene === 'result') {
     const cleared = sim.status === 'cleared';
     renderer.overlay([
-      { text: cleared ? 'CLEAR' : 'TIME UP', size: 20, color: cleared ? '#cfe3f0' : '#d0675a' },
+      { text: cleared ? 'CLEAR' : 'TIME UP', scale: 3, color: cleared ? '#cfe3f0' : '#d0675a' },
       { text: '' },
-      { text: `SCORE ${sim.score}`, size: 12 },
-      { text: cleared ? `ゴールボーナス ${sim.goalBonus}` : 'ゴールに届かなかった（得点は記録）', color: '#8d857a' },
-      { text: `ミス ${sim.misses}`, color: '#8d857a' },
+      { text: `SCORE ${sim.score}`, scale: 2 },
+      { text: cleared ? `GOAL BONUS ${sim.goalBonus}` : 'NO GOAL (SCORE KEPT)', color: '#8d857a' },
+      { text: `MISS ${sim.misses}`, color: '#8d857a' },
       { text: '' },
-      { text: 'Enter: もう一度　Esc: タイトル', color: '#e3c56e' },
+      { text: 'ENTER: RETRY   ESC: TITLE', color: '#e3c56e' },
     ]);
   }
+
+  renderer.present();
 }
 
 function frame(): void {
