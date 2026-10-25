@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { createHazards, PatrolHazard, PeriodicHazard, SwingHazard } from '../src/game/hazard.ts';
+import { createHazards, FlowHazard, PatrolHazard, PeriodicHazard, SwingHazard } from '../src/game/hazard.ts';
 import { Stage } from '../src/game/stage.ts';
 import { STAGES } from '../src/game/stages/index.ts';
 import { TICKS_PER_BAR, ZONE_INTERVAL } from '../src/game/types.ts';
@@ -34,8 +34,24 @@ for (const def of Object.values(STAGES)) {
 
     test('危険物はすべて床の上を動く', () => {
       for (const h of createHazards(def.hazards, () => 0)) {
-        const cells = h instanceof PatrolHazard ? h.route : h instanceof PeriodicHazard || h instanceof SwingHazard ? h.cells : [];
+        const cells =
+          h instanceof PatrolHazard
+            ? h.route
+            : h instanceof PeriodicHazard || h instanceof SwingHazard || h instanceof FlowHazard
+              ? h.cells
+              : [];
         for (const c of cells) assert.equal(stage.cell(c.x, c.y)?.terrain, 'floor', `(${c.x},${c.y})`);
+      }
+    });
+
+    test('流れは縦横に連続した水の中を流れる', () => {
+      for (const d of def.hazards) {
+        if (d.type !== 'flow') continue;
+        assert.ok(d.every > 0 && d.interval > 0);
+        d.cells.forEach(([x, y], i) => {
+          assert.ok(stage.cell(x, y)!.water, `(${x},${y}) が水の中でない`);
+          if (i > 0) assert.equal(Math.abs(x - d.cells[i - 1][0]) + Math.abs(y - d.cells[i - 1][1]), 1, `(${x},${y}) が前のマスと隣り合っていない`);
+        });
       }
     });
 
@@ -44,10 +60,11 @@ for (const def of Object.values(STAGES)) {
       const MAX_WAIT = 2 * TICKS_PER_BAR;
       for (const d of def.hazards) {
         if (d.type === 'patrol') continue;
-        const phases = d.type === 'swing' ? d.period : 1;
+        const phases = d.type === 'swing' ? d.period : d.type === 'flow' ? d.every : 1;
         for (let phase = 0; phase < phases; phase++) {
-          const h = d.type === 'swing' ? new SwingHazard(d, phase) : new PeriodicHazard(d);
-          for (const c of h instanceof SwingHazard || h instanceof PeriodicHazard ? h.cells : []) {
+          const h =
+            d.type === 'swing' ? new SwingHazard(d, phase) : d.type === 'flow' ? new FlowHazard(d, phase) : new PeriodicHazard(d);
+          for (const c of h.cells) {
             const interval = ZONE_INTERVAL[stage.cell(c.x, c.y)!.zone];
             const free = (t: number) => !h.cellsAt(t).some((p) => p.x === c.x && p.y === c.y);
             let last = 0;

@@ -3,7 +3,7 @@
  * 288x288 の画面を x2（576x576）で撮る。
  *
  *   npm run shot                                 既定の場面をすべて
- *   npm run shot -- --view 12,5,40 --name foo    任意の位置と tick（?view と同じ）
+ *   npm run shot -- --view 12,5,40 --name foo    任意の位置と tick（?view と同じ）。--stage STAGE2 でステージを選ぶ
  *   npm run shot -- --scale 1                    等倍で撮る
  */
 import { mkdir } from 'node:fs/promises';
@@ -18,12 +18,13 @@ const { values: args } = parseArgs({
     name: { type: 'string', default: 'custom' },
     scale: { type: 'string', default: '2' },
     seed: { type: 'string', default: '1' },
+    stage: { type: 'string' },
   },
 });
 
 /** 場面名と URL のクエリ。view は「X,Y,TICK」 */
 const SCENES: [string, string][] = args.view
-  ? [[args.name, `view=${args.view}`]]
+  ? [[args.name, `view=${args.view}${args.stage ? `&stage=${args.stage}` : ''}`]]
   : [
       ['title', ''],
       ['start', 'view=5,38,0'],
@@ -35,6 +36,11 @@ const SCENES: [string, string][] = args.view
       ['clear-light', 'clear=0.7'],
       ['clear-crumble', 'clear=1.4'],
       ['clear-result', 'clear=6'],
+      ['s2-start', 'stage=STAGE2&view=59,5,0'],
+      ['s2-canal', 'stage=STAGE2&view=51,7,40'],
+      ['s2-shishi', 'stage=STAGE2&view=37,9,92'],
+      ['s2-rapids', 'stage=STAGE2&view=16,15,150'],
+      ['s2-goal', 'stage=STAGE2&view=4,19,200'],
     ];
 
 const scale = Number(args.scale);

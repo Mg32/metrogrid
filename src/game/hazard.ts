@@ -3,7 +3,7 @@ import { mod, type Vec } from './types.ts';
 
 /** 危険物。位置は tick から直接計算できる（状態を持たない） */
 export interface Hazard {
-  readonly kind: 'patrol' | 'periodic' | 'swing';
+  readonly kind: 'patrol' | 'periodic' | 'swing' | 'flow';
   /** tick t の時点で危険なマス */
   cellsAt(t: number): Vec[];
 }
@@ -66,12 +66,16 @@ export class PeriodicHazard implements Hazard {
   readonly period: number;
   readonly from: number;
   readonly to: number;
+  readonly look: 'shishiodoshi' | null;
+  readonly pivot: Vec | null;
 
   constructor(def: Extract<HazardDef, { type: 'periodic' }>) {
     this.cells = def.cells.map(([x, y]) => ({ x, y }));
     this.period = def.period;
     this.from = def.from;
     this.to = def.to;
+    this.look = def.look ?? null;
+    this.pivot = def.pivot ? { x: def.pivot[0], y: def.pivot[1] } : null;
   }
 
   isActive(t: number): boolean {
@@ -122,10 +126,47 @@ export class SwingHazard implements Hazard {
   }
 }
 
+/**
+ * 流されていく物（巡回型）。cells（上流 → 下流）を、every tick ごとに1つずつ物が流れてくる。
+ * 物は interval tick ごとに1マス下流へ進み、最後のマスの先で（橋の下や闇へ）見えなくなる。
+ * 物 n が cells[0] に入る tick は n × every − phase。
+ */
+export class FlowHazard implements Hazard {
+  readonly kind = 'flow';
+  readonly cells: Vec[];
+  readonly interval: number;
+  readonly every: number;
+  readonly phase: number;
+
+  constructor(def: Extract<HazardDef, { type: 'flow' }>, phase: number) {
+    this.cells = def.cells.map(([x, y]) => ({ x, y }));
+    this.interval = def.interval;
+    this.every = def.every;
+    this.phase = mod(phase, def.every);
+  }
+
+  /** tick t（小数でもよい）に流れている物。pos は cells 上の位置（小数。描画用） */
+  itemsAt(t: number): { n: number; pos: number }[] {
+    if (t < 0) return [];
+    const span = this.cells.length * this.interval;
+    const items: { n: number; pos: number }[] = [];
+    const last = Math.floor((t + this.phase) / this.every);
+    for (let n = last; n * this.every - this.phase > t - span; n--) {
+      items.push({ n, pos: (t - (n * this.every - this.phase)) / this.interval });
+    }
+    return items;
+  }
+
+  cellsAt(t: number): Vec[] {
+    return this.itemsAt(t).map((it) => this.cells[Math.floor(it.pos)]);
+  }
+}
+
 export function createHazards(defs: HazardDef[], random: () => number): Hazard[] {
   return defs.map((d) => {
     if (d.type === 'patrol') return new PatrolHazard(d, Math.floor(random() * 1000));
     if (d.type === 'swing') return new SwingHazard(d, Math.floor(random() * 1000));
+    if (d.type === 'flow') return new FlowHazard(d, Math.floor(random() * 1000));
     return new PeriodicHazard(d);
   });
 }

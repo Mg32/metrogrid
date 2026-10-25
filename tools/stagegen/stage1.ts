@@ -10,7 +10,7 @@ import path from 'node:path';
 import { Stage, type HazardDef, type StageDef } from '../../src/game/stage.ts';
 import { distanceField } from '../bots/nav.ts';
 
-const BPM = 100;
+const BPM = 120;
 const BARS = Number(process.env.BARS ?? 50);
 const W = 25, H = 41;
 const T: string[][] = Array.from({ length: H }, () => Array(W).fill('#'));

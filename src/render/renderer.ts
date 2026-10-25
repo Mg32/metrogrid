@@ -1,7 +1,7 @@
-import { PatrolHazard, PeriodicHazard, SwingHazard } from '../game/hazard.ts';
+import { FlowHazard, PatrolHazard, PeriodicHazard, SwingHazard } from '../game/hazard.ts';
 import { GOAL_BONUS_PER_BEAT, type Sim } from '../game/sim.ts';
 import type { PropKind, Stage } from '../game/stage.ts';
-import { DIR_VEC, mod, TICKS_PER_BEAT, ZONE_INTERVAL, type Dir, type Zone } from '../game/types.ts';
+import { DIR_VEC, mod, TICKS_PER_BEAT, ZONE_INTERVAL, type Dir, type Vec, type Zone } from '../game/types.ts';
 import { drawText, GLYPH_H, textWidth } from './font.ts';
 import { GIRL_FOOT_X, GIRL_FOOT_Y, GIRL_FRAMES, GIRL_H, GIRL_W, GIRL_WAIST_Y, paintGirl } from './girl.ts';
 
@@ -19,12 +19,22 @@ const TH = 12;
 const FLOOR_THICK = 6;
 const PLAYER_H = 21;
 
-/** 街灯の明るさの段階ごとの道の色（0: 闇、1: 街灯から2マス、2: 街灯のすぐそば）。各段階はゾーン別 */
-const ROAD_LIGHT = [
-  { edge: '#3a3741', road: ['#56525e', '#46434e', '#36343d'] },
-  { edge: '#433e40', road: ['#625b5e', '#4f4a4c', '#3c393c'] },
-  { edge: '#4d4640', road: ['#73695f', '#5b534c', '#443f3c'] },
-] as const;
+type Theme = 'alley' | 'garden';
+/** 景色ごと・街灯の明るさの段階ごとの道の色（0: 闇、1: 街灯から2マス、2: 街灯のすぐそば）。各段階はゾーン別 */
+const THEME_LIGHT: Record<Theme, { edge: string; road: string[] }[]> = {
+  alley: [
+    { edge: '#3a3741', road: ['#56525e', '#46434e', '#36343d'] },
+    { edge: '#433e40', road: ['#625b5e', '#4f4a4c', '#3c393c'] },
+    { edge: '#4d4640', road: ['#73695f', '#5b534c', '#443f3c'] },
+  ],
+  // 庭：苔と土
+  garden: [
+    { edge: '#2f3830', road: ['#414b40', '#363e36', '#2b312c'] },
+    { edge: '#38402f', road: ['#4d5640', '#404836', '#32372d'] },
+    { edge: '#434630', road: ['#5c6145', '#4b4f3a', '#3a3c30'] },
+  ],
+};
+const ROAD_LIGHT = THEME_LIGHT.alley;
 /** 遊具の柱、ブランコの枠などの高さ */
 const POLE_H = 26;
 const FRAME_H = 22;
@@ -77,6 +87,27 @@ const COLORS = {
   lampLight: '#f3e7b0',
   dirt: '#2a231f',
   dirtSpeck: '#362d27',
+  // 庭と用水路
+  stepStone: '#4f524e',
+  stepStoneTop: '#686a63',
+  moss: '#556347',
+  water: '#22384a',
+  waterDeep: '#152330',
+  waterLight: '#5d7e95',
+  bridge: '#5a4634',
+  bridgeDark: '#3b2d22',
+  bamboo: '#8a9a4f',
+  bambooDark: '#5c6a35',
+  stone: '#6d6b64',
+  stoneDark: '#4a4945',
+  leaf: '#2f4a2e',
+  leafLight: '#46663f',
+  plaster: '#8c8678',
+  shoji: '#b9b2a0',
+  doll: '#a8453a',
+  dollFace: '#e8dccb',
+  shoe: '#b84a4a',
+  shoeSole: '#e3dccf',
 };
 
 /**
@@ -239,18 +270,43 @@ function fillSlabSides(ctx: CanvasRenderingContext2D, cx: number, top: number, w
   fillPrismSides(ctx, cx, top, w, h, Math.ceil(depth / 3), COLORS.roadSideL, COLORS.roadSideR);
 }
 
-function makeRoadSprite(zone: Zone, light: number): HTMLCanvasElement {
+function makeRoadSprite(zone: Zone, light: number, theme: Theme): HTMLCanvasElement {
+  const pal = THEME_LIGHT[theme][light];
   return makeSprite(TW, TH + FLOOR_THICK + 1, (ctx) => {
     const cx = TW / 2;
     fillSlabSides(ctx, cx, 0, TW, TH, FLOOR_THICK);
-    fillDiamond(ctx, cx, 0, TW, TH, ROAD_LIGHT[light].edge);
-    fillDiamond(ctx, cx, 1, TW - 4, TH - 2, ROAD_LIGHT[light].road[zone]);
+    fillDiamond(ctx, cx, 0, TW, TH, pal.edge);
+    fillDiamond(ctx, cx, 1, TW - 4, TH - 2, pal.road[zone]);
     if (zone === 0) {
-      ditherDiamond(ctx, cx, 1, TW - 4, TH - 2, COLORS.roadSpeck, (x, y) => (x * 7 + y * 13) % 23 === 0);
+      if (theme === 'garden') {
+        // 飛び石：中ほどに平たい石が1枚
+        fillDiamond(ctx, cx, 3, TW - 10, TH - 6, COLORS.stepStone);
+        fillDiamond(ctx, cx, 3, TW - 12, TH - 7, COLORS.stepStoneTop);
+        ditherDiamond(ctx, cx, 1, TW - 4, TH - 2, COLORS.moss, (x, y) => (x * 5 + y * 11) % 19 === 0);
+      } else {
+        ditherDiamond(ctx, cx, 1, TW - 4, TH - 2, COLORS.roadSpeck, (x, y) => (x * 7 + y * 13) % 23 === 0);
+      }
     } else {
       const period = zone === 1 ? 8 : 4;
       ditherDiamond(ctx, cx, 0, TW, TH, COLORS.bg, (x, y) => (x + 2 * y) % period === 0);
     }
+  });
+}
+
+/**
+ * 用水路の水のマス。岸（縁）の内側が一段低い水面で、さざ波の模様が frame（拍の半分ごとに 0/1）で動く。
+ * 流れの速い所（高危険）ほど白い筋が多く、闇が透ける
+ */
+function makeWaterSprite(zone: Zone, frame: number): HTMLCanvasElement {
+  return makeSprite(TW, TH + FLOOR_THICK + 1, (ctx) => {
+    const cx = TW / 2;
+    fillSlabSides(ctx, cx, 0, TW, TH, FLOOR_THICK);
+    fillDiamond(ctx, cx, 0, TW, TH, THEME_LIGHT.garden[0].edge);
+    fillDiamond(ctx, cx, 1, TW - 4, TH - 2, COLORS.waterDeep);
+    fillDiamond(ctx, cx, 2, TW - 6, TH - 3, COLORS.water);
+    const period = zone === 2 ? 5 : 9;
+    ditherDiamond(ctx, cx, 2, TW - 6, TH - 3, COLORS.waterLight, (x, y) => (x - 2 * y + frame * 3 + 40) % period === 0 && x % 2 === 0);
+    ditherDiamond(ctx, cx, 0, TW, TH, COLORS.bg, (x, y) => (x + 2 * y) % (zone === 2 ? 4 : 8) === 0);
   });
 }
 
@@ -266,6 +322,9 @@ function makeFacadeSprite(): HTMLCanvasElement {
     ditherDiamond(ctx, cx, 0, TW, TH, COLORS.facadeSpeck, (x, y) => (x * 5 + y * 11) % 17 === 0);
   });
 }
+
+/** マスいっぱいの箱として描く小物（地面より下に板がある）。それ以外の小物は小さな台座に立つ */
+const BLOCK_PROPS = new Set<PropKind>(['entrance', 'door', 'engawa', 'fence']);
 
 /** 入口の断片の下の板（地面より下）。道のタイルと同じ位置に描く */
 function makeBaseSprite(): HTMLCanvasElement {
@@ -365,7 +424,10 @@ export class Renderer {
   private camY = 0;
   private camSim: Sim | null = null;
   /** [明るさ][ゾーン] */
-  private roads: HTMLCanvasElement[][];
+  /** 道のタイル：[景色][明るさ][ゾーン] */
+  private roads = {} as Record<Theme, HTMLCanvasElement[][]>;
+  /** 水のマス：[さざ波のコマ][ゾーン] */
+  private water: HTMLCanvasElement[][];
   private facade: HTMLCanvasElement;
   private base: HTMLCanvasElement;
   private footing: HTMLCanvasElement;
@@ -384,7 +446,10 @@ export class Renderer {
     this.low.width = LW;
     this.low.height = LH;
     this.lctx = this.low.getContext('2d')!;
-    this.roads = [0, 1, 2].map((light) => [0, 1, 2].map((z) => makeRoadSprite(z as Zone, light)));
+    for (const theme of ['alley', 'garden'] as Theme[]) {
+      this.roads[theme] = [0, 1, 2].map((light) => [0, 1, 2].map((z) => makeRoadSprite(z as Zone, light, theme)));
+    }
+    this.water = [0, 1].map((frame) => [0, 1, 2].map((z) => makeWaterSprite(z as Zone, frame)));
     this.facade = makeFacadeSprite();
     this.base = makeBaseSprite();
     this.footing = makeFootingSprite();
@@ -490,6 +555,7 @@ export class Renderer {
 
     // 道（奥から手前へ）
     const light = this.lightMap(stage);
+    const theme = stage.def.theme ?? 'alley';
     for (let d = 0; d < stage.width + stage.height - 1; d++) {
       for (let x = 0; x <= d; x++) {
         const y = d - x;
@@ -505,14 +571,18 @@ export class Renderer {
           // 小物の地面より下の部分（地面より上は立体物として後で描く）
           const kind = cell.obj.kind;
           if (kind === 'lot') ctx.drawImage(this.lot, sx - TW / 2, sy);
-          else if (kind === 'entrance' || kind === 'door') ctx.drawImage(this.base, sx - TW / 2, sy);
+          else if (BLOCK_PROPS.has(kind)) ctx.drawImage(this.base, sx - TW / 2, sy);
           else ctx.drawImage(this.footing, sx - 6, sy + TH / 2 - 3);
         }
         if (cell.terrain !== 'floor') continue;
-        ctx.drawImage(this.roads[light[stage.index(x, y)]][cell.zone], sx - TW / 2, sy);
+        // 水のさざ波は半拍ごとに動く
+        if (cell.water) ctx.drawImage(this.water[mod(Math.floor(tickF / (TICKS_PER_BEAT / 2)), 2)][cell.zone], sx - TW / 2, sy);
+        else ctx.drawImage(this.roads[theme][light[stage.index(x, y)]][cell.zone], sx - TW / 2, sy);
 
         const obj = cell.obj;
-        if (obj?.type === 'stop') {
+        if (obj?.type === 'bridge') {
+          this.bridge(sx, sy, stage.cell(x - 1, y)?.water || stage.cell(x + 1, y)?.water ? 'x' : 'y');
+        } else if (obj?.type === 'stop') {
           const ready = sim.x === x && sim.y === y && sim.stillTicks >= TICKS_PER_BEAT;
           fillDiamond(ctx, sx, sy + 3, TW / 2, TH / 2, ready ? COLORS.stopReady : COLORS.stop);
         } else if (obj?.type === 'oneway') {
@@ -538,7 +608,7 @@ export class Renderer {
         // 道の外は闇で何も描かない。小物だけが闇に浮かぶ
         if (cell.terrain === 'wall' && cell.obj?.type === 'prop' && cell.obj.kind !== 'lot') {
           const kind = cell.obj.kind;
-          const height = kind === 'entrance' || kind === 'door' ? FACADE_H : kind === 'lamp' ? POLE_H : 16;
+          const height = kind === 'entrance' || kind === 'door' || kind === 'engawa' ? FACADE_H : kind === 'lamp' ? POLE_H : 16;
           // プレイヤーより手前でプレイヤーに重なるものは透かす
           const hides =
             x + y > px + py && Math.abs(sx - p.sx) < TW && sy - height < feet && sy + TH + FLOOR_THICK > feet - PLAYER_H;
@@ -613,9 +683,31 @@ export class Renderer {
         const active = h.isActive(now);
         // 1拍前から予告して点滅する
         const soon = !active && h.isActive(now + TICKS_PER_BEAT);
+        if (h.look === 'shishiodoshi' && h.pivot) {
+          const c = h.cells[0];
+          const pv = h.pivot;
+          sprites.push({
+            depth: Math.max(c.x + c.y, pv.x + pv.y) + 0.4,
+            draw: () => this.shishiodoshi(pv, c, h, tickF, soon && now % 2 === 0),
+          });
+          continue;
+        }
         for (const c of h.cells) {
           const { sx, sy } = iso(c.x, c.y);
           sprites.push({ depth: c.x + c.y + 0.4, draw: () => this.periodic(sx, sy, active, soon && now % 2 === 0) });
+        }
+      } else if (h instanceof FlowHazard) {
+        for (const it of h.itemsAt(tickF)) {
+          // マスの間をなめらかに流れる。最後のマスの先へは半マス流れて消える
+          const i = Math.floor(it.pos);
+          const a = h.cells[i];
+          const b = h.cells[i + 1] ?? { x: a.x * 2 - h.cells[i - 1].x, y: a.y * 2 - h.cells[i - 1].y };
+          const u = it.pos - i;
+          if (i === h.cells.length - 1 && u > 0.5) continue;
+          const fx = lerp(a.x, b.x, u);
+          const fy = lerp(a.y, b.y, u);
+          const { sx, sy } = iso(fx, fy);
+          sprites.push({ depth: fx + fy + 0.45, draw: () => this.flotsam(sx, sy + TH / 2, it.n, tickF) });
         }
       }
     }
@@ -700,6 +792,88 @@ export class Renderer {
     }
   }
 
+  /** 用水路にかかる板の橋。板の継ぎ目は流れの向き（canal）に平行 */
+  private bridge(sx: number, sy: number, canal: 'x' | 'y'): void {
+    const ctx = this.lctx;
+    fillDiamond(ctx, sx, sy + 1, TW - 2, TH - 1, COLORS.bridgeDark);
+    fillDiamond(ctx, sx, sy + 1, TW - 4, TH - 2, COLORS.bridge);
+    // 継ぎ目：流れの向きに平行な線を3本
+    for (const k of [-0.25, 0, 0.25]) {
+      const a = canal === 'x' ? { x: -0.4, y: k } : { x: k, y: -0.4 };
+      const b = canal === 'x' ? { x: 0.4, y: k } : { x: k, y: 0.4 };
+      const pa = { x: sx + ((a.x - a.y) * TW) / 2, y: sy + TH / 2 + ((a.x + a.y) * TH) / 2 };
+      const pb = { x: sx + ((b.x - b.y) * TW) / 2, y: sy + TH / 2 + ((b.x + b.y) * TH) / 2 };
+      plotLine(ctx, Math.round(pa.x), Math.round(pa.y), Math.round(pb.x), Math.round(pb.y), COLORS.bridgeDark);
+    }
+  }
+
+  /**
+   * 鹿威し：台（pivot、闇に浮かぶ）の上で竹筒が水を受けてゆっくり傾き、いっぱいになると道のマス（target）へ打ち下ろす。
+   * 打ち下ろしている間（周期の [from, to)）がそのマスの危険
+   */
+  private shishiodoshi(pivot: Vec, target: Vec, h: PeriodicHazard, tickF: number, blink: boolean): void {
+    const ctx = this.lctx;
+    const p = iso(pivot.x, pivot.y);
+    const tg = iso(target.x, target.y);
+    const ground = p.sy + TH / 2;
+    // 台座と2本の支柱
+    ctx.drawImage(this.footing, p.sx - 6, ground - 3);
+    ctx.fillStyle = COLORS.woodDark;
+    ctx.fillRect(p.sx - 4, ground - 12, 2, 12);
+    ctx.fillRect(p.sx + 2, ground - 12, 2, 12);
+    // 傾き a：0 は筒口が上（水を受ける）、1 は打ち下ろした所
+    const phase = mod(tickF, h.period);
+    const down = phase >= h.from && phase < h.to;
+    const rest = h.period - (h.to - h.from);
+    const a = down ? 1 : 0.4 * (mod(phase - h.to, h.period) / rest);
+    const axle = { x: p.sx, y: ground - 11 };
+    const hit = { x: tg.sx, y: tg.sy + TH / 2 - 2 };
+    const raised = { x: axle.x + (hit.x - axle.x) * 0.7, y: axle.y - 9 };
+    const front = { x: Math.round(lerp(raised.x, hit.x, a)), y: Math.round(lerp(raised.y, hit.y, a)) };
+    // 竹筒の後ろ（台の向こう側）は前の半分の長さ
+    const back = { x: Math.round(axle.x + (axle.x - front.x) * 0.5), y: Math.round(axle.y + (axle.y - front.y) * 0.5) };
+    if (blink) strokeDiamond(ctx, tg.sx, tg.sy + 2, TW - 8, TH - 4, COLORS.warn);
+    plotLine(ctx, back.x, back.y + 1, front.x, front.y + 1, COLORS.bambooDark);
+    plotLine(ctx, back.x, back.y, front.x, front.y, COLORS.bamboo);
+    ctx.fillStyle = COLORS.woodDark;
+    ctx.fillRect(axle.x - 1, axle.y - 1, 2, 2);
+  }
+
+  /** 流されていく物：家から失われた物（人形、表札、子どもの靴）が、水面で揺れながら流れる */
+  private flotsam(cx: number, cy: number, n: number, tickF: number): void {
+    const ctx = this.lctx;
+    const bob = Math.round(Math.sin(tickF * 0.9 + n) * 0.8);
+    const y = cy - 2 + bob;
+    ctx.globalAlpha = 0.5;
+    fillEllipse(ctx, cx, cy, 5, 1, COLORS.waterDeep);
+    ctx.globalAlpha = 1;
+    switch (mod(n, 3)) {
+      case 0: // 人形（着物の胴と白い顔、黒髪）
+        ctx.fillStyle = COLORS.doll;
+        ctx.fillRect(cx - 2, y - 5, 5, 5);
+        ctx.fillStyle = COLORS.dollFace;
+        ctx.fillRect(cx - 1, y - 8, 3, 3);
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(cx - 2, y - 9, 5, 2);
+        break;
+      case 1: // 表札（木の板に墨の名前）
+        ctx.fillStyle = COLORS.wood;
+        ctx.fillRect(cx - 5, y - 3, 10, 3);
+        ctx.fillStyle = COLORS.bridge;
+        ctx.fillRect(cx - 5, y - 4, 10, 1);
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(cx - 3, y - 3, 6, 1);
+        break;
+      default: // 子どもの靴（赤い甲と白い底）
+        ctx.fillStyle = COLORS.shoeSole;
+        ctx.fillRect(cx - 4, y - 1, 8, 1);
+        ctx.fillStyle = COLORS.shoe;
+        ctx.fillRect(cx - 4, y - 3, 6, 2);
+        ctx.fillRect(cx - 3, y - 5, 3, 2);
+        break;
+    }
+  }
+
   /** 各マスの街灯の明るさ（街灯と玄関から 1マス以内: 2、2マス: 1） */
   private lightMap(stage: Stage): Uint8Array {
     let map = this.lightMaps.get(stage);
@@ -708,7 +882,7 @@ export class Renderer {
     for (let y = 0; y < stage.height; y++) {
       for (let x = 0; x < stage.width; x++) {
         const obj = stage.cell(x, y)!.obj;
-        if (obj?.type !== 'prop' || (obj.kind !== 'lamp' && obj.kind !== 'entrance')) continue;
+        if (obj?.type !== 'prop' || !['lamp', 'entrance', 'lantern', 'engawa'].includes(obj.kind)) continue;
         for (let dy = -2; dy <= 2; dy++) {
           for (let dx = -2; dx <= 2; dx++) {
             if (!stage.cell(x + dx, y + dy)) continue;
@@ -731,6 +905,47 @@ export class Renderer {
       case 'door':
         ctx.drawImage(this.facade, sx - TW / 2, sy - FACADE_H);
         this.slidingDoor(sx, sy, face, kind === 'entrance');
+        return;
+      case 'engawa':
+        // 縁側：障子の閉まった壁の前に、板張りの縁が張り出している
+        ctx.drawImage(this.facade, sx - TW / 2, sy - FACADE_H);
+        for (let i = 1; i <= 10; i++) {
+          fillFaceColumn(ctx, face, sx, sy, i, 5, 13, i % 3 === 1 ? COLORS.wood : COLORS.shoji);
+          for (const r of [8, 12, 16]) fillFaceColumn(ctx, face, sx, sy, i, r, 1, COLORS.wood);
+          fillFaceColumn(ctx, face, sx, sy, i, 0, 4, i % 2 === 0 ? COLORS.bridge : COLORS.bridgeDark);
+        }
+        return;
+      case 'fence': {
+        // 隣家のブロック塀のひと切れ：x 方向に延びる薄い塀
+        const H = 14;
+        const pt = (gx: number, gy: number, h: number) => ({ x: sx + ((gx - gy) * TW) / 2, y: ground + ((gx + gy) * TH) / 2 - h });
+        const [a, b, b2] = [pt(-0.5, 0.1, 0), pt(0.5, 0.1, 0), pt(0.5, -0.1, 0)];
+        const up = (q: { x: number; y: number }) => ({ x: q.x, y: q.y - H });
+        fillQuad(ctx, [a, b, up(b), up(a)], COLORS.plaster); // 手前（+y）の面
+        fillQuad(ctx, [b, b2, up(b2), up(b)], COLORS.concrete); // 端（+x）の面
+        fillQuad(ctx, [up(a), up(b), up(b2), pt(-0.5, -0.1, H)], COLORS.concreteTop);
+        for (const r of [5, 10]) plotLine(ctx, Math.round(a.x), Math.round(a.y - r), Math.round(b.x), Math.round(b.y - r), COLORS.stoneDark);
+        return;
+      }
+      case 'lantern':
+        // 石灯籠：台、竿、火袋（灯っている）、笠
+        ctx.fillStyle = COLORS.stoneDark;
+        ctx.fillRect(sx - 4, ground - 3, 8, 3);
+        ctx.fillStyle = COLORS.stone;
+        ctx.fillRect(sx - 1, ground - 9, 3, 6);
+        ctx.fillRect(sx - 4, ground - 11, 8, 2);
+        ctx.fillRect(sx - 3, ground - 16, 6, 5);
+        ctx.fillStyle = COLORS.lampLight;
+        ctx.fillRect(sx - 1, ground - 15, 2, 3);
+        ctx.fillStyle = COLORS.stoneDark;
+        ctx.fillRect(sx - 5, ground - 18, 10, 2);
+        ctx.fillRect(sx - 3, ground - 19, 6, 1);
+        ctx.fillRect(sx - 1, ground - 21, 2, 2);
+        return;
+      case 'shrub':
+        // 植木：刈り込んだ丸い茂み
+        fillEllipse(ctx, sx, ground - 6, 7, 5, COLORS.leaf);
+        fillEllipse(ctx, sx - 2, ground - 8, 4, 3, COLORS.leafLight);
         return;
       case 'pillar':
         // 門柱
@@ -1054,7 +1269,7 @@ export class Renderer {
   }
 
   /** クリアの結果の欄。e はゴールしてからの秒。CLEAR.panel から出て、得点を1行ずつ数え上げる */
-  clearResult(sim: Sim, e: number): void {
+  clearResult(sim: Sim, e: number, note: string | null = null): void {
     const t = e - CLEAR.panel;
     if (t < 0) return;
     const ctx = this.lctx;
@@ -1086,6 +1301,7 @@ export class Renderer {
       this.text(`${r.prefix}${shown}`, LW - 64, r.y, scale, color, 'right');
       if (r.note && done) this.text(r.note, LW - 64, r.y + 9, 1, COLORS.textDim, 'right');
     });
+    if (e >= CLEAR.end && note) this.text(note, LW / 2, 104, 1, COLORS.goal, 'center');
     if (e >= CLEAR.end && Math.floor(e * 2) % 2 === 0) this.text('ENTER: RETRY   ESC: TITLE', LW / 2, 222, 1, COLORS.gem, 'center');
   }
 

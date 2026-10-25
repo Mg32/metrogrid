@@ -41,11 +41,12 @@
 - `src/game/` ゲームロジック。描画・音・DOM に依存しない。Node からそのまま実行できる。
   - `sim.ts` 本体。1tick = 十六分音符。同じステージ・シード・入力なら必ず同じ結果（決定的）。
   - `stage.ts` / `stages/` ステージ定義（文字グリッド2枚＋危険物・得点の定義）。新しいステージは `stages/index.ts` の `STAGE_ORDER` に登録。`test.ts` は単体テスト用の試作ステージ（一覧には載せない）。
-  - STAGE1 は `tools/stagegen/stage1.ts` で組み立てて書き出している。調整はスクリプト側で行い `--write` で書き出す。
-  - `hazard.ts` 危険物（巡回型・定位置型）。状態を持たず tick から位置が決まる。
+  - STAGE1・STAGE2 は `tools/stagegen/stage1.ts`・`stage2.ts` で組み立てて書き出している。調整はスクリプト側で行い `--write` で書き出す。
+  - `hazard.ts` 危険物（巡回型・定位置型・箱ブランコ・流されていく物）。状態を持たず tick から位置が決まる。
   - `random.ts` シード付き乱数。ゲームロジックで `Math.random` を直接使わない。
   - `playlog.ts` プレイ記録の形式・記録・再生。
-- `src/audio/conductor.ts` 時間の基準（いまは仮のメトロノーム）。曲に差し替えるときは `Conductor` を実装する。
+- `src/audio/conductor.ts` 時間の基準（いまは仮のメトロノーム）。曲に差し替えるときは `Conductor` を実装する。`sfx.ts` は効果音（クリアのジングル）。
+- `src/progress.ts` クリアしたステージの記録（localStorage）。前のステージをクリアすると次がタイトルで選べる。`?stage=NAME` はクリアしていなくても選べる。
 - `src/render/` 描画。288x288 のバッファに描き、実画素で整数倍に拡大する。
 - `tools/bots/` ボット（`bots.ts` に一覧と目的）。`tools/replay.ts`、`tools/shot.ts`。
 - `tests/` 単体テスト、`e2e/` Playwright。

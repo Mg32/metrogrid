@@ -18,7 +18,7 @@ import type { StageDef } from '../stage.ts';
 // prettier-ignore
 export const stage1: StageDef = {
   name: 'STAGE1',
-  bpm: 100,
+  bpm: 120,
   bars: 50,
   terrain: [
     '#########################',

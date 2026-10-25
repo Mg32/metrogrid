@@ -24,6 +24,25 @@ test('タイトルから始めて歩ける', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('STAGE 2 は STAGE 1 をクリアするまで選んでも始められない', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto('/?seed=1');
+  await frames(page);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  await frames(page);
+  expect((await game(page)).scene).toBe('title');
+
+  // STAGE 1 をクリアした記録があれば始められる
+  await page.evaluate(() => localStorage.setItem('metrogrid.cleared', JSON.stringify(['STAGE1'])));
+  await page.goto('/?seed=1');
+  await frames(page);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('STAGE2');
+  expect(errors).toEqual([]);
+});
+
 test('クリア演出（?clear）でエラーが出ない', async ({ page }) => {
   const errors = collectErrors(page);
   for (const sec of [0.7, 1.4, 6]) {

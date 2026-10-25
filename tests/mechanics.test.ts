@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { FlowHazard } from '../src/game/hazard.ts';
 import { Sim } from '../src/game/sim.ts';
 import { Stage, type StageDef } from '../src/game/stage.ts';
 import type { Dir } from '../src/game/types.ts';
@@ -152,5 +153,23 @@ describe('得点と終了', () => {
     run(s, 0, 200, null);
     assert.equal(s.status, 'timeup');
     assert.equal(s.tick, 8 * 16);
+  });
+});
+
+describe('流されていく物', () => {
+  const flow = new FlowHazard({ type: 'flow', cells: [[3, 1], [2, 1], [1, 1]], interval: 2, every: 10 }, 0);
+
+  test('every tick ごとに1つ流れてきて、interval tick ごとに下流へ進み、最後のマスの先で消える', () => {
+    const at = (t: number) => flow.cellsAt(t).map((c) => c.x);
+    assert.deepEqual(at(0), [3]);
+    assert.deepEqual(at(2), [2]);
+    assert.deepEqual(at(4), [1]);
+    assert.deepEqual(at(6), []);
+    assert.deepEqual(at(10), [3]);
+  });
+
+  test('流れの間隔が流れきる時間より短ければ、同時に複数流れている', () => {
+    const dense = new FlowHazard({ type: 'flow', cells: [[3, 1], [2, 1], [1, 1]], interval: 2, every: 4 }, 0);
+    assert.deepEqual(dense.cellsAt(4).map((c) => c.x).sort(), [1, 3]);
   });
 });

@@ -5,15 +5,20 @@ import type { Dir, Vec, Zone } from './types.ts';
  *
  * terrain:  '#' 壁  ' ' 景色の欠けた場所（踏むとミス）
  *           '.' 安全  ',' 危険  ':' 高危険
+ *           '~' 水の中（危険）  '=' 水の中（高危険。流れの速い所）  ※歩いて入れる浅い用水路
  * objects:  terrain の上に重ねる。下記以外の文字は無視する。
  *   床の上   'S' スタート  'G' ゴール  'B' 小節ゲート  'P' 停止マス
  *            '^' '>' 'v' '<' 一方通行（その向きに進むときだけ入れる）
  *            'a'〜'z' 得点マス（scores で値を定義）
+ *            '_' 橋（見た目だけ。用水路にかかる板）
  *   壁の上   小物（通れない。区画の代わりに描く）
  *            'H' 玄関  'E' ほかの家の入口  'K' 門柱  'M' 郵便受け  'L' 街灯  'T' 空き地（遊具の柱が立つ）
+ *            'V' 縁側  'Y' 隣家の塀  'O' 石灯籠  'Q' 植木
  */
 export interface StageDef {
   name: string;
+  /** 景色。道の色や小物の描き方が変わる（既定は alley） */
+  theme?: 'alley' | 'garden';
   bpm: number;
   bars: number;
   terrain: string[];
@@ -36,15 +41,38 @@ export type HazardDef =
       look?: 'kaisento';
       pivot?: [number, number];
     }
-  /** 定位置型。period tick の周期のうち [from, to) の間だけ cells が危険になる */
-  | { type: 'periodic'; cells: [number, number][]; period: number; from: number; to: number }
+  /**
+   * 定位置型。period tick の周期のうち [from, to) の間だけ cells が危険になる。
+   * look: 'shishiodoshi' は鹿威し（pivot の台から竹筒が cells へ打ち下ろされる）として描く
+   */
+  | {
+      type: 'periodic';
+      cells: [number, number][];
+      period: number;
+      from: number;
+      to: number;
+      look?: 'shishiodoshi';
+      pivot?: [number, number];
+    }
+  /** 流されていく物。cells（上流 → 下流、縦横に連続）を every tick ごとに1つ、interval tick で1マスずつ流れる */
+  | { type: 'flow'; cells: [number, number][]; interval: number; every: number }
   /**
    * 箱ブランコ。cells（axis 方向に一直線）の上を、座席が period tick で1往復する。
    * 振れ幅 reach（マス）が cells より広いと、振り切ったときは壁の上に出て、どのマスも危険でなくなる
    */
   | { type: 'swing'; cells: [number, number][]; axis: 'x' | 'y'; period: number; reach?: number };
 
-export type PropKind = 'entrance' | 'door' | 'pillar' | 'mailbox' | 'lamp' | 'lot';
+export type PropKind =
+  | 'entrance'
+  | 'door'
+  | 'pillar'
+  | 'mailbox'
+  | 'lamp'
+  | 'lot'
+  | 'engawa'
+  | 'fence'
+  | 'lantern'
+  | 'shrub';
 
 export type Obj =
   | { type: 'start' }
@@ -53,17 +81,31 @@ export type Obj =
   | { type: 'stop' }
   | { type: 'oneway'; dir: Dir }
   | { type: 'score'; key: string }
+  | { type: 'bridge' }
   | { type: 'prop'; kind: PropKind };
 
 export interface Cell {
   terrain: 'floor' | 'wall' | 'hole';
   zone: Zone;
+  /** 用水路の水の中（見た目。ゾーンとしての扱いは zone のとおり） */
+  water: boolean;
   obj: Obj | null;
 }
 
-const ZONE_CHARS: Record<string, Zone> = { '.': 0, ',': 1, ':': 2 };
+const ZONE_CHARS: Record<string, Zone> = { '.': 0, ',': 1, ':': 2, '~': 1, '=': 2 };
 const ONEWAY_CHARS: Record<string, Dir> = { '^': 'up', '>': 'right', v: 'down', '<': 'left' };
-const PROP_CHARS: Record<string, PropKind> = { H: 'entrance', E: 'door', K: 'pillar', M: 'mailbox', L: 'lamp', T: 'lot' };
+const PROP_CHARS: Record<string, PropKind> = {
+  H: 'entrance',
+  E: 'door',
+  K: 'pillar',
+  M: 'mailbox',
+  L: 'lamp',
+  T: 'lot',
+  V: 'engawa',
+  Y: 'fence',
+  O: 'lantern',
+  Q: 'shrub',
+};
 
 export class Stage {
   readonly def: StageDef;
@@ -86,15 +128,17 @@ export class Stage {
       for (let x = 0; x < this.width; x++) {
         const t = def.terrain[y][x] ?? ' ';
         const o = def.objects[y][x] ?? ' ';
+        const water = t === '~' || t === '=';
         const cell: Cell =
           t === '#'
-            ? { terrain: 'wall', zone: 0, obj: null }
+            ? { terrain: 'wall', zone: 0, water, obj: null }
             : t in ZONE_CHARS
-              ? { terrain: 'floor', zone: ZONE_CHARS[t], obj: null }
-              : { terrain: 'hole', zone: 0, obj: null };
+              ? { terrain: 'floor', zone: ZONE_CHARS[t], water, obj: null }
+              : { terrain: 'hole', zone: 0, water, obj: null };
 
         if (o === 'S') cell.obj = { type: 'start' };
         else if (o === 'G') cell.obj = { type: 'goal' };
+        else if (o === '_') cell.obj = { type: 'bridge' };
         else if (o === 'B') cell.obj = { type: 'gate' };
         else if (o === 'P') cell.obj = { type: 'stop' };
         else if (o in ONEWAY_CHARS) cell.obj = { type: 'oneway', dir: ONEWAY_CHARS[o] };

@@ -6,8 +6,9 @@ import { createRandom, randomSeed } from './game/random.ts';
 import { Sim } from './game/sim.ts';
 import { Stage } from './game/stage.ts';
 import { STAGE_ORDER, STAGES } from './game/stages/index.ts';
-import { DIR_VEC, TICKS_PER_BEAT, type Dir } from './game/types.ts';
+import { DIR_VEC, mod, TICKS_PER_BEAT, type Dir } from './game/types.ts';
 import { Input } from './input.ts';
+import { loadCleared, saveCleared } from './progress.ts';
 import { CLEAR, Renderer } from './render/renderer.ts';
 
 /**
@@ -28,8 +29,23 @@ const input = new Input(window);
 const renderer = new Renderer(canvas);
 const conductor: Conductor = new Metronome();
 const sfx = new Sfx();
-const stage = new Stage(STAGES[params.get('stage') ?? ''] ?? STAGE_ORDER[0]);
-const tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
+const cleared = loadCleared();
+/** タイトルで選んでいるステージ（STAGE_ORDER の番号）。前のステージをクリアしていれば選べる */
+let selected = Math.max(0, STAGE_ORDER.findIndex((d) => d.name === params.get('stage')));
+const unlocked = (i: number) => i === 0 || cleared.has(STAGE_ORDER[i - 1].name) || STAGE_ORDER[i].name === params.get('stage');
+// ?stage=NAME は一覧にない TEST も含めて、クリアしていなくても選べる（開発用）
+let stage = new Stage(STAGES[params.get('stage') ?? ''] ?? STAGE_ORDER[selected]);
+let tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
+/** このクリアで新しく遊べるようになったステージ（結果の欄に出す） */
+let newlyUnlocked: string | null = null;
+
+function selectStage(i: number): void {
+  selected = i;
+  stage = new Stage(STAGE_ORDER[i]);
+  tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
+}
+
+const stageLabel = (name: string) => name.replace(/(\d+)$/, ' $1');
 
 type Scene = 'title' | 'loading' | 'play' | 'result' | 'view';
 let scene: Scene = 'title';
@@ -70,15 +86,27 @@ function toTitle(): void {
   input.clearPressed();
   sim = null;
   scene = 'title';
+  if (STAGE_ORDER.includes(stage.def)) selectStage(selected);
 }
 
 function finishPlay(s: Sim): void {
   conductor.stop();
   input.clearPressed();
   scene = 'result';
+  newlyUnlocked = null;
   if (s.status === 'cleared') {
     clearedAt = performance.now() / 1000;
     sfx.clear(CLEAR.rows.map((r) => CLEAR.panel + r));
+    const i = STAGE_ORDER.findIndex((d) => d.name === s.stage.def.name);
+    if (i >= 0 && !cleared.has(s.stage.def.name)) {
+      cleared.add(s.stage.def.name);
+      saveCleared(cleared);
+      // 次のステージが開いたら、タイトルに戻ったときにそれを選んでおく
+      if (i + 1 < STAGE_ORDER.length) {
+        newlyUnlocked = STAGE_ORDER[i + 1].name;
+        selected = i + 1;
+      }
+    }
   }
   // 開発サーバーでは、最後まで遊んだ記録を playlogs/ に保存する（自動テストのプレイは残さない）
   if (import.meta.env.DEV && !navigator.webdriver) {
@@ -87,7 +115,7 @@ function finishPlay(s: Sim): void {
 }
 
 canvas.addEventListener('pointerdown', () => {
-  if (scene === 'title' || scene === 'result') void startPlay();
+  if ((scene === 'title' && unlocked(selected)) || scene === 'result') void startPlay();
 });
 
 function update(): void {
@@ -96,7 +124,10 @@ function update(): void {
   const retry = input.consumePressed('KeyR');
 
   if (scene === 'title') {
-    if (start) void startPlay();
+    const prev = input.consumePressed('ArrowLeft') || input.consumePressed('KeyA');
+    const next = input.consumePressed('ArrowRight') || input.consumePressed('KeyD');
+    if (prev || next) selectStage(mod(selected + (next ? 1 : -1), STAGE_ORDER.length));
+    else if (start && (unlocked(selected) || !STAGE_ORDER.includes(stage.def))) void startPlay();
   } else if (scene === 'result') {
     const e = clearSec();
     if (e !== null && e < CLEAR.end && (start || retry)) {
@@ -133,21 +164,29 @@ function draw(): void {
   }
 
   if (scene === 'title') {
+    // 一覧にないステージ（?stage=TEST）は選べないので、矢印を出さない
+    const listed = STAGE_ORDER.includes(stage.def);
+    const open = !listed || unlocked(selected);
+    const len = stage.def.bars * 4 * (60 / stage.def.bpm);
     renderer.overlay([
       { text: 'METROGRID', scale: 3 },
-      { text: stage.def.name.replace(/(\d+)$/, ' $1'), color: '#8d857a' },
+      { text: '' },
+      { text: listed ? `<  ${stageLabel(stage.def.name)}  >` : stageLabel(stage.def.name), scale: 2, color: open ? '#e8e1d6' : '#5a554e' },
+      open
+        ? { text: `BPM ${stage.def.bpm}   ${Math.floor(len / 60)}:${String(Math.round(len % 60)).padStart(2, '0')}${cleared.has(stage.def.name) ? '   CLEARED' : ''}`, color: '#8d857a' }
+        : { text: `LOCKED: CLEAR ${stageLabel(STAGE_ORDER[selected - 1].name)} FIRST`, color: '#d0675a' },
       { text: '' },
       { text: 'HOLD ARROWS (WASD) TO WALK' },
       { text: 'ONE STEP PER COUNT' },
       { text: 'FADED ROADS ARE FASTER: 1/4 1/8 1/16', color: '#8d857a' },
       { text: '' },
-      { text: 'ENTER / SPACE / CLICK TO START', color: '#e3c56e' },
+      { text: open ? 'ENTER / SPACE / CLICK TO START' : 'LEFT / RIGHT: CHOOSE STAGE', color: '#e3c56e' },
       { text: 'R: RETRY   ESC: TITLE', color: '#8d857a' },
     ]);
   } else if (sim && scene === 'result') {
     const e = clearSec();
     if (e !== null) {
-      renderer.clearResult(sim, e);
+      renderer.clearResult(sim, e, newlyUnlocked ? `NEW: ${stageLabel(newlyUnlocked)}` : null);
     } else {
       renderer.overlay([
         { text: 'TIME UP', scale: 3, color: '#d0675a' },
