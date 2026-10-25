@@ -26,12 +26,15 @@ const SCENES: [string, string][] = args.view
   ? [[args.name, `view=${args.view}`]]
   : [
       ['title', ''],
-      ['start', 'view=15,1,0'],
-      ['r1-spur', 'view=3,10,24'],
-      ['r1-kaisento', 'view=5,24,60'],
-      ['r2-kaisento', 'view=9,8,100'],
-      ['r3-inner', 'view=12,16,150'],
-      ['goal', 'view=17,15,170'],
+      ['start', 'view=5,38,0'],
+      ['early', 'view=12,31,40'],
+      ['middle-kaisento', 'view=10,24,90'],
+      ['middle-gate', 'view=16,19,110'],
+      ['late', 'view=13,11,150'],
+      ['goal', 'view=3,6,180'],
+      ['clear-light', 'clear=0.7'],
+      ['clear-crumble', 'clear=1.4'],
+      ['clear-result', 'clear=6'],
     ];
 
 const scale = Number(args.scale);

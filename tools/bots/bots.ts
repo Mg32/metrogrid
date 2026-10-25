@@ -119,6 +119,11 @@ export const BOTS: BotDef[] = [
     create: (sim) => lookahead(sim, distanceField(sim.stage)),
   },
   {
+    name: 'novice',
+    purpose: '慣れていないプレイ（安全な道を、危険物を気にせず歩く）：一度も戻されずにゴールできるはず',
+    create: (sim) => followField(sim, distanceField(sim.stage, { safeOnly: true })),
+  },
+  {
     name: 'rush',
     purpose: '最短時間の道を危険物を気にせず突っ込む：ミスの損で割に合わないはず',
     create: (sim) => followField(sim, distanceField(sim.stage)),

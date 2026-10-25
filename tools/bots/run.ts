@@ -16,6 +16,7 @@ import { Stage } from '../../src/game/stage.ts';
 import { STAGE_ORDER, STAGES } from '../../src/game/stages/index.ts';
 import { TICKS_PER_BEAT } from '../../src/game/types.ts';
 import { BOTS, type BotDef } from './bots.ts';
+import { distanceField } from './nav.ts';
 
 const { values: args } = parseArgs({
   options: {
@@ -36,13 +37,21 @@ interface RunResult {
   goalBonus: number;
   /** ゴールしたときの残り拍数 */
   remainBeats: number | null;
+  /** どこまで進んだか（ゴールまでの最短時間が、スタートからどれだけ縮んだか。0〜1） */
+  progress: number;
 }
 
-function runBot(stage: Stage, bot: BotDef, seed: number): RunResult {
+function runBot(stage: Stage, bot: BotDef, seed: number, field: Float64Array): RunResult {
   const sim = new Sim(stage, createRandom(seed));
   const policy = bot.create(sim, seed, createRandom(seed ^ 0x5eed));
-  for (let t = 0; sim.status === 'playing'; t++) sim.step(t, policy(t));
+  const startDist = field[stage.index(stage.start.x, stage.start.y)];
+  let best = startDist;
+  for (let t = 0; sim.status === 'playing'; t++) {
+    sim.step(t, policy(t));
+    best = Math.min(best, field[stage.index(sim.x, sim.y)]);
+  }
   return {
+    progress: sim.status === 'cleared' ? 1 : 1 - best / startDist,
     cleared: sim.status === 'cleared',
     score: sim.score,
     misses: sim.misses,
@@ -63,6 +72,7 @@ interface Summary {
   avgMisses: number;
   avgPickups: number;
   avgRemain: number | null;
+  avgProgress: number;
 }
 
 function summarize(bot: BotDef, runs: RunResult[]): Summary {
@@ -78,6 +88,7 @@ function summarize(bot: BotDef, runs: RunResult[]): Summary {
     avgMisses: avg(runs.map((r) => r.misses)),
     avgPickups: avg(runs.map((r) => r.pickups)),
     avgRemain: remains.length ? avg(remains) : null,
+    avgProgress: avg(runs.map((r) => r.progress)),
   };
 }
 
@@ -94,12 +105,13 @@ for (const def of args.stage ? [STAGES[args.stage]] : STAGE_ORDER) {
   const songBeats = def.bars * 4;
   console.log(`\n=== ${def.name}（${def.bars}小節 = ${songBeats}拍, BPM ${def.bpm}） ===`);
 
+  const field = distanceField(stage);
   const results = new Map<string, Summary>();
   for (const bot of BOTS) {
     if (args.bot && bot.name !== args.bot) continue;
     const n = bot.heavy ? Math.min(SEED_COUNT, 3) : SEED_COUNT;
     const started = performance.now();
-    const runs = Array.from({ length: n }, (_, i) => runBot(stage, bot, i + 1));
+    const runs = Array.from({ length: n }, (_, i) => runBot(stage, bot, i + 1, field));
     const s = summarize(bot, runs);
     results.set(bot.name, s);
     const ms = performance.now() - started;
@@ -111,6 +123,7 @@ for (const def of args.stage ? [STAGES[args.stage]] : STAGE_ORDER) {
         `remain ${pad(s.avgRemain === null ? '-' : s.avgRemain.toFixed(1), 5, true)}拍`,
         `miss ${pad(s.avgMisses.toFixed(1), 4, true)}`,
         `pickup ${pad(s.avgPickups.toFixed(1), 4, true)}`,
+        `進度 ${pad(Math.round(s.avgProgress * 100), 3, true)}%`,
         bot.heavy ? `${(ms / 1000).toFixed(1)}s` : '',
       ].join('  '),
     );
@@ -127,6 +140,12 @@ for (const def of args.stage ? [STAGES[args.stage]] : STAGE_ORDER) {
     ['押しっぱなしではゴールできない', holds.every((h) => h.clearRate === 0), holds.map((h) => `${h.bot.name} ${Math.round(h.clearRate * 100)}%`).join(', ')],
     ['でたらめな操作ではゴールできない', get('random').clearRate === 0, `clear ${Math.round(get('random').clearRate * 100)}%`],
     ['連打は押しっぱなしより悪い', get('mash').avgScore < get('careful').avgScore, `mash ${Math.round(get('mash').avgScore)} < careful ${Math.round(get('careful').avgScore)}`],
+    // 慣れていなくても進めるように：ミスはゾーンの入口まで戻されるので、安全な道で危険物に当たると大きく戻される
+    [
+      '安全な道を歩くだけなら、危険物を気にしなくても戻されない',
+      get('novice').clearRate === 1 && get('novice').avgMisses === 0,
+      `clear ${Math.round(get('novice').clearRate * 100)}%, miss ${get('novice').avgMisses.toFixed(1)}, 進度 ${Math.round(get('novice').avgProgress * 100)}%`,
+    ],
     ['安全マスだけで必ずゴールできる', get('safe').clearRate === 1, `clear ${Math.round(get('safe').clearRate * 100)}%`],
     [
       '安全マスだけだと曲の長さほぼいっぱいかかる（残り15%以内）',

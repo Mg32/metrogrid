@@ -1,5 +1,5 @@
 import { PatrolHazard, PeriodicHazard, SwingHazard } from '../game/hazard.ts';
-import type { Sim } from '../game/sim.ts';
+import { GOAL_BONUS_PER_BEAT, type Sim } from '../game/sim.ts';
 import type { PropKind, Stage } from '../game/stage.ts';
 import { DIR_VEC, mod, TICKS_PER_BEAT, ZONE_INTERVAL, type Dir, type Zone } from '../game/types.ts';
 import { drawText, GLYPH_H, textWidth } from './font.ts';
@@ -77,6 +77,27 @@ const COLORS = {
   lampLight: '#f3e7b0',
   dirt: '#2a231f',
   dirtSpeck: '#362d27',
+};
+
+/**
+ * クリア演出の進行（ゴールしてからの秒）。
+ * 扉から光の柱が立ち、少女は光に溶けて扉の向こうへ消える。道は扉から遠い順に崩れて闇へ落ち、扉だけが残る。
+ * そのあと結果の欄が出て、得点を1行ずつ数え上げる
+ */
+export const CLEAR = {
+  /** 少女が光に包まれ始める／消えきる */
+  glow: 0.35,
+  gone: 1.3,
+  /** 道が崩れ始める。扉から1マス離れるごとの遅れ。1マスが落ちきるまで */
+  crumble: 0.6,
+  crumbleStep: 0.05,
+  fall: 0.5,
+  /** 結果の欄が出る。各行が出る時刻（欄が出てから）。行の数え上げにかかる秒 */
+  panel: 2.0,
+  rows: [0.5, 1.1, 1.7, 2.2],
+  count: 0.5,
+  /** すべて数え終わる（ゴールしてからの秒） */
+  end: 4.7,
 };
 
 const ZONE_LABEL: Record<Zone, string> = { 0: 'SAFE 1/4', 1: 'RISK 1/8', 2: 'HIGH 1/16' };
@@ -161,6 +182,44 @@ function fillEllipse(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: 
   }
 }
 
+/** 凸な四角形を塗る（行ごとに左右の端を求めて fillRect） */
+function fillQuad(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[], color: string): void {
+  ctx.fillStyle = color;
+  const ys = pts.map((p) => p.y);
+  for (let y = Math.round(Math.min(...ys)); y <= Math.round(Math.max(...ys)); y++) {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      if (a.y === b.y) {
+        if (Math.round(a.y) === y) {
+          lo = Math.min(lo, a.x, b.x);
+          hi = Math.max(hi, a.x, b.x);
+        }
+        continue;
+      }
+      const k = (y - a.y) / (b.y - a.y);
+      if (k < 0 || k > 1) continue;
+      const x = a.x + (b.x - a.x) * k;
+      lo = Math.min(lo, x);
+      hi = Math.max(hi, x);
+    }
+    if (lo <= hi) ctx.fillRect(Math.round(lo), y, Math.round(hi) - Math.round(lo) + 1, 1);
+  }
+}
+
+/** 水平な円をクォータービューで見た輪（横:縦 = 2:1 の楕円の線）。奥の半分と手前の半分で色を分ける */
+function strokeIsoRing(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, back: string, front: string): void {
+  const ry = rx / 2;
+  const n = Math.ceil(rx * 8);
+  for (let i = 0; i < n; i++) {
+    const a = (2 * Math.PI * i) / n;
+    ctx.fillStyle = Math.sin(a) > 0 ? front : back;
+    ctx.fillRect(Math.round(cx + rx * Math.cos(a)), Math.round(cy + ry * Math.sin(a)), 1, 1);
+  }
+}
+
 function makeSprite(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = w;
@@ -195,15 +254,22 @@ function makeRoadSprite(zone: Zone, light: number): HTMLCanvasElement {
   });
 }
 
-/** 闇に浮かぶ、家の入口の断片（壁ひと切れ）。扉は wallCell で側面に描く */
+/**
+ * 闇に浮かぶ、家の入口の断片（壁ひと切れ）の地面より上。扉は wallCell で側面に描く。
+ * 地面より下の板（makeBaseSprite）は道と一緒に奥から順に描く。立体物と一緒に後から描くと、手前の道にかぶさる
+ */
 function makeFacadeSprite(): HTMLCanvasElement {
-  return makeSprite(TW, FACADE_H + TH + FLOOR_THICK + 1, (ctx) => {
+  return makeSprite(TW, FACADE_H + TH + 1, (ctx) => {
     const cx = TW / 2;
-    fillSlabSides(ctx, cx, 0, TW, TH, FACADE_H + FLOOR_THICK);
     fillPrismSides(ctx, cx, 0, TW, TH, FACADE_H, COLORS.facadeL, COLORS.facadeR);
     fillDiamond(ctx, cx, 0, TW, TH, COLORS.facadeTop);
     ditherDiamond(ctx, cx, 0, TW, TH, COLORS.facadeSpeck, (x, y) => (x * 5 + y * 11) % 17 === 0);
   });
+}
+
+/** 入口の断片の下の板（地面より下）。道のタイルと同じ位置に描く */
+function makeBaseSprite(): HTMLCanvasElement {
+  return makeSprite(TW, TH + FLOOR_THICK + 1, (ctx) => fillSlabSides(ctx, TW / 2, 0, TW, TH, FLOOR_THICK));
 }
 
 /** 空き地の地面（遊具の柱が立つ） */
@@ -219,6 +285,16 @@ function makeLotSprite(): HTMLCanvasElement {
 /** 少女：[向き][コマ] */
 function makeGirlSprites(): HTMLCanvasElement[][] {
   return GIRL_FRAMES.map((frames) => frames.map((rows) => makeSprite(GIRL_W, GIRL_H, (ctx) => paintGirl(ctx, rows))));
+}
+
+/** 光に溶けていく少女（クリア演出）：絵の形だけを光の色で塗ったもの */
+function makeGlowSprite(src: HTMLCanvasElement): HTMLCanvasElement {
+  return makeSprite(src.width, src.height, (ctx) => {
+    ctx.drawImage(src, 0, 0);
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = COLORS.goal;
+    ctx.fillRect(0, 0, src.width, src.height);
+  });
 }
 
 /** 進む方向 → GIRL_FRAMES の向き（画面上の斜め） */
@@ -291,10 +367,12 @@ export class Renderer {
   /** [明るさ][ゾーン] */
   private roads: HTMLCanvasElement[][];
   private facade: HTMLCanvasElement;
+  private base: HTMLCanvasElement;
   private footing: HTMLCanvasElement;
   private hole: HTMLCanvasElement;
   /** 少女：[正面, 背面][立ち, 歩き]、左右反転したものも */
   private girl: HTMLCanvasElement[][];
+  private girlGlow: HTMLCanvasElement;
   private lot: HTMLCanvasElement;
   /** ステージごとの、各マスの街灯の明るさ */
   private lightMaps = new WeakMap<Stage, Uint8Array>();
@@ -308,10 +386,12 @@ export class Renderer {
     this.lctx = this.low.getContext('2d')!;
     this.roads = [0, 1, 2].map((light) => [0, 1, 2].map((z) => makeRoadSprite(z as Zone, light)));
     this.facade = makeFacadeSprite();
+    this.base = makeBaseSprite();
     this.footing = makeFootingSprite();
     this.hole = makeHoleSprite();
     this.lot = makeLotSprite();
     this.girl = makeGirlSprites();
+    this.girlGlow = makeGlowSprite(this.girl[GIRL_DIR.up][0]);
 
     // キャンバスの実画素サイズを正確に取る（CSSピクセル × dpr の丸め誤差でぼやけないように）
     // devicePixelContentBoxSize がCSSサイズ×dprと食い違う環境（高DPIのエミュレーションなど）では計算値を使う
@@ -363,7 +443,11 @@ export class Renderer {
 
   // ---- 世界 ----
 
-  world(sim: Sim, songTime: number, tickSec: number): void {
+  /**
+   * songTime はカウント中なら負（足元のハイライトはカウント中も拍に合わせる）。
+   * clearSec はゴールしてからの経過秒（クリア演出）。プレイ中は null
+   */
+  world(sim: Sim, songTime: number, tickSec: number, clearSec: number | null = null): void {
     const ctx = this.lctx;
     const stage = sim.stage;
     const tickF = Math.max(0, songTime / tickSec);
@@ -393,6 +477,17 @@ export class Renderer {
     ctx.save();
     ctx.translate(offX, offY);
 
+    // クリア演出：扉から遠いマスほど遅れて、道が崩れて闇へ落ちていく。扉のマスだけが残る。null は崩れ落ちたあと
+    const goal = stage.goal;
+    const crumble = (x: number, y: number): { dy: number; alpha: number } | null => {
+      if (clearSec === null || (x === goal.x && y === goal.y)) return { dy: 0, alpha: 1 };
+      const dist = Math.abs(x - goal.x) + Math.abs(y - goal.y);
+      const u = (clearSec - CLEAR.crumble - dist * CLEAR.crumbleStep) / CLEAR.fall;
+      if (u <= 0) return { dy: 0, alpha: 1 };
+      if (u >= 1) return null;
+      return { dy: Math.round(u * u * 18), alpha: Math.ceil((1 - u) * 4) / 4 };
+    };
+
     // 道（奥から手前へ）
     const light = this.lightMap(stage);
     for (let d = 0; d < stage.width + stage.height - 1; d++) {
@@ -400,9 +495,19 @@ export class Renderer {
         const y = d - x;
         const cell = stage.cell(x, y);
         if (!cell) continue;
-        const { sx, sy } = iso(x, y);
+        const f = crumble(x, y);
+        if (!f) continue;
+        ctx.globalAlpha = f.alpha;
+        const sx = iso(x, y).sx;
+        const sy = iso(x, y).sy + f.dy;
         if (cell.terrain === 'hole') ctx.drawImage(this.hole, sx - TW / 2, sy);
-        if (cell.terrain === 'wall' && cell.obj?.type === 'prop' && cell.obj.kind === 'lot') ctx.drawImage(this.lot, sx - TW / 2, sy);
+        if (cell.terrain === 'wall' && cell.obj?.type === 'prop') {
+          // 小物の地面より下の部分（地面より上は立体物として後で描く）
+          const kind = cell.obj.kind;
+          if (kind === 'lot') ctx.drawImage(this.lot, sx - TW / 2, sy);
+          else if (kind === 'entrance' || kind === 'door') ctx.drawImage(this.base, sx - TW / 2, sy);
+          else ctx.drawImage(this.footing, sx - 6, sy + TH / 2 - 3);
+        }
         if (cell.terrain !== 'floor') continue;
         ctx.drawImage(this.roads[light[stage.index(x, y)]][cell.zone], sx - TW / 2, sy);
 
@@ -415,6 +520,9 @@ export class Renderer {
         }
       }
     }
+    ctx.globalAlpha = 1;
+
+    if (sim.status === 'playing') this.beatTile(sim, songTime / tickSec);
 
     // 立体物は奥行き順に描く
     const sprites: { depth: number; draw: () => void }[] = [];
@@ -423,7 +531,10 @@ export class Renderer {
     for (let y = 0; y < stage.height; y++) {
       for (let x = 0; x < stage.width; x++) {
         const cell = stage.cell(x, y)!;
-        const { sx, sy } = iso(x, y);
+        const f = crumble(x, y);
+        if (!f) continue;
+        const sx = iso(x, y).sx;
+        const sy = iso(x, y).sy + f.dy;
         // 道の外は闇で何も描かない。小物だけが闇に浮かぶ
         if (cell.terrain === 'wall' && cell.obj?.type === 'prop' && cell.obj.kind !== 'lot') {
           const kind = cell.obj.kind;
@@ -436,16 +547,23 @@ export class Renderer {
           sprites.push({
             depth: x + y,
             draw: () => {
-              ctx.globalAlpha = hides ? 0.4 : 1;
+              ctx.globalAlpha = (hides ? 0.4 : 1) * f.alpha;
               this.wallCell(sx, sy, kind, face);
               ctx.globalAlpha = 1;
             },
           });
         } else if (cell.obj?.type === 'gate') {
           const closed = sim.isGateClosed(x, y, now);
-          sprites.push({ depth: x + y + 0.2, draw: () => this.gate(sx, sy, closed) });
+          sprites.push({
+            depth: x + y + 0.2,
+            draw: () => {
+              ctx.globalAlpha = f.alpha;
+              this.gate(sx, sy, closed);
+              ctx.globalAlpha = 1;
+            },
+          });
         } else if (cell.obj?.type === 'goal') {
-          const pulse = 1 - (tickF % TICKS_PER_BEAT) / TICKS_PER_BEAT;
+          const pulse = clearSec !== null ? 1 : 1 - (tickF % TICKS_PER_BEAT) / TICKS_PER_BEAT;
           sprites.push({ depth: x + y + 0.3, draw: () => this.goalDoor(sx, sy, pulse) });
         }
       }
@@ -454,14 +572,16 @@ export class Renderer {
     const labels: { x: number; y: number; text: string; color: string }[] = [];
 
     for (const s of sim.scores) {
-      if (!s.alive) continue;
+      // クリア演出のあいだは、残った得点マスは道と一緒に消えるので出さない
+      if (!s.alive || clearSec !== null) continue;
       const { sx, sy } = iso(s.x, s.y);
       const bob = Math.round(Math.sin(tickF * 0.4 + s.x));
       sprites.push({ depth: s.x + s.y + 0.3, draw: () => this.gem(sx, sy + TH / 2 - 3 + bob) });
       labels.push({ x: sx, y: sy - 8, text: String(s.value), color: COLORS.gem });
     }
 
-    for (const h of sim.hazards) {
+    // 遊具はゴールした瞬間に消える
+    for (const h of clearSec === null ? sim.hazards : []) {
       if (h instanceof PatrolHazard) {
         const step = Math.floor(tickF / h.interval);
         const a = h.posAtStep(step - 1);
@@ -500,7 +620,9 @@ export class Renderer {
       }
     }
 
-    if (!(sim.stunned && Math.floor(tickF * 2) % 2 === 0)) {
+    if (clearSec !== null) {
+      sprites.push({ depth: px + py + 0.5, draw: () => this.playerEntering(p.sx, p.sy + TH / 2, clearSec) });
+    } else if (!(sim.stunned && Math.floor(tickF * 2) % 2 === 0)) {
       sprites.push({
         depth: px + py + 0.5,
         draw: () => this.player(p.sx, p.sy + TH / 2, sim.facing, walk, (sim.x + sim.y) % 2 !== 0, tickF),
@@ -509,6 +631,11 @@ export class Renderer {
 
     sprites.sort((a, b) => a.depth - b.depth);
     for (const s of sprites) s.draw();
+
+    if (clearSec !== null) {
+      const g = iso(goal.x, goal.y);
+      this.clearLight(g.sx, g.sy + TH / 2, clearSec);
+    }
 
     // 演出：ミスの輪、得点の表示
     for (const ev of sim.events) {
@@ -598,8 +725,7 @@ export class Renderer {
   /** 闇に浮かぶ小物 */
   private wallCell(sx: number, sy: number, kind: PropKind, face: 'L' | 'R'): void {
     const ctx = this.lctx;
-    const ground = sy + TH / 2; // 台座の上面の中心
-    if (kind === 'pillar' || kind === 'mailbox' || kind === 'lamp') ctx.drawImage(this.footing, sx - 6, ground - 3);
+    const ground = sy + TH / 2; // 台座の上面の中心（台座は道と一緒に描いてある）
     switch (kind) {
       case 'entrance':
       case 'door':
@@ -693,16 +819,14 @@ export class Renderer {
   private kaisentoRing(pcx: number, pground: number, cx: number, ground: number): void {
     const ctx = this.lctx;
     const ry = ground - 8;
+    const r = 5;
     ctx.globalAlpha = 0.45;
-    fillEllipse(ctx, cx, ground, 4, 1, '#000');
+    fillEllipse(ctx, cx, ground, r, 1, '#000');
     ctx.globalAlpha = 1;
-    plotLine(ctx, pcx, pground - POLE_H, cx, ry - 1, COLORS.rustDark);
-    ctx.fillStyle = COLORS.rustLight;
-    ctx.fillRect(cx - 4, ry - 1, 8, 1);
-    ctx.fillStyle = COLORS.rust;
-    ctx.fillRect(cx - 4, ry, 1, 2);
-    ctx.fillRect(cx + 3, ry, 1, 2);
-    ctx.fillRect(cx - 4, ry + 2, 8, 1);
+    // 輪は水平。柱のてっぺんから、輪の左右の端へ鎖が2本
+    plotLine(ctx, pcx, pground - POLE_H, cx - r, ry, COLORS.rustDark);
+    plotLine(ctx, pcx, pground - POLE_H, cx + r, ry, COLORS.rustDark);
+    strokeIsoRing(ctx, cx, ry, r, COLORS.rustDark, COLORS.rustLight);
   }
 
   /**
@@ -715,30 +839,41 @@ export class Renderer {
     // 揺れる向きと直角の向き（グリッド）
     const along = { x: Math.sign(ends[1].x - ends[0].x), y: Math.sign(ends[1].y - ends[0].y) };
     const perp = { x: along.y, y: along.x };
-    const legs = [-0.7, 0.7].map((k) => iso(mid.x + perp.x * k, mid.y + perp.y * k));
-    const hooks = [-0.3, 0.3].map((k) => iso(mid.x + perp.x * k, mid.y + perp.y * k));
-    const seats = [-0.3, 0.3].map((k) => iso(seat.x + perp.x * k, seat.y + perp.y * k));
-    const swingOut = Math.abs((seat.x - mid.x) + (seat.y - mid.y));
+    // グリッド上の点 → 画面（h は地面からの高さ）
+    const at = (gx: number, gy: number, h = 0) => {
+      const q = iso(gx, gy);
+      return { x: q.sx, y: q.sy + TH / 2 - h };
+    };
+    const swingOut = Math.abs(seat.x - mid.x + (seat.y - mid.y));
     const seatLift = 5 + Math.round(swingOut * 3);
-    // 枠：両側の A 字の脚と梁
-    for (const l of legs) {
-      plotLine(ctx, l.sx - 3, l.sy + TH / 2, l.sx, l.sy + TH / 2 - FRAME_H, COLORS.rust);
-      plotLine(ctx, l.sx + 3, l.sy + TH / 2, l.sx, l.sy + TH / 2 - FRAME_H, COLORS.rustDark);
+    // 枠：両側の A 字の脚（揺れる向きに開く）と、その上に渡した梁
+    for (const k of [-0.7, 0.7]) {
+      const px = mid.x + perp.x * k;
+      const py = mid.y + perp.y * k;
+      const apex = at(px, py, FRAME_H);
+      for (const [a, color] of [[-0.35, COLORS.rust], [0.35, COLORS.rustDark]] as const) {
+        const foot = at(px + along.x * a, py + along.y * a);
+        plotLine(ctx, foot.x, foot.y, apex.x, apex.y, color);
+      }
     }
-    plotLine(ctx, legs[0].sx, legs[0].sy + TH / 2 - FRAME_H, legs[1].sx, legs[1].sy + TH / 2 - FRAME_H, COLORS.rustLight);
-    // 座席の影、吊り棒、座席
-    const s = iso(seat.x, seat.y);
+    const beam = [-0.7, 0.7].map((k) => at(mid.x + perp.x * k, mid.y + perp.y * k, FRAME_H));
+    plotLine(ctx, beam[0].x, beam[0].y, beam[1].x, beam[1].y, COLORS.rustLight);
+    // 座席の影、吊り棒、座席（梁と平行な板）
+    const s = at(seat.x, seat.y);
     ctx.globalAlpha = 0.45;
-    fillEllipse(ctx, s.sx, s.sy + TH / 2, 5, 1, '#000');
+    fillEllipse(ctx, s.x, s.y, 5, 1, '#000');
     ctx.globalAlpha = 1;
-    for (let k = 0; k < 2; k++) {
-      plotLine(ctx, hooks[k].sx, hooks[k].sy + TH / 2 - FRAME_H, seats[k].sx, seats[k].sy + TH / 2 - seatLift - 4, COLORS.rustDark);
+    const lift = seatLift + 4;
+    for (const k of [-0.3, 0.3]) {
+      const hook = at(mid.x + perp.x * k, mid.y + perp.y * k, FRAME_H);
+      const hang = at(seat.x + perp.x * k, seat.y + perp.y * k, lift);
+      plotLine(ctx, hook.x, hook.y, hang.x, hang.y, COLORS.rustDark);
     }
-    const top = s.sy + TH / 2 - seatLift - 4;
-    ctx.fillStyle = COLORS.seatPaint;
-    ctx.fillRect(s.sx - 5, top, 10, 3);
-    ctx.fillStyle = COLORS.rust;
-    ctx.fillRect(s.sx - 5, top + 3, 10, 1);
+    const corner = (kp: number, ka: number, h: number) =>
+      at(seat.x + perp.x * kp + along.x * ka, seat.y + perp.y * kp + along.y * ka, h);
+    const plank = (h: number) => [corner(-0.35, -0.15, h), corner(0.35, -0.15, h), corner(0.35, 0.15, h), corner(-0.35, 0.15, h)];
+    fillQuad(ctx, plank(lift - 1), COLORS.rust); // 板の厚み
+    fillQuad(ctx, plank(lift), COLORS.seatPaint);
   }
 
   private gem(cx: number, bottom: number): void {
@@ -777,6 +912,78 @@ export class Renderer {
     } else {
       strokeDiamond(ctx, sx, sy + 2, TW - 8, TH - 4, blink ? COLORS.warn : COLORS.hazardL);
     }
+  }
+
+  /**
+   * 足元のマスを拍に合わせて光らせる（拍の頭で光って次の拍までに引く）。小節の頭は金色（HUD の拍の点と同じ）。
+   * 八分・十六分のゾーンでは、動ける各カウントにも弱く光り、細かく刻んでいることを足元で見せる。
+   * tick はカウント中なら負
+   */
+  private beatTile(sim: Sim, tick: number): void {
+    const ctx = this.lctx;
+    const interval = ZONE_INTERVAL[sim.stage.cell(sim.x, sim.y)!.zone];
+    const beatPulse = 1 - mod(tick, TICKS_PER_BEAT) / TICKS_PER_BEAT;
+    const countPulse = interval < TICKS_PER_BEAT ? (1 - mod(tick, interval) / interval) * 0.5 : 0;
+    // 色数を増やさないよう、明るさは4段階
+    const level = Math.floor(Math.max(beatPulse, countPulse) * 4) / 4;
+    const downbeat = mod(Math.floor(tick / TICKS_PER_BEAT), 4) === 0;
+    const color = downbeat ? COLORS.gem : COLORS.text;
+    const { sx, sy } = iso(sim.x, sim.y);
+    ctx.globalAlpha = 0.1 + level * 0.3;
+    fillDiamond(ctx, sx, sy + 1, TW - 4, TH - 2, color);
+    ctx.globalAlpha = 0.25 + level * 0.75;
+    strokeDiamond(ctx, sx, sy, TW, TH, color);
+    ctx.globalAlpha = 1;
+  }
+
+  /** クリア演出の少女：扉の前で奥を向き、光に包まれて溶け、ふわりと浮いて消える */
+  private playerEntering(cx: number, cy: number, e: number): void {
+    if (e >= CLEAR.gone) return;
+    const ctx = this.lctx;
+    const left = cx - GIRL_FOOT_X;
+    const top = cy - GIRL_FOOT_Y;
+    const u = clamp01((e - CLEAR.glow) / (CLEAR.gone - CLEAR.glow));
+    const step = (v: number) => Math.round(v * 4) / 4;
+    if (u < 0.5) {
+      ctx.drawImage(this.girl[GIRL_DIR.up][0], left, top);
+      ctx.globalAlpha = step(u * 2);
+      ctx.drawImage(this.girlGlow, left, top);
+    } else {
+      ctx.globalAlpha = step(1 - (u - 0.5) * 2);
+      ctx.drawImage(this.girlGlow, left, top - Math.round((u - 0.5) * 12));
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** クリア演出の光：扉の足元に広がる光、扉から立ち上る光の柱、昇っていく光の粒 */
+  private clearLight(cx: number, ground: number, e: number): void {
+    const ctx = this.lctx;
+    // 足元の光（扉のまわりのマスへ広がる）
+    const spread = Math.min(TW * 2, 8 + Math.floor(e * 40) * 2);
+    ctx.globalAlpha = 0.25;
+    fillDiamond(ctx, cx, ground - spread / 4, spread, spread / 2, COLORS.goal);
+    // 光の柱。芯は濃く、外側は薄い
+    const w = Math.min(12, Math.floor(e * 24) * 2);
+    if (w > 0) {
+      ctx.globalAlpha = 0.2;
+      ctx.fillStyle = COLORS.goal;
+      ctx.fillRect(cx - w / 2, ground - LH * 2, w, LH * 2 - 2);
+      ctx.globalAlpha = 0.45;
+      ctx.fillRect(cx - w / 4, ground - LH * 2, w / 2, LH * 2 - 2);
+    }
+    // 光の粒：柱のまわりを昇って消える。位置は番号から決める（毎フレーム同じ動き）
+    ctx.fillStyle = COLORS.goal;
+    for (let i = 0; i < 24; i++) {
+      const life = 1.6;
+      const age = e - 0.2 - ((i * 0.137) % life);
+      if (age < 0) continue;
+      const a = age % life;
+      const x = cx + ((i * 7) % 15) - 7 + Math.round(Math.sin(a * 3 + i) * 2);
+      const y = ground - 4 - Math.round(a * 40);
+      ctx.globalAlpha = Math.ceil((1 - a / life) * 3) / 3;
+      ctx.fillRect(x, y, 1, i % 3 === 0 ? 2 : 1);
+    }
+    ctx.globalAlpha = 1;
   }
 
   /**
@@ -844,6 +1051,42 @@ export class Renderer {
       const n = Math.ceil(-songTime / beatSec);
       this.text(String(n), LW / 2, LH / 2 - 36, 4, COLORS.text, 'center');
     }
+  }
+
+  /** クリアの結果の欄。e はゴールしてからの秒。CLEAR.panel から出て、得点を1行ずつ数え上げる */
+  clearResult(sim: Sim, e: number): void {
+    const t = e - CLEAR.panel;
+    if (t < 0) return;
+    const ctx = this.lctx;
+    // 帯は光の柱が上下に見えるよう画面の中ほどだけ
+    ctx.globalAlpha = Math.min(0.75, Math.ceil(t * 8) / 8);
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 50, LW, 186);
+    ctx.globalAlpha = 1;
+
+    const title = 'CLEAR';
+    this.text(title.slice(0, Math.floor(t / 0.08)), LW / 2 - textWidth(title, 3) / 2, 74, 3, COLORS.goal);
+    if (t > 0.3) this.text(sim.stage.def.name.replace(/(\d+)$/, ' $1'), LW / 2, 94, 1, COLORS.textDim, 'center');
+
+    const remainBeats = sim.goalBonus / GOAL_BONUS_PER_BEAT;
+    const rows = [
+      { label: 'SCORE', value: sim.score - sim.goalBonus, y: 120, prefix: '' },
+      { label: 'GOAL BONUS', value: sim.goalBonus, y: 140, prefix: '+', note: `${remainBeats} BEATS LEFT` },
+      { label: 'MISS', value: sim.misses, y: 166, prefix: '' },
+      { label: 'TOTAL', value: sim.score, y: 196, prefix: '', big: true },
+    ];
+    rows.forEach((r, i) => {
+      const rt = t - CLEAR.rows[i];
+      if (rt < 0) return;
+      const shown = Math.round(r.value * clamp01(rt / CLEAR.count));
+      const done = rt >= CLEAR.count;
+      const scale = r.big ? 2 : 1;
+      const color = r.big ? (done && Math.floor(rt * 6) % 2 === 0 && rt < CLEAR.count + 0.6 ? COLORS.text : COLORS.gem) : COLORS.text;
+      this.text(r.label, 64, r.y, scale, r.big ? COLORS.gem : COLORS.textDim);
+      this.text(`${r.prefix}${shown}`, LW - 64, r.y, scale, color, 'right');
+      if (r.note && done) this.text(r.note, LW - 64, r.y + 9, 1, COLORS.textDim, 'right');
+    });
+    if (e >= CLEAR.end && Math.floor(e * 2) % 2 === 0) this.text('ENTER: RETRY   ESC: TITLE', LW / 2, 222, 1, COLORS.gem, 'center');
   }
 
   overlay(lines: { text: string; scale?: number; color?: string }[]): void {
