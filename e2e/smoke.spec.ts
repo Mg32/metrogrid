@@ -65,6 +65,37 @@ test('拠点の入口は、前のステージをクリアすると増える', as
   expect(await portals()).toBe('12345');
 });
 
+test('二階への階段：確認で NO なら拠点に戻り、YES ならエンディング', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto('/?seed=1&stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4,STAGE5&autostart');
+  await expect.poll(async () => (await game(page)).scene, { timeout: 5000 }).toBe('play');
+  // スタートから左（画面の左上）へ歩くと、階段の上り口
+  await page.keyboard.down('ArrowLeft');
+  await expect.poll(async () => (await game(page)).scene, { timeout: 8000 }).toBe('confirm');
+  await page.keyboard.up('ArrowLeft');
+  await page.keyboard.press('Enter'); // はじめは NO が選ばれている
+  await expect.poll(async () => (await game(page)).scene, { timeout: 5000 }).toBe('play');
+  expect((await game(page)).sim?.stage).toBe('HUB');
+
+  await page.keyboard.down('ArrowLeft');
+  await expect.poll(async () => (await game(page)).scene, { timeout: 8000 }).toBe('confirm');
+  await page.keyboard.up('ArrowLeft');
+  await page.keyboard.press('ArrowLeft'); // YES
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await game(page)).scene, { timeout: 5000 }).toBe('ending');
+  expect(errors).toEqual([]);
+});
+
+test('エンディング（?ending）でエラーが出ない', async ({ page }) => {
+  const errors = collectErrors(page);
+  for (const sec of [3.5, 6, 14.3, 24]) {
+    await page.goto(`/?seed=1&ending=${sec}&total=12345`);
+    await frames(page);
+    expect((await game(page)).scene).toBe('ending');
+  }
+  expect(errors).toEqual([]);
+});
+
 test('クリア演出（?clear）でエラーが出ない', async ({ page }) => {
   const errors = collectErrors(page);
   for (const sec of [0.7, 1.4, 6]) {

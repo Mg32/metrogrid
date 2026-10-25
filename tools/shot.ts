@@ -54,6 +54,8 @@ const SCENES: [string, string][] = args.view
       ['s5-start', 'stage=STAGE5&view=5,47,0'],
       ['s5-fan', 'stage=STAGE5&view=11,27,40'],
       ['s5-late', 'stage=STAGE5&view=13,15,90'],
+      ['hub-stairs', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4,STAGE5&view=4,10,0'],
+      ...[1, 3.5, 6, 9.5, 11.6, 14.3, 16.3, 18.2, 24].map((t): [string, string] => [`ending-${t}`, `ending=${t}&total=48210`]),
     ];
 
 const scale = Number(args.scale);

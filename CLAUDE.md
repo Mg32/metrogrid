@@ -22,9 +22,9 @@
 | `npm run shot` | 主要な場面のスクリーンショットを `screenshots/` に保存する |
 | `npm run check` | typecheck → test → bots → e2e をまとめて |
 
-遊ぶ流れ：タイトル →（はじめてならチュートリアル。S でスキップ）→ 拠点（家の中）→ 光る入口からステージへ → 結果 → 拠点へ戻る。
+遊ぶ流れ：タイトル →（はじめてならチュートリアル。S でスキップ）→ 拠点（家の中）→ 光る入口からステージへ → 結果 → 拠点へ戻る。STAGE5 をクリアすると拠点に二階への階段が現れ、上り口で確認して YES ならエンディング。終わるとガレキの画面のまま（ページを読み込み直すと、階段が現れた時点に戻る）。
 
-開発用 URL パラメータ：`?autostart`、`?seed=N`、`?stage=NAME`（拠点を通さず直接。TUTORIAL・HUB・TEST も可）、`?cleared=A,B`（クリアの記録を差し替える。保存しない）、`?view=X,Y,TICK`（音なしの静止表示）、`?clear=SEC`（ゴールして SEC 秒後のクリア演出の静止表示）。
+開発用 URL パラメータ：`?autostart`、`?seed=N`、`?stage=NAME`（拠点を通さず直接。TUTORIAL・HUB・TEST も可）、`?cleared=A,B`（クリアの記録を差し替える。保存しない）、`?view=X,Y,TICK`（音なしの静止表示）、`?clear=SEC`（ゴールして SEC 秒後のクリア演出の静止表示）、`?ending=SEC`（エンディングの SEC 秒目の静止表示）、`?total=N`（これまでに溜めた得点を差し替える。保存しない）。
 
 ## 変更したら確かめること
 
@@ -49,8 +49,8 @@
   - `random.ts` シード付き乱数。ゲームロジックで `Math.random` を直接使わない。
   - `playlog.ts` プレイ記録の形式・記録・再生。
 - `src/audio/conductor.ts` 時間の基準（いまは仮のメトロノーム）。曲に差し替えるときは `Conductor` を実装する。`sfx.ts` は効果音（クリアのジングル）。
-- `src/progress.ts` クリアしたステージの記録（localStorage）。チュートリアルはクリアかスキップで 'TUTORIAL' が入る。
-- `src/render/` 描画。288x288 のバッファに描き、実画素で整数倍に拡大する。
+- `src/progress.ts` クリアしたステージと、これまでに溜めた得点（全プレイの累計。エンディングで使われる）の記録（localStorage）。チュートリアルはクリアかスキップで 'TUTORIAL' が入る。エンディングを見ても記録は書き換えない。
+- `src/render/` 描画。288x288 のバッファに描き、実画素で整数倍に拡大する。`ending.ts` はエンディング（時刻は `ENDING`）、`pixel.ts` はドット単位の図形。
 - `tools/bots/` ボット（`bots.ts` に一覧と目的）。`tools/replay.ts`、`tools/shot.ts`。
 - `tests/` 単体テスト、`e2e/` Playwright。
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { Sim } from '../src/game/sim.ts';
 import { Stage } from '../src/game/stage.ts';
-import { buildHub, hubReturnCell } from '../src/game/stages/hub.ts';
+import { buildHub, hubReturnCell, UPSTAIRS } from '../src/game/stages/hub.ts';
 import { STAGE_ORDER, STAGES } from '../src/game/stages/index.ts';
 import { DIR_VEC, type Dir } from '../src/game/types.ts';
 
@@ -52,6 +52,21 @@ describe('拠点', () => {
       for (let x = 0; x < stage.width; x++) assert.equal(stage.cell(x, 0)!.terrain, 'wall');
       for (let x = 0; x < stage.width; x++) assert.equal(stage.cell(x, stage.height - 1)!.terrain, 'wall');
     });
+  });
+
+  test('STAGE5 をクリアすると二階への階段が現れ、歩いて行けて、戻る場所がある', () => {
+    const upstairs = (def: ReturnType<typeof buildHub>) => def.objects.some((r) => r.includes('6'));
+    assert.equal(upstairs(buildHub(progressions[progressions.length - 1])), false);
+    const all = new Set(STAGE_ORDER.map((d) => d.name));
+    const def = buildHub(all);
+    const stage = new Stage(def);
+    const cells = stage.cells.flatMap((c, idx) =>
+      c.obj?.type === 'portal' && c.obj.stage === UPSTAIRS ? [`${idx % stage.width},${Math.floor(idx / stage.width)}`] : [],
+    );
+    assert.equal(cells.length, 1);
+    assert.ok(reachable(stage).has(cells[0]), '階段に行けない');
+    const back = hubReturnCell(def, UPSTAIRS);
+    assert.ok(back && stage.cell(back.x, back.y)?.terrain === 'floor');
   });
 
   test('入口のマスに入ると、行き先が決まって止まる', () => {

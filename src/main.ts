@@ -5,15 +5,19 @@ import { InputRecorder, makePlayLog } from './game/playlog.ts';
 import { createRandom, randomSeed } from './game/random.ts';
 import { Sim } from './game/sim.ts';
 import { Stage, type StageDef } from './game/stage.ts';
-import { buildHub, hubReturnCell } from './game/stages/hub.ts';
+import { buildHub, hubReturnCell, UPSTAIRS } from './game/stages/hub.ts';
 import { STAGE_ORDER, STAGES, tutorial } from './game/stages/index.ts';
 import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
-import { loadCleared, saveCleared } from './progress.ts';
+import { loadCleared, loadTotal, saveCleared, saveTotal } from './progress.ts';
+import { ENDING } from './render/ending.ts';
 import { CLEAR, Renderer } from './render/renderer.ts';
 
 /**
  * 遊ぶ流れ：タイトル →（はじめてならチュートリアル。S でスキップ）→ 拠点（家の中）→ 入口からステージへ → 結果 → 拠点へ戻る
+ * ステージ5をクリアすると拠点に二階への階段が現れ、上り口で「本当に二階へ昇る？」と確かめてエンディングへ（企画書 第2.3節・第4.6節）。
+ * エンディングのあとは、ガレキだけが残った画面のまま（崩壊後の画面。第2.4節 TODO を仮に決めたもの：操作はできず、案内も出さない）。
+ * クリアの記録は書き換えないので、ページを読み込み直すと階段が現れた時点（家がそろった状態）に戻る
  *
  * 開発用の URL パラメータ
  *   ?autostart        タイトルを飛ばして始める
@@ -22,6 +26,8 @@ import { CLEAR, Renderer } from './render/renderer.ts';
  *   ?cleared=A,B      クリアの記録をこの内容に差し替える（保存しない。拠点の見た目の確認用）
  *   ?view=X,Y,TICK    音を鳴らさず、TICK まで何もせず進めた状態でプレイヤーを (X,Y) に置いて静止表示する
  *   ?clear=SEC        音を鳴らさず、ゴールしてから SEC 秒後のクリア演出を静止表示する
+ *   ?ending=SEC       音を鳴らさず、エンディングの SEC 秒目を静止表示する
+ *   ?total=N          これまでに溜めた得点をこの値に差し替える（保存しない）
  */
 const params = new URLSearchParams(location.search);
 const fixedSeed = params.has('seed') ? Number(params.get('seed')) : null;
@@ -40,6 +46,9 @@ const save = () => {
   if (devCleared === null) saveCleared(cleared);
 };
 renderer.portalNote = (name) => (cleared.has(name) ? 'CLEARED' : null);
+/** これまでに溜めた得点（エンディングで使われる） */
+const devTotal = params.get('total');
+let total = devTotal !== null ? Number(devTotal) : loadTotal();
 
 /** ?stage=NAME で直接遊ぶステージ */
 const devStage = params.get('stage');
@@ -52,7 +61,7 @@ let newlyUnlocked: string | null = null;
 
 const stageLabel = (name: string) => name.replace(/(\d+)$/, ' $1');
 
-type Scene = 'title' | 'loading' | 'play' | 'result' | 'view';
+type Scene = 'title' | 'loading' | 'play' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
 let scene: Scene = 'title';
 let sim: Sim | null = null;
 let seed = 0;
@@ -62,6 +71,24 @@ let viewTick = 0;
 /** ゴールした時刻（performance.now() の秒）。クリア演出の経過秒はここから数える。?clear では固定の経過秒 */
 let clearedAt = 0;
 let fixedClearSec: number | null = null;
+/** 二階へ昇るかの確認で、YES を選んでいるか（はじめは NO） */
+let confirmYes = false;
+/** エンディングが始まった時刻（performance.now() の秒）。?ending では固定の経過秒 */
+let endingAt = 0;
+let fixedEndingSec: number | null = null;
+
+function endingSec(): number {
+  return fixedEndingSec ?? performance.now() / 1000 - endingAt;
+}
+
+/** エンディングへ。音を鳴らし、時刻を数えはじめる */
+function startEnding(): void {
+  conductor.stop();
+  input.clearPressed();
+  scene = 'ending';
+  endingAt = performance.now() / 1000;
+  sfx.ending({ light: ENDING.light, rumble: ENDING.rumble, jerks: ENDING.jerks, settle: ENDING.settle });
+}
 
 function clearSec(): number | null {
   if (sim?.status !== 'cleared') return null;
@@ -126,6 +153,9 @@ function finishPlay(s: Sim): void {
   input.clearPressed();
   scene = 'result';
   newlyUnlocked = null;
+  // これまでに溜めた得点（クリアでも時間切れでも、そのプレイの得点を足す）
+  total += s.score;
+  if (devTotal === null && devCleared === null) saveTotal(total);
   if (s.status === 'cleared') {
     clearedAt = performance.now() / 1000;
     sfx.clear(CLEAR.rows.map((r) => CLEAR.panel + r));
@@ -180,6 +210,18 @@ function update(): void {
     } else if (start) resultContinue(sim);
     else if (retry) void play(sim.stage.def);
     else if (esc) resultBack(sim);
+  } else if (scene === 'confirm') {
+    // 左右で選び、Enter で決める。Esc は「いいえ」
+    if (input.consumePressed('ArrowLeft') || input.consumePressed('KeyA')) confirmYes = true;
+    if (input.consumePressed('ArrowRight') || input.consumePressed('KeyD')) confirmYes = false;
+    if (start && confirmYes) startEnding();
+    else if (esc || (start && !confirmYes)) goHub(UPSTAIRS);
+  } else if (scene === 'ending') {
+    // エンディングは飛ばせない。終わると、ガレキだけが残った画面へ
+    if (fixedEndingSec === null && endingSec() > ENDING.end + 2) {
+      scene = 'ruins';
+      sfx.stop();
+    }
   } else if (scene === 'play' && sim) {
     const kind = sim.stage.kind;
     if (esc) {
@@ -198,7 +240,12 @@ function update(): void {
       recorder.record(sim.tick + 1, held);
       sim.step(sim.tick + 1, held);
     }
-    if (sim.status === 'portal') {
+    if (sim.status === 'portal' && sim.portal === UPSTAIRS) {
+      conductor.stop();
+      input.clearPressed();
+      confirmYes = false;
+      scene = 'confirm';
+    } else if (sim.status === 'portal') {
       const target = STAGES[sim.portal!];
       if (target) void play(target);
     } else if (sim.status !== 'playing') finishPlay(sim);
@@ -210,13 +257,19 @@ function draw(): void {
   // 結果画面では止まった時点の様子を表示する
   const songTime =
     scene === 'play' ? conductor.songTime() : scene === 'view' ? viewTick * tickSec : sim ? Math.max(sim.tick, 0) * tickSec : 0;
-  if (sim && scene !== 'title') {
+  if (scene === 'ending') {
+    renderer.ending(endingSec(), total);
+  } else if (scene === 'ruins') {
+    renderer.ruinsTitle();
+  } else if (sim && scene !== 'title') {
     renderer.world(sim, songTime, tickSec, clearSec());
     // クリア演出のあいだは HUD を消す（得点は結果の欄で数え上げる）
     if (scene !== 'loading' && clearSec() === null) renderer.hud(sim, songTime, tickSec);
   }
 
-  if (scene === 'title') {
+  if (scene === 'confirm') {
+    renderer.confirmUpstairs(confirmYes);
+  } else if (scene === 'title') {
     const first = !cleared.has(tutorial.name);
     const dev = devDef();
     renderer.overlay([
@@ -282,6 +335,9 @@ if (params.has('view')) {
   for (let i = t0; sim.status === 'playing'; i++) sim.step(i, dir);
   fixedClearSec = Number(params.get('clear'));
   scene = 'result';
+} else if (params.has('ending')) {
+  fixedEndingSec = Number(params.get('ending'));
+  scene = 'ending';
 } else if (params.has('autostart')) {
   startGame();
 }

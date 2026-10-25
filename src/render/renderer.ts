@@ -3,7 +3,22 @@ import { GOAL_BONUS_PER_BEAT, type Sim } from '../game/sim.ts';
 import type { FloorStyle, PropKind, Stage } from '../game/stage.ts';
 import { DIR_VEC, mod, TICKS_PER_BEAT, ZONE_INTERVAL, type Dir, type Vec, type Zone } from '../game/types.ts';
 import { drawText, GLYPH_H, textWidth } from './font.ts';
-import { GIRL_FOOT_X, GIRL_FOOT_Y, GIRL_FRAMES, GIRL_H, GIRL_W, GIRL_WAIST_Y, paintGirl } from './girl.ts';
+import {
+  ditherDiamond,
+  fillDiamond,
+  fillEllipse,
+  fillPrismSides,
+  fillQuad,
+  iso,
+  makeSprite,
+  plotLine,
+  strokeDiamond,
+  strokeIsoRing,
+  TH,
+  TW,
+} from './pixel.ts';
+import { drawEnding, ENDING } from './ending.ts';
+import { GIRL_FOOT_X, GIRL_FOOT_Y, GIRL_FRAMES, GIRL_H, GIRL_RAISE, GIRL_W, GIRL_WAIST_Y, paintGirl } from './girl.ts';
 
 /**
  * 288x288 のバッファに描き、実画素で整数倍（見た目で x1〜x4）に拡大して表示する。
@@ -12,9 +27,6 @@ import { GIRL_FOOT_X, GIRL_FOOT_Y, GIRL_FRAMES, GIRL_H, GIRL_W, GIRL_WAIST_Y, pa
 const LW = 288;
 const LH = 288;
 const MAX_SCALE = 4;
-/** クォータービューのタイル（上面の菱形）の幅と高さ */
-const TW = 24;
-const TH = 12;
 /** 闇に浮かぶ道の板の厚み */
 const FLOOR_THICK = 6;
 const PLAYER_H = 21;
@@ -224,123 +236,16 @@ function lerp(a: number, b: number, k: number): number {
   return a + (b - a) * k;
 }
 
-/** グリッド座標 → 菱形の上の頂点（ワールドのピクセル座標） */
-function iso(x: number, y: number): { sx: number; sy: number } {
-  return { sx: Math.round(((x - y) * TW) / 2), sy: Math.round(((x + y) * TH) / 2) };
-}
 
-// ---- ドット単位の図形（w:h = 2:1 の菱形が基本） ----
 
-function diamondRowWidth(r: number, w: number, h: number): number {
-  return Math.round((w * (Math.min(r, h - 1 - r) + 1)) / (h / 2));
-}
 
-function fillDiamond(ctx: CanvasRenderingContext2D, cx: number, top: number, w: number, h: number, color: string): void {
-  ctx.fillStyle = color;
-  for (let r = 0; r < h; r++) {
-    const rw = diamondRowWidth(r, w, h);
-    ctx.fillRect(cx - rw / 2, top + r, rw, 1);
-  }
-}
 
-function strokeDiamond(ctx: CanvasRenderingContext2D, cx: number, top: number, w: number, h: number, color: string): void {
-  ctx.fillStyle = color;
-  for (let r = 0; r < h; r++) {
-    const rw = diamondRowWidth(r, w, h);
-    ctx.fillRect(cx - rw / 2, top + r, 2, 1);
-    ctx.fillRect(cx + rw / 2 - 2, top + r, 2, 1);
-  }
-}
 
-/** 菱形を上面とする角柱の左右の側面 */
-function fillPrismSides(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  top: number,
-  w: number,
-  h: number,
-  depth: number,
-  left: string,
-  right: string,
-): void {
-  for (let i = 0; i < w / 2; i++) {
-    ctx.fillStyle = left;
-    ctx.fillRect(cx - w / 2 + i, top + h - Math.ceil((w / 2 - i) / 2), 1, depth + 1);
-    ctx.fillStyle = right;
-    ctx.fillRect(cx + i, top + h - Math.ceil((i + 1) / 2), 1, depth + 1);
-  }
-}
 
-/** 菱形の内側の各ドットに対して pred が真なら塗る（ディザ用） */
-function ditherDiamond(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  top: number,
-  w: number,
-  h: number,
-  color: string,
-  pred: (x: number, y: number) => boolean,
-): void {
-  ctx.fillStyle = color;
-  for (let r = 0; r < h; r++) {
-    const rw = diamondRowWidth(r, w, h);
-    for (let x = cx - rw / 2; x < cx + rw / 2; x++) if (pred(x, top + r)) ctx.fillRect(x, top + r, 1, 1);
-  }
-}
 
-function fillEllipse(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number, color: string): void {
-  ctx.fillStyle = color;
-  for (let dy = -ry; dy <= ry; dy++) {
-    const hw = Math.round(rx * Math.sqrt(1 - (dy / (ry + 0.5)) ** 2));
-    ctx.fillRect(cx - hw, cy + dy, hw * 2 + 1, 1);
-  }
-}
 
-/** 凸な四角形を塗る（行ごとに左右の端を求めて fillRect） */
-function fillQuad(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[], color: string): void {
-  ctx.fillStyle = color;
-  const ys = pts.map((p) => p.y);
-  for (let y = Math.round(Math.min(...ys)); y <= Math.round(Math.max(...ys)); y++) {
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (let i = 0; i < pts.length; i++) {
-      const a = pts[i];
-      const b = pts[(i + 1) % pts.length];
-      if (a.y === b.y) {
-        if (Math.round(a.y) === y) {
-          lo = Math.min(lo, a.x, b.x);
-          hi = Math.max(hi, a.x, b.x);
-        }
-        continue;
-      }
-      const k = (y - a.y) / (b.y - a.y);
-      if (k < 0 || k > 1) continue;
-      const x = a.x + (b.x - a.x) * k;
-      lo = Math.min(lo, x);
-      hi = Math.max(hi, x);
-    }
-    if (lo <= hi) ctx.fillRect(Math.round(lo), y, Math.round(hi) - Math.round(lo) + 1, 1);
-  }
-}
 
-/** 水平な円をクォータービューで見た輪（横:縦 = 2:1 の楕円の線）。奥の半分と手前の半分で色を分ける */
-function strokeIsoRing(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, back: string, front: string): void {
-  const ry = rx / 2;
-  const n = Math.ceil(rx * 8);
-  for (let i = 0; i < n; i++) {
-    const a = (2 * Math.PI * i) / n;
-    ctx.fillStyle = Math.sin(a) > 0 ? front : back;
-    ctx.fillRect(Math.round(cx + rx * Math.cos(a)), Math.round(cy + ry * Math.sin(a)), 1, 1);
-  }
-}
 
-function makeSprite(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void): HTMLCanvasElement {
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  draw(c.getContext('2d')!);
-  return c;
-}
 
 /**
  * 道のタイル。景色が薄い（危険な）ほど暗く、闇が透けて見える。
@@ -504,12 +409,6 @@ function fillFaceColumn(
   ctx.fillRect(x, ground - bottom - height + 1, 1, height);
 }
 
-/** 線分（ドット単位） */
-function plotLine(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, color: string): void {
-  ctx.fillStyle = color;
-  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
-  for (let k = 0; k <= n; k++) ctx.fillRect(Math.round(x0 + ((x1 - x0) * k) / n), Math.round(y0 + ((y1 - y0) * k) / n), 1, 1);
-}
 
 export class Renderer {
   private main: HTMLCanvasElement;
@@ -536,6 +435,8 @@ export class Renderer {
   /** 少女：[正面, 背面][立ち, 歩き]、左右反転したものも */
   private girl: HTMLCanvasElement[][];
   private girlGlow: HTMLCanvasElement;
+  /** エンディングで手を挙げる少女 */
+  private girlRaise: HTMLCanvasElement;
   /** ハブの入口の下に出す一言（クリア済みなど）。main.ts が設定する */
   portalNote: (stage: string) => string | null = () => null;
   private lot: HTMLCanvasElement;
@@ -560,6 +461,7 @@ export class Renderer {
     this.lot = makeLotSprite();
     this.girl = makeGirlSprites();
     this.girlGlow = makeGlowSprite(this.girl[GIRL_DIR.up][0]);
+    this.girlRaise = makeSprite(GIRL_W, GIRL_H, (ctx) => paintGirl(ctx, GIRL_RAISE));
 
     // キャンバスの実画素サイズを正確に取る（CSSピクセル × dpr の丸め誤差でぼやけないように）
     // devicePixelContentBoxSize がCSSサイズ×dprと食い違う環境（高DPIのエミュレーションなど）では計算値を使う
@@ -745,9 +647,12 @@ export class Renderer {
           // ハブの入口：その先の景色の色で光る戸口。近づくと行き先が出る
           const target = cell.obj.stage;
           const pulse = 1 - (tickF % TICKS_PER_BEAT) / TICKS_PER_BEAT;
-          sprites.push({ depth: x + y + 0.3, draw: () => this.goalDoor(sx, sy, pulse, PORTAL_LIGHT[target]) });
+          sprites.push({
+            depth: x + y + 0.3,
+            draw: () => (target === 'UPSTAIRS' ? this.stairs(sx, sy) : this.goalDoor(sx, sy, pulse, PORTAL_LIGHT[target])),
+          });
           if (Math.max(Math.abs(x - px), Math.abs(y - py)) <= 3) {
-            labels.push({ x: sx, y: sy - 30, text: target.replace(/(\d+)$/, ' $1'), color: COLORS.text });
+            labels.push({ x: sx, y: sy - 30, text: target.replace(/(\d+)$/, ' $1'), color: target === 'UPSTAIRS' ? COLORS.textDim : COLORS.text });
             const note = this.portalNote(target);
             if (note) labels.push({ x: sx, y: sy - 22, text: note, color: COLORS.gem });
           }
@@ -1475,6 +1380,30 @@ export class Renderer {
     fillEllipse(ctx, q.x - 1, q.y - 4, 5, 3, COLORS.snow);
   }
 
+  /**
+   * 拠点の、二階への階段（ステージ5をクリアすると現れる）。上り口のマスから -x へ昇っていき、上のほうは闇に溶けている。
+   * 二階は最後まで閉じている（企画書 第4.4節）ので、昇った先は描かない
+   */
+  private stairs(sx: number, sy: number): void {
+    const ctx = this.lctx;
+    const STEPS = 7;
+    // 奥（高い段）から手前へ
+    for (let i = STEPS - 1; i >= 0; i--) {
+      const gx = 0.35 - i * 0.32;
+      const top = (i + 1) * 5;
+      const pt = (dx: number, dy: number, h: number) => ({
+        x: Math.round(sx + ((gx + dx - dy) * TW) / 2),
+        y: Math.round(sy + TH / 2 + ((gx + dx + dy) * TH) / 2 - h),
+      });
+      ctx.globalAlpha = Math.max(0, 1 - i / STEPS);
+      // 踏み面と、手前（+x）の蹴込み
+      fillQuad(ctx, [pt(-0.16, -0.42, top), pt(0.16, -0.42, top), pt(0.16, 0.42, top), pt(-0.16, 0.42, top)], COLORS.bridge);
+      fillQuad(ctx, [pt(0.16, 0.42, top), pt(0.16, -0.42, top), pt(0.16, -0.42, top - 5), pt(0.16, 0.42, top - 5)], COLORS.woodDark);
+      fillQuad(ctx, [pt(-0.16, 0.42, top), pt(0.16, 0.42, top), pt(0.16, 0.42, 0), pt(-0.16, 0.42, 0)], COLORS.wood);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   /** ゴール：欠けに囲まれて一枚だけ立つ扉。開いた戸口から光が漏れる。ハブの入口も同じ形で、光の色が行き先の景色の色 */
   private goalDoor(sx: number, sy: number, pulse: number, light: string = COLORS.goal): void {
     const ctx = this.lctx;
@@ -1810,6 +1739,35 @@ export class Renderer {
     });
     if (e >= CLEAR.end && note) this.text(note, LW / 2, 104, 1, COLORS.goal, 'center');
     if (e >= CLEAR.end && Math.floor(e * 2) % 2 === 0) this.text(prompt, LW / 2, 222, 1, COLORS.gem, 'center');
+  }
+
+  /** エンディング（ending.ts）。t は始まってからの秒、total は使われる得点 */
+  ending(t: number, total: number): void {
+    drawEnding(this.lctx, t, total, {
+      front: this.girl[GIRL_DIR.down],
+      back: this.girl[GIRL_DIR.up],
+      raise: this.girlRaise,
+    });
+  }
+
+  /** エンディングが終わったあと（ガレキだけが残った）のタイトル。操作の案内は出さない */
+  ruinsTitle(): void {
+    this.ending(ENDING.end, 0);
+    this.text('METROGRID', LW / 2, 40, 3, COLORS.textDim, 'center');
+  }
+
+  /** 二階へ昇るかの確認（企画書 第2.3節）。取り返しのつかないことが起きると、意図的に予告する */
+  confirmUpstairs(yes: boolean): void {
+    const ctx = this.lctx;
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, LW, LH);
+    ctx.globalAlpha = 1;
+    this.text('REALLY GO UPSTAIRS?', LW / 2, LH / 2 - 30, 2, COLORS.text, 'center');
+    this.text('THERE WILL BE NO TURNING BACK.', LW / 2, LH / 2 - 10, 1, COLORS.textDim, 'center');
+    this.text(yes ? '> YES' : '  YES', LW / 2 - 30, LH / 2 + 20, 2, yes ? COLORS.gem : COLORS.textDim, 'center');
+    this.text(!yes ? '> NO' : '  NO', LW / 2 + 34, LH / 2 + 20, 2, !yes ? COLORS.gem : COLORS.textDim, 'center');
+    this.text('LEFT / RIGHT, ENTER', LW / 2, LH / 2 + 46, 1, COLORS.textDim, 'center');
   }
 
   overlay(lines: { text: string; scale?: number; color?: string }[]): void {

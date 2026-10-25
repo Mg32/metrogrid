@@ -9,10 +9,14 @@ import type { Vec } from '../types.ts';
  *   STAGE2 をクリア → 居間が現れ、居間の窓から STAGE3（時代の重なった通り）へ
  *   STAGE3 をクリア → 玄関の脇に台所が現れ、勝手口から STAGE4（裏手の屋根の連なり）へ
  *   STAGE4 をクリア → 廊下の奥に和室が現れ、その奥の襖から STAGE5（家に近い場所）へ
- * STAGE5 をクリアすると二階への階段が現れる（第2.3節）が、階段とエンディングはまだ作っていない。
+ *   STAGE5 をクリア → 玄関の板の間の脇に、二階への階段が現れる（第2.3節）。上り口に入ると「本当に二階へ昇る？」と確かめて
+ *   エンディングへ（main.ts）。二階は最後まで閉じている
  * どのクリアでどの部屋が開くかは企画書では未定（第2.4節 TODO「拠点の部屋の開き方」）。ここでは入口の部屋の並び（第4.4節）のとおり仮に決めた。
  * 家は最初から傷んでいて、通路が増えても新品には戻らない。時間制限はなく、危険物もない。
  */
+/** 二階への階段の行き先（ステージではない。入るとエンディングの確認になる） */
+export const UPSTAIRS = 'UPSTAIRS';
+
 export function buildHub(cleared: ReadonlySet<string>): StageDef {
   const W = 15;
   const H = 17;
@@ -71,6 +75,13 @@ export function buildHub(cleared: ReadonlySet<string>): StageDef {
     F[6][11] = 't';
   }
 
+  // 二階への階段：上り口のマス（入口と同じ扱い。行き先は UPSTAIRS）
+  if (cleared.has('STAGE5')) {
+    T[10][3] = '.';
+    F[10][3] = 'w';
+    O[10][3] = '6';
+  }
+
   return {
     name: 'HUB',
     kind: 'hub',
@@ -83,7 +94,7 @@ export function buildHub(cleared: ReadonlySet<string>): StageDef {
     floors: F.map((r) => r.join('')),
     scores: {},
     hazards: [],
-    portals: { '1': 'STAGE1', '2': 'STAGE2', '3': 'STAGE3', '4': 'STAGE4', '5': 'STAGE5' },
+    portals: { '1': 'STAGE1', '2': 'STAGE2', '3': 'STAGE3', '4': 'STAGE4', '5': 'STAGE5', '6': UPSTAIRS },
   };
 }
 
