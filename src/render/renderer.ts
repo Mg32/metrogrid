@@ -1,8 +1,9 @@
 import { PatrolHazard, PeriodicHazard, SwingHazard } from '../game/hazard.ts';
 import type { Sim } from '../game/sim.ts';
 import type { PropKind, Stage } from '../game/stage.ts';
-import { DIR_VEC, TICKS_PER_BEAT, ZONE_INTERVAL, type Zone } from '../game/types.ts';
+import { DIR_VEC, mod, TICKS_PER_BEAT, ZONE_INTERVAL, type Dir, type Zone } from '../game/types.ts';
 import { drawText, GLYPH_H, textWidth } from './font.ts';
+import { GIRL_FOOT_X, GIRL_FOOT_Y, GIRL_FRAMES, GIRL_H, GIRL_W, GIRL_WAIST_Y, paintGirl } from './girl.ts';
 
 /**
  * 288x288 のバッファに描き、実画素で整数倍（見た目で x1〜x4）に拡大して表示する。
@@ -14,10 +15,9 @@ const MAX_SCALE = 4;
 /** クォータービューのタイル（上面の菱形）の幅と高さ */
 const TW = 24;
 const TH = 12;
-const FLOOR_THICK = 3;
-/** 道と道の間の区画（塀や植え込み）の高さ */
-const BLOCK_H = 6;
-const PLAYER_H = 16;
+/** 闇に浮かぶ道の板の厚み */
+const FLOOR_THICK = 6;
+const PLAYER_H = 21;
 
 /** 街灯の明るさの段階ごとの道の色（0: 闇、1: 街灯から2マス、2: 街灯のすぐそば）。各段階はゾーン別 */
 const ROAD_LIGHT = [
@@ -36,10 +36,16 @@ const COLORS = {
   roadSpeck: '#625e6a',
   roadSideL: '#24222a',
   roadSideR: '#2c2933',
-  blockTop: '#1d1b23',
-  blockSpeck: '#27242e',
-  blockL: '#121016',
-  blockR: '#17151c',
+  slabMidL: '#17151c',
+  slabMidR: '#1b1921',
+  slabDeepL: '#0e0d12',
+  slabDeepR: '#100f15',
+  holeRim: '#3a3741',
+  // 家の入口の断片（土壁と瓦の庇のつもり）
+  facadeTop: '#2a2731',
+  facadeSpeck: '#34303b',
+  facadeL: '#3a3338',
+  facadeR: '#2b262c',
   hazard: '#a54a3e',
   hazardL: '#6e2c25',
   hazardR: '#843830',
@@ -167,10 +173,17 @@ function makeSprite(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) 
  * 道のタイル。景色が薄い（危険な）ほど暗く、闇が透けて見える。
  * ディザの模様は (x + 2y) で決めるので、タイルどうしの継ぎ目でもずれない（タイルの間隔 12,6 で周期がそろう）。
  */
+/** 闇に浮かぶ板の側面。下へいくほど闇に溶ける */
+function fillSlabSides(ctx: CanvasRenderingContext2D, cx: number, top: number, w: number, h: number, depth: number): void {
+  fillPrismSides(ctx, cx, top, w, h, depth, COLORS.slabDeepL, COLORS.slabDeepR);
+  fillPrismSides(ctx, cx, top, w, h, Math.ceil((depth * 2) / 3), COLORS.slabMidL, COLORS.slabMidR);
+  fillPrismSides(ctx, cx, top, w, h, Math.ceil(depth / 3), COLORS.roadSideL, COLORS.roadSideR);
+}
+
 function makeRoadSprite(zone: Zone, light: number): HTMLCanvasElement {
   return makeSprite(TW, TH + FLOOR_THICK + 1, (ctx) => {
     const cx = TW / 2;
-    fillPrismSides(ctx, cx, 0, TW, TH, FLOOR_THICK, COLORS.roadSideL, COLORS.roadSideR);
+    fillSlabSides(ctx, cx, 0, TW, TH, FLOOR_THICK);
     fillDiamond(ctx, cx, 0, TW, TH, ROAD_LIGHT[light].edge);
     fillDiamond(ctx, cx, 1, TW - 4, TH - 2, ROAD_LIGHT[light].road[zone]);
     if (zone === 0) {
@@ -182,12 +195,14 @@ function makeRoadSprite(zone: Zone, light: number): HTMLCanvasElement {
   });
 }
 
-function makeBlockSprite(height: number): HTMLCanvasElement {
-  return makeSprite(TW, height + TH + FLOOR_THICK + 1, (ctx) => {
+/** 闇に浮かぶ、家の入口の断片（壁ひと切れ）。扉は wallCell で側面に描く */
+function makeFacadeSprite(): HTMLCanvasElement {
+  return makeSprite(TW, FACADE_H + TH + FLOOR_THICK + 1, (ctx) => {
     const cx = TW / 2;
-    fillPrismSides(ctx, cx, 0, TW, TH, height + FLOOR_THICK, COLORS.blockL, COLORS.blockR);
-    fillDiamond(ctx, cx, 0, TW, TH, COLORS.blockTop);
-    ditherDiamond(ctx, cx, 0, TW, TH, COLORS.blockSpeck, (x, y) => (x * 5 + y * 11) % 17 === 0);
+    fillSlabSides(ctx, cx, 0, TW, TH, FACADE_H + FLOOR_THICK);
+    fillPrismSides(ctx, cx, 0, TW, TH, FACADE_H, COLORS.facadeL, COLORS.facadeR);
+    fillDiamond(ctx, cx, 0, TW, TH, COLORS.facadeTop);
+    ditherDiamond(ctx, cx, 0, TW, TH, COLORS.facadeSpeck, (x, y) => (x * 5 + y * 11) % 17 === 0);
   });
 }
 
@@ -195,9 +210,41 @@ function makeBlockSprite(height: number): HTMLCanvasElement {
 function makeLotSprite(): HTMLCanvasElement {
   return makeSprite(TW, TH + FLOOR_THICK + 1, (ctx) => {
     const cx = TW / 2;
-    fillPrismSides(ctx, cx, 0, TW, TH, FLOOR_THICK, COLORS.roadSideL, COLORS.roadSideR);
+    fillSlabSides(ctx, cx, 0, TW, TH, FLOOR_THICK);
     fillDiamond(ctx, cx, 0, TW, TH, COLORS.dirt);
     ditherDiamond(ctx, cx, 0, TW, TH, COLORS.dirtSpeck, (x, y) => (x * 3 + y * 7) % 11 === 0);
+  });
+}
+
+/** 少女：[向き][コマ] */
+function makeGirlSprites(): HTMLCanvasElement[][] {
+  return GIRL_FRAMES.map((frames) => frames.map((rows) => makeSprite(GIRL_W, GIRL_H, (ctx) => paintGirl(ctx, rows))));
+}
+
+/** 進む方向 → GIRL_FRAMES の向き（画面上の斜め） */
+const GIRL_DIR: Record<Dir, number> = { down: 0, right: 1, left: 2, up: 3 };
+
+/** 闇に浮かぶ小物（街灯、門柱、郵便受け）の小さな台座。上面の中心が (6, 3) */
+function makeFootingSprite(): HTMLCanvasElement {
+  return makeSprite(12, 6 + 4, (ctx) => {
+    fillSlabSides(ctx, 6, 0, 12, 6, 3);
+    fillDiamond(ctx, 6, 0, 12, 6, ROAD_LIGHT[0].edge);
+  });
+}
+
+/**
+ * 景色の欠けた場所（踏むとミス）。道がそこだけ抜け落ちていて、奥の道の板の断面が見え、破片が闇へ落ちていく。
+ * 道の端（通れない闇）と見分けられるように、破片を描く
+ */
+function makeHoleSprite(): HTMLCanvasElement {
+  return makeSprite(TW, TH + 10, (ctx) => {
+    const cx = TW / 2;
+    ctx.fillStyle = COLORS.holeRim;
+    ctx.fillRect(cx - 4, TH / 2 + 2, 2, 1);
+    ctx.fillRect(cx + 3, TH / 2 + 4, 1, 1);
+    ctx.fillStyle = COLORS.slabMidL;
+    ctx.fillRect(cx - 1, TH / 2 + 6, 2, 1);
+    ctx.fillRect(cx + 5, TH / 2 + 8, 1, 1);
   });
 }
 
@@ -216,7 +263,7 @@ function fillFaceColumn(
   color: string,
 ): void {
   const x = side === 'L' ? sx - TW / 2 + i : sx + i;
-  const ground = sy + FLOOR_THICK + (side === 'L' ? TH / 2 + Math.floor(i / 2) : TH - Math.ceil((i + 1) / 2));
+  const ground = sy + (side === 'L' ? TH / 2 + Math.floor(i / 2) : TH - Math.ceil((i + 1) / 2));
   ctx.fillStyle = color;
   ctx.fillRect(x, ground - bottom - height + 1, 1, height);
 }
@@ -243,8 +290,11 @@ export class Renderer {
   private camSim: Sim | null = null;
   /** [明るさ][ゾーン] */
   private roads: HTMLCanvasElement[][];
-  private block: HTMLCanvasElement;
   private facade: HTMLCanvasElement;
+  private footing: HTMLCanvasElement;
+  private hole: HTMLCanvasElement;
+  /** 少女：[正面, 背面][立ち, 歩き]、左右反転したものも */
+  private girl: HTMLCanvasElement[][];
   private lot: HTMLCanvasElement;
   /** ステージごとの、各マスの街灯の明るさ */
   private lightMaps = new WeakMap<Stage, Uint8Array>();
@@ -257,9 +307,11 @@ export class Renderer {
     this.low.height = LH;
     this.lctx = this.low.getContext('2d')!;
     this.roads = [0, 1, 2].map((light) => [0, 1, 2].map((z) => makeRoadSprite(z as Zone, light)));
-    this.block = makeBlockSprite(BLOCK_H);
-    this.facade = makeBlockSprite(FACADE_H);
+    this.facade = makeFacadeSprite();
+    this.footing = makeFootingSprite();
+    this.hole = makeHoleSprite();
     this.lot = makeLotSprite();
+    this.girl = makeGirlSprites();
 
     // キャンバスの実画素サイズを正確に取る（CSSピクセル × dpr の丸め誤差でぼやけないように）
     // devicePixelContentBoxSize がCSSサイズ×dprと食い違う環境（高DPIのエミュレーションなど）では計算値を使う
@@ -323,6 +375,9 @@ export class Renderer {
     const k = clamp01((tickF - sim.moveTick) / slide);
     const px = lerp(sim.fromX, sim.x, k);
     const py = lerp(sim.fromY, sim.y, k);
+    // 歩きのコマは、位置の補間より長く、次に動ける拍まで（押し続ければ足が止まらない）
+    const moved = sim.fromX !== sim.x || sim.fromY !== sim.y;
+    const walk = moved ? clamp01((tickF - sim.moveTick) / ZONE_INTERVAL[fromZone]) : 1;
 
     // カメラはプレイヤーを追う
     const p = iso(px, py);
@@ -344,8 +399,11 @@ export class Renderer {
       for (let x = 0; x <= d; x++) {
         const y = d - x;
         const cell = stage.cell(x, y);
-        if (!cell || cell.terrain !== 'floor') continue;
+        if (!cell) continue;
         const { sx, sy } = iso(x, y);
+        if (cell.terrain === 'hole') ctx.drawImage(this.hole, sx - TW / 2, sy);
+        if (cell.terrain === 'wall' && cell.obj?.type === 'prop' && cell.obj.kind === 'lot') ctx.drawImage(this.lot, sx - TW / 2, sy);
+        if (cell.terrain !== 'floor') continue;
         ctx.drawImage(this.roads[light[stage.index(x, y)]][cell.zone], sx - TW / 2, sy);
 
         const obj = cell.obj;
@@ -366,9 +424,10 @@ export class Renderer {
       for (let x = 0; x < stage.width; x++) {
         const cell = stage.cell(x, y)!;
         const { sx, sy } = iso(x, y);
-        if (cell.terrain === 'wall') {
-          const kind = cell.obj?.type === 'prop' ? cell.obj.kind : null;
-          const height = kind === 'entrance' || kind === 'door' ? FACADE_H : kind === 'lamp' ? POLE_H : BLOCK_H + 14;
+        // 道の外は闇で何も描かない。小物だけが闇に浮かぶ
+        if (cell.terrain === 'wall' && cell.obj?.type === 'prop' && cell.obj.kind !== 'lot') {
+          const kind = cell.obj.kind;
+          const height = kind === 'entrance' || kind === 'door' ? FACADE_H : kind === 'lamp' ? POLE_H : 16;
           // プレイヤーより手前でプレイヤーに重なるものは透かす
           const hides =
             x + y > px + py && Math.abs(sx - p.sx) < TW && sy - height < feet && sy + TH + FLOOR_THICK > feet - PLAYER_H;
@@ -442,7 +501,10 @@ export class Renderer {
     }
 
     if (!(sim.stunned && Math.floor(tickF * 2) % 2 === 0)) {
-      sprites.push({ depth: px + py + 0.5, draw: () => this.player(p.sx, p.sy + TH / 2) });
+      sprites.push({
+        depth: px + py + 0.5,
+        draw: () => this.player(p.sx, p.sy + TH / 2, sim.facing, walk, (sim.x + sim.y) % 2 !== 0, tickF),
+      });
     }
 
     sprites.sort((a, b) => a.depth - b.depth);
@@ -533,14 +595,12 @@ export class Renderer {
     return map;
   }
 
-  /** 通れないマス：区画、または小物 */
-  private wallCell(sx: number, sy: number, kind: PropKind | null, face: 'L' | 'R'): void {
+  /** 闇に浮かぶ小物 */
+  private wallCell(sx: number, sy: number, kind: PropKind, face: 'L' | 'R'): void {
     const ctx = this.lctx;
-    const ground = sy - BLOCK_H + TH / 2; // 区画の上面の中心
+    const ground = sy + TH / 2; // 台座の上面の中心
+    if (kind === 'pillar' || kind === 'mailbox' || kind === 'lamp') ctx.drawImage(this.footing, sx - 6, ground - 3);
     switch (kind) {
-      case 'lot':
-        ctx.drawImage(this.lot, sx - TW / 2, sy);
-        return;
       case 'entrance':
       case 'door':
         ctx.drawImage(this.facade, sx - TW / 2, sy - FACADE_H);
@@ -548,16 +608,14 @@ export class Renderer {
         return;
       case 'pillar':
         // 門柱
-        ctx.drawImage(this.block, sx - TW / 2, sy - BLOCK_H);
         ctx.fillStyle = COLORS.concrete;
         ctx.fillRect(sx - 3, ground - 14, 6, 14);
-        ctx.fillStyle = COLORS.blockR;
+        ctx.fillStyle = COLORS.facadeR;
         ctx.fillRect(sx, ground - 14, 3, 14);
         ctx.fillStyle = COLORS.concreteTop;
         ctx.fillRect(sx - 4, ground - 16, 8, 2);
         return;
       case 'mailbox':
-        ctx.drawImage(this.block, sx - TW / 2, sy - BLOCK_H);
         ctx.fillStyle = COLORS.lampPole;
         ctx.fillRect(sx - 1, ground - 8, 2, 8);
         ctx.fillStyle = COLORS.mailbox;
@@ -566,7 +624,6 @@ export class Renderer {
         ctx.fillRect(sx - 3, ground - 12, 6, 1);
         return;
       case 'lamp': {
-        ctx.drawImage(this.block, sx - TW / 2, sy - BLOCK_H);
         const top = ground - POLE_H;
         ctx.fillStyle = COLORS.lampPole;
         ctx.fillRect(sx - 1, top, 2, POLE_H);
@@ -579,8 +636,6 @@ export class Renderer {
         ctx.globalAlpha /= 0.35;
         return;
       }
-      default:
-        ctx.drawImage(this.block, sx - TW / 2, sy - BLOCK_H);
     }
   }
 
@@ -724,31 +779,25 @@ export class Renderer {
     }
   }
 
-  private player(cx: number, cy: number): void {
+  /**
+   * 少女。向きは斜め見下ろしの画面に合わせる（上・左へ進むときは背面で奥へ歩く）。
+   * 1マス進むあいだに歩きのコマを3つ送り、マスの偶奇で左右の足を入れ替える。止まっていれば立ちのコマ
+   * 拍に乗って体を揺らす：拍の頭から半拍は頭と胴を1ドット沈め、残りの半拍で戻す。脚は地面に残す
+   * step: 移動の進み具合 0〜1（1 で止まっている）
+   */
+  private player(cx: number, cy: number, facing: Dir, step: number, odd: boolean, tickF: number): void {
     const ctx = this.lctx;
     ctx.globalAlpha = 0.45;
     fillEllipse(ctx, cx, cy, 4, 1, '#000');
     ctx.globalAlpha = 1;
-    // 脚
-    ctx.fillStyle = '#26232b';
-    ctx.fillRect(cx - 2, cy - 3, 1, 3);
-    ctx.fillRect(cx + 1, cy - 3, 1, 3);
-    // 服
-    ctx.fillStyle = '#6e5562';
-    ctx.fillRect(cx - 2, cy - 8, 4, 5);
-    ctx.fillRect(cx - 3, cy - 5, 6, 2);
-    // 顔と髪
-    ctx.fillStyle = '#e6dac8';
-    ctx.fillRect(cx - 2, cy - 13, 4, 5);
-    ctx.fillStyle = '#1b1820';
-    ctx.fillRect(cx - 2, cy - 14, 4, 2);
-    ctx.fillRect(cx - 3, cy - 13, 1, 5);
-    ctx.fillRect(cx + 2, cy - 13, 1, 5);
-    // ヘッドホン
-    ctx.fillStyle = COLORS.accent;
-    ctx.fillRect(cx - 3, cy - PLAYER_H + 1, 6, 1);
-    ctx.fillRect(cx - 4, cy - 12, 2, 3);
-    ctx.fillRect(cx + 2, cy - 12, 2, 3);
+    const frame = step < 1 ? 1 + Math.min(2, Math.floor(step * 3)) + (odd ? 3 : 0) : 0;
+    const img = this.girl[GIRL_DIR[facing]][frame];
+    const left = cx - GIRL_FOOT_X;
+    const top = cy - GIRL_FOOT_Y;
+    const dip = mod(tickF, TICKS_PER_BEAT) < TICKS_PER_BEAT / 2 ? 1 : 0;
+    const w = GIRL_WAIST_Y;
+    ctx.drawImage(img, 0, w, GIRL_W, GIRL_H - w, left, top + w, GIRL_W, GIRL_H - w);
+    ctx.drawImage(img, 0, 0, GIRL_W, w, left, top + dip, GIRL_W, w);
   }
 
   // ---- 文字・HUD ----

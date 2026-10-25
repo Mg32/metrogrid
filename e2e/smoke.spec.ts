@@ -12,10 +12,11 @@ test('タイトルから始めて歩ける', async ({ page }) => {
   await expect.poll(async () => (await game(page)).sim?.tick ?? -1, { timeout: 5000 }).toBeGreaterThan(0);
   expect((await game(page)).scene).toBe('play');
 
+  // スタート（玄関の前）からは下へ道が続いている
   const before = (await game(page)).sim!;
-  await page.keyboard.down('ArrowRight');
-  await expect.poll(async () => (await game(page)).sim!.x, { timeout: 3000 }).toBeGreaterThan(before.x);
-  await page.keyboard.up('ArrowRight');
+  await page.keyboard.down('ArrowDown');
+  await expect.poll(async () => (await game(page)).sim!.y, { timeout: 3000 }).toBeGreaterThan(before.y);
+  await page.keyboard.up('ArrowDown');
 
   await page.keyboard.press('Escape');
   await frames(page);
