@@ -15,7 +15,8 @@ export type SimEvent =
   | { kind: 'miss'; tick: number; x: number; y: number; fell: boolean }
   | { kind: 'bounce'; tick: number; x: number; y: number };
 
-export type Status = 'playing' | 'cleared' | 'timeup';
+/** portal はハブでステージの入口に入った（行き先は Sim.portal） */
+export type Status = 'playing' | 'cleared' | 'timeup' | 'portal';
 
 /** ミス後の停止時間（1拍） */
 const STUN_TICKS = TICKS_PER_BEAT;
@@ -57,17 +58,20 @@ export class Sim {
   streak = 0;
   misses = 0;
   goalBonus = 0;
+  /** ハブで入った入口の行き先のステージ名 */
+  portal: string | null = null;
   events: SimEvent[] = [];
 
   private gateClosedUntil = new Map<number, number>();
 
-  constructor(stage: Stage, random: () => number = Math.random) {
+  /** start を渡すとそのマスから始める（ハブで、出てきたステージの入口の前に戻すとき） */
+  constructor(stage: Stage, random: () => number = Math.random, start: Vec = stage.start) {
     this.stage = stage;
     this.hazards = createHazards(stage.def.hazards, random);
     this.totalTicks = stage.def.bars * TICKS_PER_BAR;
-    this.x = this.fromX = stage.start.x;
-    this.y = this.fromY = stage.start.y;
-    this.zoneEntry = { ...stage.start };
+    this.x = this.fromX = start.x;
+    this.y = this.fromY = start.y;
+    this.zoneEntry = { ...start };
     this.scores = [];
     const candidates = new Map<string, { x: number; y: number }[]>();
     for (let y = 0; y < stage.height; y++) {
@@ -207,6 +211,10 @@ export class Sim {
         }
         break;
       }
+      case 'portal':
+        this.portal = cell.obj.stage;
+        this.status = 'portal';
+        break;
       case 'goal': {
         const remainingBeats = Math.floor((this.totalTicks - t) / TICKS_PER_BEAT);
         this.goalBonus = remainingBeats * GOAL_BONUS_PER_BEAT;

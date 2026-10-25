@@ -24,23 +24,45 @@ test('タイトルから始めて歩ける', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test('STAGE 2 は STAGE 1 をクリアするまで選んでも始められない', async ({ page }) => {
+test('はじめてはチュートリアルから。S でスキップすると拠点へ、拠点の入口から STAGE 1 へ', async ({ page }) => {
   const errors = collectErrors(page);
   await page.goto('/?seed=1');
   await frames(page);
-  await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Enter');
-  await frames(page);
-  expect((await game(page)).scene).toBe('title');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('TUTORIAL');
 
-  // STAGE 1 をクリアした記録があれば始められる
-  await page.evaluate(() => localStorage.setItem('metrogrid.cleared', JSON.stringify(['STAGE1'])));
+  await page.keyboard.press('KeyS');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
+  await expect.poll(async () => (await game(page)).scene, { timeout: 5000 }).toBe('play');
+
+  // 拠点のスタートから下（画面の左手前）へ歩くと、玄関の戸（STAGE 1 の入口）に入る
+  await page.keyboard.down('ArrowDown');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 8000 }).toBe('STAGE1');
+  await page.keyboard.up('ArrowDown');
+
+  // スキップした記録が残り、次からはタイトルからまっすぐ拠点へ
   await page.goto('/?seed=1');
   await frames(page);
-  await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Enter');
-  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('STAGE2');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
   expect(errors).toEqual([]);
+});
+
+test('拠点の入口は、前のステージをクリアすると増える', async ({ page }) => {
+  const portals = () =>
+    page.evaluate(() => {
+      const g = (window as unknown as { __game: { sim: { stage: { def: { objects: string[] } } } } }).__game;
+      return g.sim.stage.def.objects.join('').replace(/[^1-9]/g, '').split('').sort().join('');
+    });
+  await page.goto('/?seed=1&stage=HUB&cleared=TUTORIAL&view=6,10,0');
+  await frames(page);
+  expect(await portals()).toBe('1');
+  await page.goto('/?seed=1&stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2&view=6,10,0');
+  await frames(page);
+  expect(await portals()).toBe('123');
+  await page.goto('/?seed=1&stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4&view=6,10,0');
+  await frames(page);
+  expect(await portals()).toBe('12345');
 });
 
 test('クリア演出（?clear）でエラーが出ない', async ({ page }) => {

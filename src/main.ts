@@ -4,18 +4,22 @@ import { Sfx } from './audio/sfx.ts';
 import { InputRecorder, makePlayLog } from './game/playlog.ts';
 import { createRandom, randomSeed } from './game/random.ts';
 import { Sim } from './game/sim.ts';
-import { Stage } from './game/stage.ts';
-import { STAGE_ORDER, STAGES } from './game/stages/index.ts';
-import { DIR_VEC, mod, TICKS_PER_BEAT, type Dir } from './game/types.ts';
+import { Stage, type StageDef } from './game/stage.ts';
+import { buildHub, hubReturnCell } from './game/stages/hub.ts';
+import { STAGE_ORDER, STAGES, tutorial } from './game/stages/index.ts';
+import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
 import { loadCleared, saveCleared } from './progress.ts';
 import { CLEAR, Renderer } from './render/renderer.ts';
 
 /**
+ * 遊ぶ流れ：タイトル →（はじめてならチュートリアル。S でスキップ）→ 拠点（家の中）→ 入口からステージへ → 結果 → 拠点へ戻る
+ *
  * 開発用の URL パラメータ
  *   ?autostart        タイトルを飛ばして始める
  *   ?seed=N           乱数のシードを固定する（危険物の開始位置が毎回同じになる）
- *   ?stage=NAME       ステージを選ぶ（既定は最初のステージ）
+ *   ?stage=NAME       タイトルから、拠点を通さずにそのステージを遊ぶ（TUTORIAL、TEST、HUB も指定できる）
+ *   ?cleared=A,B      クリアの記録をこの内容に差し替える（保存しない。拠点の見た目の確認用）
  *   ?view=X,Y,TICK    音を鳴らさず、TICK まで何もせず進めた状態でプレイヤーを (X,Y) に置いて静止表示する
  *   ?clear=SEC        音を鳴らさず、ゴールしてから SEC 秒後のクリア演出を静止表示する
  */
@@ -29,21 +33,22 @@ const input = new Input(window);
 const renderer = new Renderer(canvas);
 const conductor: Conductor = new Metronome();
 const sfx = new Sfx();
-const cleared = loadCleared();
-/** タイトルで選んでいるステージ（STAGE_ORDER の番号）。前のステージをクリアしていれば選べる */
-let selected = Math.max(0, STAGE_ORDER.findIndex((d) => d.name === params.get('stage')));
-const unlocked = (i: number) => i === 0 || cleared.has(STAGE_ORDER[i - 1].name) || STAGE_ORDER[i].name === params.get('stage');
-// ?stage=NAME は一覧にない TEST も含めて、クリアしていなくても選べる（開発用）
-let stage = new Stage(STAGES[params.get('stage') ?? ''] ?? STAGE_ORDER[selected]);
-let tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
-/** このクリアで新しく遊べるようになったステージ（結果の欄に出す） */
-let newlyUnlocked: string | null = null;
+/** クリアしたステージ（チュートリアルは、クリアかスキップで 'TUTORIAL' が入る） */
+const devCleared = params.get('cleared');
+const cleared = devCleared !== null ? new Set(devCleared.split(',').filter(Boolean)) : loadCleared();
+const save = () => {
+  if (devCleared === null) saveCleared(cleared);
+};
+renderer.portalNote = (name) => (cleared.has(name) ? 'CLEARED' : null);
 
-function selectStage(i: number): void {
-  selected = i;
-  stage = new Stage(STAGE_ORDER[i]);
-  tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
-}
+/** ?stage=NAME で直接遊ぶステージ */
+const devStage = params.get('stage');
+const devDef = (): StageDef | null => (devStage === 'HUB' ? buildHub(cleared) : (STAGES[devStage ?? ''] ?? null));
+
+let stage = new Stage(devDef() ?? STAGE_ORDER[0]);
+let tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
+/** このクリアで拠点に新しく現れた入口（結果の欄に出す） */
+let newlyUnlocked: string | null = null;
 
 const stageLabel = (name: string) => name.replace(/(\d+)$/, ' $1');
 
@@ -63,21 +68,49 @@ function clearSec(): number | null {
   return fixedClearSec ?? performance.now() / 1000 - clearedAt;
 }
 
-function newSim(): Sim {
-  seed = fixedSeed ?? randomSeed();
-  recorder = new InputRecorder();
-  return new Sim(stage, createRandom(seed));
+function setStage(def: StageDef): void {
+  stage = new Stage(def);
+  tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
 }
 
-async function startPlay(): Promise<void> {
+function newSim(start?: Vec): Sim {
+  seed = fixedSeed ?? randomSeed();
+  recorder = new InputRecorder();
+  return new Sim(stage, createRandom(seed), start);
+}
+
+/** def を遊び始める。start を渡すとそのマスから（拠点で、出てきた入口の前に戻すとき） */
+async function play(def: StageDef, start?: Vec): Promise<void> {
   if (scene === 'loading') return;
   scene = 'loading';
   conductor.stop();
   sfx.stop();
   input.clearPressed();
-  sim = newSim();
-  await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: 1 });
+  setStage(def);
+  sim = newSim(start);
+  // 拠点はカウントなしですぐ歩ける
+  await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: stage.kind === 'hub' ? 0 : 1 });
   scene = 'play';
+}
+
+/** 拠点へ。from はいま出てきたステージ（その入口の前に立つ） */
+function goHub(from?: string): void {
+  const hub = buildHub(cleared);
+  void play(hub, (from && hubReturnCell(hub, from)) || undefined);
+}
+
+/** タイトルから始める。はじめてならチュートリアル、そうでなければ拠点 */
+function startGame(): void {
+  const dev = devDef();
+  if (dev) void play(dev);
+  else if (!cleared.has(tutorial.name)) void play(tutorial);
+  else goHub();
+}
+
+function skipTutorial(): void {
+  cleared.add(tutorial.name);
+  save();
+  goHub();
 }
 
 function toTitle(): void {
@@ -86,7 +119,6 @@ function toTitle(): void {
   input.clearPressed();
   sim = null;
   scene = 'title';
-  if (STAGE_ORDER.includes(stage.def)) selectStage(selected);
 }
 
 function finishPlay(s: Sim): void {
@@ -97,15 +129,12 @@ function finishPlay(s: Sim): void {
   if (s.status === 'cleared') {
     clearedAt = performance.now() / 1000;
     sfx.clear(CLEAR.rows.map((r) => CLEAR.panel + r));
-    const i = STAGE_ORDER.findIndex((d) => d.name === s.stage.def.name);
-    if (i >= 0 && !cleared.has(s.stage.def.name)) {
-      cleared.add(s.stage.def.name);
-      saveCleared(cleared);
-      // 次のステージが開いたら、タイトルに戻ったときにそれを選んでおく
-      if (i + 1 < STAGE_ORDER.length) {
-        newlyUnlocked = STAGE_ORDER[i + 1].name;
-        selected = i + 1;
-      }
+    const name = s.stage.def.name;
+    if (!cleared.has(name)) {
+      cleared.add(name);
+      save();
+      const i = STAGE_ORDER.findIndex((d) => d.name === name);
+      if (i >= 0 && i + 1 < STAGE_ORDER.length) newlyUnlocked = STAGE_ORDER[i + 1].name;
     }
   }
   // 開発サーバーでは、最後まで遊んだ記録を playlogs/ に保存する（自動テストのプレイは残さない）
@@ -114,32 +143,53 @@ function finishPlay(s: Sim): void {
   }
 }
 
+/** 結果画面で Enter：チュートリアルをクリアしたら拠点へ、それ以外はもう一度 */
+function resultContinue(s: Sim): void {
+  if (s.stage.kind === 'tutorial' && s.status === 'cleared') goHub();
+  else void play(s.stage.def);
+}
+
+/** 結果画面で Esc：拠点へ戻る（?stage で直接遊んでいたときはタイトルへ） */
+function resultBack(s: Sim): void {
+  if (devDef()) toTitle();
+  else goHub(s.stage.def.name);
+}
+
 canvas.addEventListener('pointerdown', () => {
-  if ((scene === 'title' && unlocked(selected)) || scene === 'result') void startPlay();
+  if (scene === 'title') startGame();
+  else if (scene === 'result' && sim) resultContinue(sim);
 });
 
 function update(): void {
   const start = input.consumePressed('Enter') || input.consumePressed('Space');
   const esc = input.consumePressed('Escape');
   const retry = input.consumePressed('KeyR');
+  const skip = input.consumePressed('KeyS');
+  const tut = input.consumePressed('KeyT');
 
   if (scene === 'title') {
-    const prev = input.consumePressed('ArrowLeft') || input.consumePressed('KeyA');
-    const next = input.consumePressed('ArrowRight') || input.consumePressed('KeyD');
-    if (prev || next) selectStage(mod(selected + (next ? 1 : -1), STAGE_ORDER.length));
-    else if (start && (unlocked(selected) || !STAGE_ORDER.includes(stage.def))) void startPlay();
-  } else if (scene === 'result') {
+    if (start) startGame();
+    else if (skip && !cleared.has(tutorial.name)) skipTutorial();
+    else if (tut && cleared.has(tutorial.name)) void play(tutorial);
+  } else if (scene === 'result' && sim) {
     const e = clearSec();
     if (e !== null && e < CLEAR.end && (start || retry)) {
       // 演出の途中で押したら、数え終わったところまで飛ばす
       clearedAt = performance.now() / 1000 - CLEAR.end;
       sfx.stop();
-    } else if (start || retry) void startPlay();
-    else if (esc) toTitle();
+    } else if (start) resultContinue(sim);
+    else if (retry) void play(sim.stage.def);
+    else if (esc) resultBack(sim);
   } else if (scene === 'play' && sim) {
-    if (esc) return toTitle();
-    if (retry) {
-      void startPlay();
+    const kind = sim.stage.kind;
+    if (esc) {
+      if (kind === 'stage' && !devDef()) goHub(sim.stage.def.name);
+      else toTitle();
+      return;
+    }
+    if (kind === 'tutorial' && skip) return skipTutorial();
+    if (retry && kind !== 'hub') {
+      void play(sim.stage.def);
       return;
     }
     const now = Math.floor(conductor.songTime() / tickSec);
@@ -148,7 +198,10 @@ function update(): void {
       recorder.record(sim.tick + 1, held);
       sim.step(sim.tick + 1, held);
     }
-    if (sim.status !== 'playing') finishPlay(sim);
+    if (sim.status === 'portal') {
+      const target = STAGES[sim.portal!];
+      if (target) void play(target);
+    } else if (sim.status !== 'playing') finishPlay(sim);
   }
 }
 
@@ -164,29 +217,29 @@ function draw(): void {
   }
 
   if (scene === 'title') {
-    // 一覧にないステージ（?stage=TEST）は選べないので、矢印を出さない
-    const listed = STAGE_ORDER.includes(stage.def);
-    const open = !listed || unlocked(selected);
-    const len = stage.def.bars * 4 * (60 / stage.def.bpm);
+    const first = !cleared.has(tutorial.name);
+    const dev = devDef();
     renderer.overlay([
       { text: 'METROGRID', scale: 3 },
-      { text: '' },
-      { text: listed ? `<  ${stageLabel(stage.def.name)}  >` : stageLabel(stage.def.name), scale: 2, color: open ? '#e8e1d6' : '#5a554e' },
-      open
-        ? { text: `BPM ${stage.def.bpm}   ${Math.floor(len / 60)}:${String(Math.round(len % 60)).padStart(2, '0')}${cleared.has(stage.def.name) ? '   CLEARED' : ''}`, color: '#8d857a' }
-        : { text: `LOCKED: CLEAR ${stageLabel(STAGE_ORDER[selected - 1].name)} FIRST`, color: '#d0675a' },
+      { text: dev ? `DEV: ${stageLabel(dev.name)}` : '', color: '#8d857a' },
       { text: '' },
       { text: 'HOLD ARROWS (WASD) TO WALK' },
       { text: 'ONE STEP PER COUNT' },
       { text: 'FADED ROADS ARE FASTER: 1/4 1/8 1/16', color: '#8d857a' },
       { text: '' },
-      { text: open ? 'ENTER / SPACE / CLICK TO START' : 'LEFT / RIGHT: CHOOSE STAGE', color: '#e3c56e' },
-      { text: 'R: RETRY   ESC: TITLE', color: '#8d857a' },
+      { text: 'ENTER / SPACE / CLICK TO START', color: '#e3c56e' },
+      { text: first ? 'S: SKIP TUTORIAL' : 'T: PLAY TUTORIAL AGAIN', color: '#8d857a' },
     ]);
   } else if (sim && scene === 'result') {
     const e = clearSec();
+    const tutorialDone = sim.stage.kind === 'tutorial' && e !== null;
     if (e !== null) {
-      renderer.clearResult(sim, e, newlyUnlocked ? `NEW: ${stageLabel(newlyUnlocked)}` : null);
+      renderer.clearResult(
+        sim,
+        e,
+        newlyUnlocked ? `A NEW DOOR AT HOME: ${stageLabel(newlyUnlocked)}` : null,
+        tutorialDone ? 'ENTER: GO HOME   R: AGAIN' : 'ENTER: RETRY   ESC: HOME',
+      );
     } else {
       renderer.overlay([
         { text: 'TIME UP', scale: 3, color: '#d0675a' },
@@ -195,7 +248,7 @@ function draw(): void {
         { text: 'NO GOAL (SCORE KEPT)', color: '#8d857a' },
         { text: `MISS ${sim.misses}`, color: '#8d857a' },
         { text: '' },
-        { text: 'ENTER: RETRY   ESC: TITLE', color: '#e3c56e' },
+        { text: 'ENTER: RETRY   ESC: HOME', color: '#e3c56e' },
       ]);
     }
   }
@@ -223,14 +276,14 @@ if (params.has('view')) {
   const dir = (['up', 'down', 'left', 'right'] as Dir[]).find(
     (d) => stage.cell(g.x - DIR_VEC[d].x, g.y - DIR_VEC[d].y)?.terrain === 'floor',
   )!;
-  const t0 = 120 * TICKS_PER_BEAT;
+  const t0 = Math.min(120 * TICKS_PER_BEAT, sim.totalTicks / 2);
   for (let i = 0; i < t0; i++) sim.step(i, null);
   sim.debugPlace(g.x - DIR_VEC[dir].x, g.y - DIR_VEC[dir].y);
   for (let i = t0; sim.status === 'playing'; i++) sim.step(i, dir);
   fixedClearSec = Number(params.get('clear'));
   scene = 'result';
 } else if (params.has('autostart')) {
-  void startPlay();
+  startGame();
 }
 
 // 自動テスト（Playwright）から状態を読むための窓口。開発サーバーのときだけ

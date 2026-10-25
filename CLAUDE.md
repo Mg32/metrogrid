@@ -22,7 +22,9 @@
 | `npm run shot` | 主要な場面のスクリーンショットを `screenshots/` に保存する |
 | `npm run check` | typecheck → test → bots → e2e をまとめて |
 
-開発用 URL パラメータ：`?autostart`、`?seed=N`、`?stage=NAME`、`?view=X,Y,TICK`（音なしの静止表示）、`?clear=SEC`（ゴールして SEC 秒後のクリア演出の静止表示）。
+遊ぶ流れ：タイトル →（はじめてならチュートリアル。S でスキップ）→ 拠点（家の中）→ 光る入口からステージへ → 結果 → 拠点へ戻る。
+
+開発用 URL パラメータ：`?autostart`、`?seed=N`、`?stage=NAME`（拠点を通さず直接。TUTORIAL・HUB・TEST も可）、`?cleared=A,B`（クリアの記録を差し替える。保存しない）、`?view=X,Y,TICK`（音なしの静止表示）、`?clear=SEC`（ゴールして SEC 秒後のクリア演出の静止表示）。
 
 ## 変更したら確かめること
 
@@ -41,18 +43,20 @@
 - `src/game/` ゲームロジック。描画・音・DOM に依存しない。Node からそのまま実行できる。
   - `sim.ts` 本体。1tick = 十六分音符。同じステージ・シード・入力なら必ず同じ結果（決定的）。
   - `stage.ts` / `stages/` ステージ定義（文字グリッド2枚＋危険物・得点の定義）。新しいステージは `stages/index.ts` の `STAGE_ORDER` に登録。`test.ts` は単体テスト用の試作ステージ（一覧には載せない）。
-  - STAGE1・STAGE2 は `tools/stagegen/stage1.ts`・`stage2.ts` で組み立てて書き出している。調整はスクリプト側で行い `--write` で書き出す。
+  - TUTORIAL・STAGE1〜5 は `tools/stagegen/*.ts` で組み立てて書き出している。調整はスクリプト側で行い `--write` で書き出す。
+  - `stages/hub.ts` 拠点（家の中）。クリアの記録から組み立てる（クリアするたびに部屋と入口が増える）。時間制限・ゴール・危険物はない。
   - `hazard.ts` 危険物（巡回型・定位置型・箱ブランコ・流されていく物）。状態を持たず tick から位置が決まる。
   - `random.ts` シード付き乱数。ゲームロジックで `Math.random` を直接使わない。
   - `playlog.ts` プレイ記録の形式・記録・再生。
 - `src/audio/conductor.ts` 時間の基準（いまは仮のメトロノーム）。曲に差し替えるときは `Conductor` を実装する。`sfx.ts` は効果音（クリアのジングル）。
-- `src/progress.ts` クリアしたステージの記録（localStorage）。前のステージをクリアすると次がタイトルで選べる。`?stage=NAME` はクリアしていなくても選べる。
+- `src/progress.ts` クリアしたステージの記録（localStorage）。チュートリアルはクリアかスキップで 'TUTORIAL' が入る。
 - `src/render/` 描画。288x288 のバッファに描き、実画素で整数倍に拡大する。
 - `tools/bots/` ボット（`bots.ts` に一覧と目的）。`tools/replay.ts`、`tools/shot.ts`。
 - `tests/` 単体テスト、`e2e/` Playwright。
 
 ## 描画の決まり
 
+- 拠点（家の中）も、床だけが闇に浮かぶ。壁で囲わない。
 - ステージは屋外。闇に浮かぶ暗い道として描く。道以外（terrain の `#`）は何も描かない闇で、壁や外周で囲った「部屋」に見せない。小物（街灯・家の入口の断片など）だけが闇に浮かぶ。
 - 画面は 288x288。拡大は実画素で整数倍（見た目で x1〜x4）。
 - バッファへの描画は整数座標の `fillRect` / `drawImage` だけ。パス（`fill()`、`arc()` など）やアンチエイリアスされる文字描画は使わない（`e2e/pixel.spec.ts` が検出する）。

@@ -1,7 +1,7 @@
 /**
  * ボットに各ステージを遊ばせて成績を表にし、企画書の設計意図どおりか判定する。
  *
- *   npm run bots                      全ステージ（STAGE_ORDER）・全ボット
+ *   npm run bots                      全ステージ（BOT_STAGES：チュートリアルと STAGE_ORDER）・全ボット
  *   npm run bots -- --stage STAGE1    ステージを絞る（一覧にない TEST も指定できる）
  *   npm run bots -- --bot strong      ボットを絞る（判定は省略）
  *   npm run bots -- --seeds 10        シード数（既定 5、heavy なボットは最大 3）
@@ -13,7 +13,7 @@ import { parseArgs } from 'node:util';
 import { createRandom } from '../../src/game/random.ts';
 import { Sim } from '../../src/game/sim.ts';
 import { Stage } from '../../src/game/stage.ts';
-import { STAGE_ORDER, STAGES } from '../../src/game/stages/index.ts';
+import { BOT_STAGES, STAGES } from '../../src/game/stages/index.ts';
 import { TICKS_PER_BEAT } from '../../src/game/types.ts';
 import { BOTS, type BotDef } from './bots.ts';
 import { distanceField } from './nav.ts';
@@ -100,7 +100,7 @@ function pad(s: string | number, n: number, right = false): string {
 let failed = false;
 
 if (args.stage && !STAGES[args.stage]) throw new Error(`未知のステージ: ${args.stage}`);
-for (const def of args.stage ? [STAGES[args.stage]] : STAGE_ORDER) {
+for (const def of args.stage ? [STAGES[args.stage]] : BOT_STAGES) {
   const stage = new Stage(def);
   const songBeats = def.bars * 4;
   console.log(`\n=== ${def.name}（${def.bars}小節 = ${songBeats}拍, BPM ${def.bpm}） ===`);
@@ -130,9 +130,28 @@ for (const def of args.stage ? [STAGES[args.stage]] : STAGE_ORDER) {
   }
 
   if (args.bot) continue;
+  const get = (name: string) => results.get(name)!;
+
+  // チュートリアル：1本道の練習なので、本番の釣り合いの判定はしない。慎重に遊べば余裕を持ってゴールできるか
+  if (def.kind === 'tutorial') {
+    const checks: [string, boolean, string][] = [
+      ['何もしないとゴールできない', get('idle').clearRate === 0, `clear ${Math.round(get('idle').clearRate * 100)}%`],
+      ['慎重に遊べばミスなくゴールできる', get('careful').clearRate === 1 && get('careful').avgMisses === 0, `clear ${Math.round(get('careful').clearRate * 100)}%, miss ${get('careful').avgMisses.toFixed(1)}`],
+      [
+        '時間に余裕がある（曲の3割以上残る）',
+        (get('careful').avgRemain ?? 0) >= songBeats * 0.3,
+        `残り ${get('careful').avgRemain?.toFixed(1)}拍 / 下限 ${(songBeats * 0.3).toFixed(1)}拍`,
+      ],
+    ];
+    console.log('');
+    for (const [name, ok, detail] of checks) {
+      console.log(`${ok ? '✔' : '✘'} ${name}  (${detail})`);
+      if (!ok) failed = true;
+    }
+    continue;
+  }
 
   // 企画書の設計意図（第2.2節「単純なプレイが負ける理由」「バランスの目安」）と、ボット自体の検証
-  const get = (name: string) => results.get(name)!;
   const holds = ['up', 'down', 'left', 'right'].map((d) => get(`hold-${d}`));
   const others = [...results.values()].filter((s) => s.bot.name !== 'strong');
   const checks: [string, boolean, string][] = [

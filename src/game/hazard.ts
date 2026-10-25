@@ -14,11 +14,14 @@ export class PatrolHazard implements Hazard {
   readonly interval: number;
   /** 丸暗記対策の開始位置のずらし（route 上のインデックス） */
   readonly phase: number;
-  readonly look: 'kaisento' | null;
+  readonly look: 'kaisento' | 'tram' | 'koinobori' | null;
   readonly pivot: Vec | null;
+  /** 車両の長さ（マス） */
+  readonly length: number;
 
   constructor(def: Extract<HazardDef, { type: 'patrol' }>, phase: number) {
     this.look = def.look ?? null;
+    this.length = def.length ?? 1;
     this.pivot = def.pivot ? { x: def.pivot[0], y: def.pivot[1] } : null;
     const path: Vec[] = [];
     const pts = def.waypoints.map(([x, y]) => ({ x, y }));
@@ -56,7 +59,14 @@ export class PatrolHazard implements Hazard {
   }
 
   cellsAt(t: number): Vec[] {
-    return [this.posAt(t)];
+    const step = this.stepAt(t);
+    const cells = [this.posAtStep(step)];
+    // 車両の後ろの部分は、先頭が通ってきたマス（往復の折り返しでは重なる）
+    for (let k = 1; k < this.length; k++) {
+      const c = this.posAtStep(step - k);
+      if (!cells.some((p) => p.x === c.x && p.y === c.y)) cells.push(c);
+    }
+    return cells;
   }
 }
 
@@ -66,7 +76,7 @@ export class PeriodicHazard implements Hazard {
   readonly period: number;
   readonly from: number;
   readonly to: number;
-  readonly look: 'shishiodoshi' | null;
+  readonly look: 'shishiodoshi' | 'snow' | null;
   readonly pivot: Vec | null;
 
   constructor(def: Extract<HazardDef, { type: 'periodic' }>) {
@@ -99,8 +109,12 @@ export class SwingHazard implements Hazard {
   readonly period: number;
   readonly reach: number;
   readonly phase: number;
+  readonly look: 'pendulum' | 'fan' | null;
+  readonly pivot: Vec | null;
 
   constructor(def: Extract<HazardDef, { type: 'swing' }>, phase: number) {
+    this.look = def.look ?? null;
+    this.pivot = def.pivot ? { x: def.pivot[0], y: def.pivot[1] } : null;
     this.cells = def.cells.map(([x, y]) => ({ x, y }));
     this.axis = def.axis;
     for (let i = 1; i < this.cells.length; i++) {

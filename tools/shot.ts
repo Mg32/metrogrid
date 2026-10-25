@@ -41,6 +41,19 @@ const SCENES: [string, string][] = args.view
       ['s2-shishi', 'stage=STAGE2&view=37,9,92'],
       ['s2-rapids', 'stage=STAGE2&view=16,15,150'],
       ['s2-goal', 'stage=STAGE2&view=4,19,200'],
+      ['tutorial-start', 'stage=TUTORIAL&view=3,30,0'],
+      ['tutorial-fast', 'stage=TUTORIAL&view=16,19,20'],
+      ['hub-first', 'stage=HUB&cleared=TUTORIAL&view=6,11,0'],
+      ['hub-all', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4&view=6,8,0'],
+      ['s3-start', 'stage=STAGE3&view=5,49,0'],
+      ['s3-tram', 'stage=STAGE3&view=19,31,90'],
+      ['s3-late', 'stage=STAGE3&view=12,15,170'],
+      ['s4-start', 'stage=STAGE4&view=47,5,0'],
+      ['s4-koi', 'stage=STAGE4&view=30,8,60'],
+      ['s4-snow', 'stage=STAGE4&view=17,9,3'],
+      ['s5-start', 'stage=STAGE5&view=5,47,0'],
+      ['s5-fan', 'stage=STAGE5&view=11,27,40'],
+      ['s5-late', 'stage=STAGE5&view=13,15,90'],
     ];
 
 const scale = Number(args.scale);
