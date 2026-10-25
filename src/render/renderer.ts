@@ -190,16 +190,25 @@ export class Renderer {
     this.block = makeBlockSprite();
 
     // キャンバスの実画素サイズを正確に取る（CSSピクセル × dpr の丸め誤差でぼやけないように）
+    // devicePixelContentBoxSize がCSSサイズ×dprと食い違う環境（高DPIのエミュレーションなど）では計算値を使う
     const ro = new ResizeObserver(([entry]) => {
       const box = entry.devicePixelContentBoxSize?.[0];
-      this.devW = box ? box.inlineSize : Math.round(entry.contentRect.width * devicePixelRatio);
-      this.devH = box ? box.blockSize : Math.round(entry.contentRect.height * devicePixelRatio);
+      const estW = Math.round(entry.contentRect.width * devicePixelRatio);
+      const estH = Math.round(entry.contentRect.height * devicePixelRatio);
+      const ok = box && Math.abs(box.inlineSize - estW) <= 1 && Math.abs(box.blockSize - estH) <= 1;
+      this.devW = ok ? box.inlineSize : estW;
+      this.devH = ok ? box.blockSize : estH;
     });
     try {
       ro.observe(main, { box: 'device-pixel-content-box' });
     } catch {
       ro.observe(main);
     }
+  }
+
+  /** 拡大表示の配置（実画素）。自動テストでの検査用 */
+  get layout(): { scale: number; ox: number; oy: number; width: number; height: number } {
+    return { scale: this.scale, ox: this.ox, oy: this.oy, width: LW, height: LH };
   }
 
   begin(): void {

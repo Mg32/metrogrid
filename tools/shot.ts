@@ -1,0 +1,57 @@
+/**
+ * 主要な場面のスクリーンショットを screenshots/ に保存する（見た目を変えたあとの確認用）。
+ * 288x288 の画面を x2（576x576）で撮る。
+ *
+ *   npm run shot                                 既定の場面をすべて
+ *   npm run shot -- --view 12,5,40 --name foo    任意の位置と tick（?view と同じ）
+ *   npm run shot -- --scale 1                    等倍で撮る
+ */
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import { parseArgs } from 'node:util';
+import { chromium } from '@playwright/test';
+import { createServer } from 'vite';
+
+const { values: args } = parseArgs({
+  options: {
+    view: { type: 'string' },
+    name: { type: 'string', default: 'custom' },
+    scale: { type: 'string', default: '2' },
+    seed: { type: 'string', default: '1' },
+  },
+});
+
+/** 場面名と URL のクエリ。view は「X,Y,TICK」 */
+const SCENES: [string, string][] = args.view
+  ? [[args.name, `view=${args.view}`]]
+  : [
+      ['title', ''],
+      ['start', 'view=1,15,0'],
+      ['lane2-danger', 'view=11,11,24'],
+      ['lane3-stop', 'view=10,9,40'],
+      ['lane4-periodic', 'view=12,6,72'],
+      ['goal-area', 'view=20,3,100'],
+    ];
+
+const scale = Number(args.scale);
+const outDir = path.resolve(import.meta.dirname, '../screenshots');
+await mkdir(outDir, { recursive: true });
+
+const server = await createServer({ server: { port: 5181, strictPort: false }, logLevel: 'error' });
+await server.listen();
+const base = server.resolvedUrls!.local[0];
+const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'msedge' });
+
+try {
+  const page = await browser.newPage({ viewport: { width: 288 * scale, height: 288 * scale }, deviceScaleFactor: 1 });
+  for (const [name, query] of SCENES) {
+    await page.goto(`${base}?seed=${args.seed}&${query}`);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
+    const file = path.join(outDir, `${name}.png`);
+    await page.screenshot({ path: file });
+    console.log(path.relative(process.cwd(), file));
+  }
+} finally {
+  await browser.close();
+  await server.close();
+}

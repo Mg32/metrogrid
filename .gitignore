@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 自動テスト・確認用の出力
+screenshots
+test-results
+playwright-report

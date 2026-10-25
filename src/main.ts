@@ -1,11 +1,23 @@
 import './style.css';
 import { Metronome, type Conductor } from './audio/conductor.ts';
+import { InputRecorder, makePlayLog } from './game/playlog.ts';
+import { createRandom, randomSeed } from './game/random.ts';
 import { Sim } from './game/sim.ts';
 import { Stage } from './game/stage.ts';
-import { testStage } from './game/stages/test.ts';
+import { STAGES } from './game/stages/index.ts';
 import { TICKS_PER_BEAT } from './game/types.ts';
 import { Input } from './input.ts';
 import { Renderer } from './render/renderer.ts';
+
+/**
+ * 開発用の URL パラメータ
+ *   ?autostart        タイトルを飛ばして始める
+ *   ?seed=N           乱数のシードを固定する（危険物の開始位置が毎回同じになる）
+ *   ?stage=NAME       ステージを選ぶ（既定は TEST）
+ *   ?view=X,Y,TICK    音を鳴らさず、TICK まで何もせず進めた状態でプレイヤーを (X,Y) に置いて静止表示する
+ */
+const params = new URLSearchParams(location.search);
+const fixedSeed = params.has('seed') ? Number(params.get('seed')) : null;
 
 const canvas = document.createElement('canvas');
 document.querySelector<HTMLDivElement>('#app')!.append(canvas);
@@ -13,19 +25,29 @@ document.querySelector<HTMLDivElement>('#app')!.append(canvas);
 const input = new Input(window);
 const renderer = new Renderer(canvas);
 const conductor: Conductor = new Metronome();
-const stage = new Stage(testStage);
+const stage = new Stage(STAGES[params.get('stage') ?? 'TEST'] ?? STAGES.TEST);
 const tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
 
-type Scene = 'title' | 'loading' | 'play' | 'result';
+type Scene = 'title' | 'loading' | 'play' | 'result' | 'view';
 let scene: Scene = 'title';
 let sim: Sim | null = null;
+let seed = 0;
+let recorder = new InputRecorder();
+/** view のときに表示する tick */
+let viewTick = 0;
+
+function newSim(): Sim {
+  seed = fixedSeed ?? randomSeed();
+  recorder = new InputRecorder();
+  return new Sim(stage, createRandom(seed));
+}
 
 async function startPlay(): Promise<void> {
   if (scene === 'loading') return;
   scene = 'loading';
   conductor.stop();
   input.clearPressed();
-  sim = new Sim(stage);
+  sim = newSim();
   await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: 1 });
   scene = 'play';
 }
@@ -35,6 +57,16 @@ function toTitle(): void {
   input.clearPressed();
   sim = null;
   scene = 'title';
+}
+
+function finishPlay(s: Sim): void {
+  conductor.stop();
+  input.clearPressed();
+  scene = 'result';
+  // 開発サーバーでは、最後まで遊んだ記録を playlogs/ に保存する（自動テストのプレイは残さない）
+  if (import.meta.env.DEV && !navigator.webdriver) {
+    void fetch('/__playlog', { method: 'POST', body: JSON.stringify(makePlayLog(s, seed, recorder)) }).catch(() => {});
+  }
 }
 
 canvas.addEventListener('pointerdown', () => {
@@ -58,19 +90,20 @@ function update(): void {
       return;
     }
     const now = Math.floor(conductor.songTime() / tickSec);
-    while (sim.tick < now && sim.status === 'playing') sim.step(sim.tick + 1, input.current());
-    if (sim.status !== 'playing') {
-      conductor.stop();
-      input.clearPressed();
-      scene = 'result';
+    while (sim.tick < now && sim.status === 'playing') {
+      const held = input.current();
+      recorder.record(sim.tick + 1, held);
+      sim.step(sim.tick + 1, held);
     }
+    if (sim.status !== 'playing') finishPlay(sim);
   }
 }
 
 function draw(): void {
   renderer.begin();
   // 結果画面では止まった時点の様子を表示する
-  const songTime = scene === 'play' ? conductor.songTime() : sim ? Math.max(sim.tick, 0) * tickSec : 0;
+  const songTime =
+    scene === 'play' ? conductor.songTime() : scene === 'view' ? viewTick * tickSec : sim ? Math.max(sim.tick, 0) * tickSec : 0;
   if (sim && scene !== 'title') {
     renderer.world(sim, Math.max(songTime, 0), tickSec);
     if (scene !== 'loading') renderer.hud(sim, songTime, tickSec);
@@ -110,6 +143,32 @@ function frame(): void {
   requestAnimationFrame(frame);
 }
 
-// 開発用：?autostart でタイトルを飛ばす
-if (new URLSearchParams(location.search).has('autostart')) void startPlay();
+if (params.has('view')) {
+  const [x, y, t] = params.get('view')!.split(',').map(Number);
+  sim = newSim();
+  for (let i = 0; i <= t; i++) sim.step(i, null);
+  sim.debugPlace(x, y);
+  viewTick = t;
+  scene = 'view';
+} else if (params.has('autostart')) {
+  void startPlay();
+}
+
+// 自動テスト（Playwright）から状態を読むための窓口。開発サーバーのときだけ
+if (import.meta.env.DEV) {
+  Object.assign(window, {
+    __game: {
+      get scene() {
+        return scene;
+      },
+      get sim() {
+        return sim;
+      },
+      get layout() {
+        return renderer.layout;
+      },
+    },
+  });
+}
+
 requestAnimationFrame(frame);

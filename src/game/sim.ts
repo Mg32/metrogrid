@@ -23,13 +23,17 @@ const STUN_TICKS = TICKS_PER_BEAT;
 const STOP_TICKS = TICKS_PER_BEAT;
 const MAX_MULTIPLIER = 4;
 /** ゴール時の残り1拍あたりのボーナス */
-const GOAL_BONUS_PER_BEAT = 10;
+export const GOAL_BONUS_PER_BEAT = 10;
 
+/**
+ * ゲームロジック本体。描画や音に依存せず、同じステージ・乱数のシード・入力列なら必ず同じ結果になる。
+ * random は危険物の開始位置のずらしにだけ使う（createRandom(seed) を渡す）。
+ */
 export class Sim {
   readonly stage: Stage;
   readonly hazards: Hazard[];
   readonly totalTicks: number;
-  readonly scores: ScoreTile[];
+  scores: ScoreTile[];
 
   /** 最後に処理した tick */
   tick = -1;
@@ -74,6 +78,25 @@ export class Sim {
         }
       }
     }
+  }
+
+  /** 状態の複製（ボットの先読み用）。危険物は状態を持たないので共有する。events は引き継がない */
+  clone(): Sim {
+    const c = Object.create(Sim.prototype) as Sim;
+    Object.assign(c, this);
+    c.scores = this.scores.map((s) => ({ ...s }));
+    c.zoneEntry = { ...this.zoneEntry };
+    c.events = [];
+    c.gateClosedUntil = new Map(this.gateClosedUntil);
+    return c;
+  }
+
+  /** 開発用：プレイヤーを任意のマスに置く */
+  debugPlace(x: number, y: number): void {
+    this.x = this.fromX = x;
+    this.y = this.fromY = y;
+    this.zoneEntry = { x, y };
+    this.moveTick = -Infinity;
   }
 
   get multiplier(): number {

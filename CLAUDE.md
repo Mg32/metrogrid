@@ -1,0 +1,59 @@
+# metrogrid
+
+音楽の拍に合わせてキャラクターが移動・探索する 2D ミニゲーム（TypeScript + Vite + Canvas、依存ライブラリなし）。
+
+## 企画書が正
+
+- 企画内容は [docs/rhythm_exploration_game_planning_log_integrated_20261025.md](docs/rhythm_exploration_game_planning_log_integrated_20261025.md)。まず第1章（サマリ）と第2章（ゲームシステム仕様）を読む。
+- ステータス表記を区別する。**確定**・**暫定合意**は従う。**候補**・**提案（未評価）**は決定事項として扱わない。**不採用**は使わない。
+- 企画書の TODO（第2.4節）を実装の都合で仮に決めたときは、コード内のコメントと報告で明示する。企画書は勝手に書き換えない。
+- 第III部（検討の記録）は経緯であり、第I部・第II部と食い違えば第I部・第II部が優先。
+
+## コマンド
+
+| コマンド | 内容 |
+|---|---|
+| `npm run dev` | 開発サーバー。最後まで遊ぶとプレイ記録が `playlogs/` に保存される |
+| `npm run typecheck` | 型チェック（ゲーム本体と、テスト・ツール） |
+| `npm test` | 単体テスト（`node --test`。ゲームロジック・ステージ定義・決定性・プレイ記録の再生一致） |
+| `npm run bots` | ボットに遊ばせて成績表を出し、企画書の設計意図どおりか判定する（失敗で終了コード1） |
+| `npm run replay` | プレイ記録を再生して一致を確かめ、プレイの傾向（いた場所、ミス、得点）を集計する |
+| `npm run e2e` | Playwright（インストール済みの Edge）でスモークテストと、ドットがぼやけていないかの検査 |
+| `npm run shot` | 主要な場面のスクリーンショットを `screenshots/` に保存する |
+| `npm run check` | typecheck → test → bots → e2e をまとめて |
+
+開発用 URL パラメータ：`?autostart`、`?seed=N`、`?stage=NAME`、`?view=X,Y,TICK`（音なしの静止表示）。
+
+## 変更したら確かめること
+
+- ゲームロジック（`src/game/`）を変えた → `npm test` と `npm run bots`。
+- ルールを変えた（同じ入力で結果が変わる変更）→ [src/game/playlog.ts](src/game/playlog.ts) の `RULES_VERSION` を上げる。古いプレイ記録は再生一致の検査から外れる。
+- ステージを変えた・足した → `npm run bots` の判定を確認し、成績表の数字（安全ルートの残り拍数、強いボットとの差など）を報告する。
+- 見た目（`src/render/`）を変えた → `npm run e2e` と `npm run shot`、スクリーンショットを実際に見る。
+- 判定が失敗したら、ボットの誤りなのかゲームの設計の問題なのかを切り分けて報告する。判定の基準を黙って緩めない。
+
+## 構成
+
+- `src/game/` ゲームロジック。描画・音・DOM に依存しない。Node からそのまま実行できる。
+  - `sim.ts` 本体。1tick = 十六分音符。同じステージ・シード・入力なら必ず同じ結果（決定的）。
+  - `stage.ts` / `stages/` ステージ定義（文字グリッド2枚＋危険物・得点の定義）。新しいステージは `stages/index.ts` に登録。
+  - `hazard.ts` 危険物（巡回型・定位置型）。状態を持たず tick から位置が決まる。
+  - `random.ts` シード付き乱数。ゲームロジックで `Math.random` を直接使わない。
+  - `playlog.ts` プレイ記録の形式・記録・再生。
+- `src/audio/conductor.ts` 時間の基準（いまは仮のメトロノーム）。曲に差し替えるときは `Conductor` を実装する。
+- `src/render/` 描画。288x288 のバッファに描き、実画素で整数倍に拡大する。
+- `tools/bots/` ボット（`bots.ts` に一覧と目的）。`tools/replay.ts`、`tools/shot.ts`。
+- `tests/` 単体テスト、`e2e/` Playwright。
+
+## 描画の決まり
+
+- 画面は 288x288。拡大は実画素で整数倍（見た目で x1〜x4）。
+- バッファへの描画は整数座標の `fillRect` / `drawImage` だけ。パス（`fill()`、`arc()` など）やアンチエイリアスされる文字描画は使わない（`e2e/pixel.spec.ts` が検出する）。
+- 文字は内蔵の 3x5 ドットフォント（`src/render/font.ts`、英大文字・数字・記号のみ）。
+- クォータービューのタイルは横 24px・縦 12px。
+
+## コードの書き方
+
+- コメントは日本語。周りのコードの密度に合わせる。
+- import には `.ts` 拡張子を付ける（Node の型ストリップで直接実行するため）。
+- `erasableSyntaxOnly`：enum、namespace、コンストラクタ引数のプロパティ宣言は使わない。
