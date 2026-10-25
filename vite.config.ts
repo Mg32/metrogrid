@@ -37,6 +37,7 @@ function playlogPlugin(): Plugin {
 }
 
 export default defineConfig({
+  base: '/metrogrid/',
   plugins: [playlogPlugin()],
   server: {
     watch: { ignored: ['**/playlogs/**', '**/screenshots/**', '**/test-results/**', '**/playwright-report/**'] },
