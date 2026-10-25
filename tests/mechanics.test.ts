@@ -144,7 +144,7 @@ describe('得点と終了', () => {
     const s = mk('#...#', ' S G');
     run(s, 0, 9, 'right');
     assert.equal(s.status, 'cleared');
-    assert.equal(s.goalBonus, 31 * 10);
+    assert.equal(s.goalBonus, 31 * 2);
   });
 
   test('曲が終わると時間切れ', () => {

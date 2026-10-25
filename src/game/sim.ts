@@ -23,7 +23,7 @@ const STUN_TICKS = TICKS_PER_BEAT;
 const STOP_TICKS = TICKS_PER_BEAT;
 const MAX_MULTIPLIER = 4;
 /** ゴール時の残り1拍あたりのボーナス */
-export const GOAL_BONUS_PER_BEAT = 10;
+export const GOAL_BONUS_PER_BEAT = 2;
 
 /**
  * ゲームロジック本体。描画や音に依存せず、同じステージ・乱数のシード・入力列なら必ず同じ結果になる。
@@ -69,14 +69,25 @@ export class Sim {
     this.y = this.fromY = stage.start.y;
     this.zoneEntry = { ...stage.start };
     this.scores = [];
+    const candidates = new Map<string, { x: number; y: number }[]>();
     for (let y = 0; y < stage.height; y++) {
       for (let x = 0; x < stage.width; x++) {
         const obj = stage.cell(x, y)!.obj;
-        if (obj?.type === 'score') {
-          const s = stage.def.scores[obj.key];
-          this.scores.push({ x, y, value: s.value, decay: s.decay, alive: true });
-        }
+        if (obj?.type === 'score') candidates.set(obj.key, [...(candidates.get(obj.key) ?? []), { x, y }]);
       }
+    }
+    // pick があれば候補の中から選ぶ（丸暗記対策）
+    for (const [key, cells] of [...candidates].sort(([a], [b]) => a.localeCompare(b))) {
+      const s = stage.def.scores[key];
+      const chosen = [...cells];
+      if (s.pick !== undefined) {
+        for (let i = chosen.length - 1; i > 0; i--) {
+          const j = Math.floor(random() * (i + 1));
+          [chosen[i], chosen[j]] = [chosen[j], chosen[i]];
+        }
+        chosen.length = Math.min(s.pick, chosen.length);
+      }
+      for (const { x, y } of chosen) this.scores.push({ x, y, value: s.value, decay: s.decay, alive: true });
     }
   }
 

@@ -48,8 +48,8 @@ for (const c of CASES) {
       }, layout);
 
       expect(result.bad).toBe(0);
-      // アンチエイリアスがあると中間色が大量に出る
-      expect(result.colors).toBeLessThan(100);
+      // アンチエイリアスがあると中間色が数千色出る。影や光の半透明の重ね塗りで増える分は 256 色までを目安とする
+      expect(result.colors).toBeLessThan(256);
       // キャンバスの実画素がウィンドウの実画素と一致している
       expect(result.canvas).toEqual([Math.round(c.viewport.width * c.dpr), Math.round(c.viewport.height * c.dpr)]);
     });

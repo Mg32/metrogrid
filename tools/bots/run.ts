@@ -1,8 +1,8 @@
 /**
  * ボットに各ステージを遊ばせて成績を表にし、企画書の設計意図どおりか判定する。
  *
- *   npm run bots                      全ステージ・全ボット
- *   npm run bots -- --stage TEST      ステージを絞る
+ *   npm run bots                      全ステージ（STAGE_ORDER）・全ボット
+ *   npm run bots -- --stage STAGE1    ステージを絞る（一覧にない TEST も指定できる）
  *   npm run bots -- --bot strong      ボットを絞る（判定は省略）
  *   npm run bots -- --seeds 10        シード数（既定 5、heavy なボットは最大 3）
  *   BEAM_WIDTH=500 npm run bots       強いボットの探索幅
@@ -13,7 +13,7 @@ import { parseArgs } from 'node:util';
 import { createRandom } from '../../src/game/random.ts';
 import { Sim } from '../../src/game/sim.ts';
 import { Stage } from '../../src/game/stage.ts';
-import { STAGES } from '../../src/game/stages/index.ts';
+import { STAGE_ORDER, STAGES } from '../../src/game/stages/index.ts';
 import { TICKS_PER_BEAT } from '../../src/game/types.ts';
 import { BOTS, type BotDef } from './bots.ts';
 
@@ -31,6 +31,9 @@ interface RunResult {
   score: number;
   misses: number;
   pickups: number;
+  /** そのプレイで出ていた得点マスの数 */
+  tiles: number;
+  goalBonus: number;
   /** ゴールしたときの残り拍数 */
   remainBeats: number | null;
 }
@@ -44,6 +47,8 @@ function runBot(stage: Stage, bot: BotDef, seed: number): RunResult {
     score: sim.score,
     misses: sim.misses,
     pickups: sim.events.filter((e) => e.kind === 'pickup').length,
+    tiles: sim.scores.length,
+    goalBonus: sim.goalBonus,
     remainBeats: sim.status === 'cleared' ? Math.floor((sim.totalTicks - sim.tick) / TICKS_PER_BEAT) : null,
   };
 }
@@ -83,8 +88,8 @@ function pad(s: string | number, n: number, right = false): string {
 
 let failed = false;
 
-for (const def of Object.values(STAGES)) {
-  if (args.stage && def.name !== args.stage) continue;
+if (args.stage && !STAGES[args.stage]) throw new Error(`未知のステージ: ${args.stage}`);
+for (const def of args.stage ? [STAGES[args.stage]] : STAGE_ORDER) {
   const stage = new Stage(def);
   const songBeats = def.bars * 4;
   console.log(`\n=== ${def.name}（${def.bars}小節 = ${songBeats}拍, BPM ${def.bpm}） ===`);
@@ -130,6 +135,17 @@ for (const def of Object.values(STAGES)) {
     ],
     ['危険ゾーンを使うと安全な道より得', get('careful').avgScore > get('safe').avgScore, `careful ${Math.round(get('careful').avgScore)} > safe ${Math.round(get('safe').avgScore)}`],
     ['強引に突っ込むのは割に合わない', get('rush').avgScore < get('strong').avgScore, `rush ${Math.round(get('rush').avgScore)} < strong ${Math.round(get('strong').avgScore)}`],
+    // 「危険ゾーンをうまく使って稼いだ時間が、得点マスへの寄り道の余裕になる」
+    [
+      '強いボットは得点マスの半分以上に寄り道する',
+      get('strong').runs.every((r) => r.pickups >= r.tiles / 2),
+      get('strong').runs.map((r) => `${r.pickups}/${r.tiles}`).join(', '),
+    ],
+    [
+      'ゴールボーナスより得点マスの得点が大きい',
+      get('strong').runs.every((r) => r.goalBonus < r.score / 2),
+      get('strong').runs.map((r) => `bonus ${r.goalBonus} / ${r.score}`).join(', '),
+    ],
     [
       '強いボットがどのボットより強い（ボットの検証）',
       others.every((o) => get('strong').avgScore >= o.avgScore),

@@ -3,7 +3,7 @@ import { mod, type Vec } from './types.ts';
 
 /** 危険物。位置は tick から直接計算できる（状態を持たない） */
 export interface Hazard {
-  readonly kind: 'patrol' | 'periodic';
+  readonly kind: 'patrol' | 'periodic' | 'swing';
   /** tick t の時点で危険なマス */
   cellsAt(t: number): Vec[];
 }
@@ -14,8 +14,12 @@ export class PatrolHazard implements Hazard {
   readonly interval: number;
   /** 丸暗記対策の開始位置のずらし（route 上のインデックス） */
   readonly phase: number;
+  readonly look: 'kaisento' | null;
+  readonly pivot: Vec | null;
 
   constructor(def: Extract<HazardDef, { type: 'patrol' }>, phase: number) {
+    this.look = def.look ?? null;
+    this.pivot = def.pivot ? { x: def.pivot[0], y: def.pivot[1] } : null;
     const path: Vec[] = [];
     const pts = def.waypoints.map(([x, y]) => ({ x, y }));
     if (def.loop) pts.push(pts[0]);
@@ -80,9 +84,48 @@ export class PeriodicHazard implements Hazard {
   }
 }
 
+/**
+ * 箱ブランコ。座席の位置 u = reach × sin(2π(t + phase) / period)（マス単位、cells の中央が 0）。
+ * 座席の真下のマスだけが危険。振り切って cells の外（壁の上）にあるときは、どのマスも危険でない。
+ */
+export class SwingHazard implements Hazard {
+  readonly kind = 'swing';
+  readonly cells: Vec[];
+  readonly axis: 'x' | 'y';
+  readonly period: number;
+  readonly reach: number;
+  readonly phase: number;
+
+  constructor(def: Extract<HazardDef, { type: 'swing' }>, phase: number) {
+    this.cells = def.cells.map(([x, y]) => ({ x, y }));
+    this.axis = def.axis;
+    for (let i = 1; i < this.cells.length; i++) {
+      const a = this.cells[i - 1];
+      const b = this.cells[i];
+      const ok = def.axis === 'x' ? b.x === a.x + 1 && b.y === a.y : b.y === a.y + 1 && b.x === a.x;
+      if (!ok) throw new Error(`箱ブランコの cells は ${def.axis} 方向に連続して並べる`);
+    }
+    this.period = def.period;
+    this.reach = def.reach ?? (this.cells.length - 1) / 2 + 1.25;
+    this.phase = mod(phase, def.period);
+  }
+
+  /** 座席の位置（マス単位、cells の中央が 0）。t は小数でもよい（描画用） */
+  seatAt(t: number): number {
+    return this.reach * Math.sin((2 * Math.PI * (Math.max(0, t) + this.phase)) / this.period);
+  }
+
+  cellsAt(t: number): Vec[] {
+    if (t < 0) return [];
+    const i = Math.round(this.seatAt(t) + (this.cells.length - 1) / 2);
+    return i >= 0 && i < this.cells.length ? [this.cells[i]] : [];
+  }
+}
+
 export function createHazards(defs: HazardDef[], random: () => number): Hazard[] {
   return defs.map((d) => {
     if (d.type === 'patrol') return new PatrolHazard(d, Math.floor(random() * 1000));
+    if (d.type === 'swing') return new SwingHazard(d, Math.floor(random() * 1000));
     return new PeriodicHazard(d);
   });
 }

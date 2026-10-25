@@ -8,7 +8,7 @@ import type { Dir } from './types.ts';
  * ゲームのルール（Sim の挙動）を変えたら上げる。
  * 古い版のプレイ記録は再生結果が変わりうるので、一致の検査から外れる。
  */
-export const RULES_VERSION = 1;
+export const RULES_VERSION = 2;
 
 /** プレイ記録。ステージ・シード・入力の変化だけを残し、Sim で再生すれば同じ結果になる */
 export interface PlayLog {

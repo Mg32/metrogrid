@@ -4,7 +4,7 @@ import { InputRecorder, makePlayLog } from './game/playlog.ts';
 import { createRandom, randomSeed } from './game/random.ts';
 import { Sim } from './game/sim.ts';
 import { Stage } from './game/stage.ts';
-import { STAGES } from './game/stages/index.ts';
+import { STAGE_ORDER, STAGES } from './game/stages/index.ts';
 import { TICKS_PER_BEAT } from './game/types.ts';
 import { Input } from './input.ts';
 import { Renderer } from './render/renderer.ts';
@@ -13,7 +13,7 @@ import { Renderer } from './render/renderer.ts';
  * 開発用の URL パラメータ
  *   ?autostart        タイトルを飛ばして始める
  *   ?seed=N           乱数のシードを固定する（危険物の開始位置が毎回同じになる）
- *   ?stage=NAME       ステージを選ぶ（既定は TEST）
+ *   ?stage=NAME       ステージを選ぶ（既定は最初のステージ）
  *   ?view=X,Y,TICK    音を鳴らさず、TICK まで何もせず進めた状態でプレイヤーを (X,Y) に置いて静止表示する
  */
 const params = new URLSearchParams(location.search);
@@ -25,7 +25,7 @@ document.querySelector<HTMLDivElement>('#app')!.append(canvas);
 const input = new Input(window);
 const renderer = new Renderer(canvas);
 const conductor: Conductor = new Metronome();
-const stage = new Stage(STAGES[params.get('stage') ?? 'TEST'] ?? STAGES.TEST);
+const stage = new Stage(STAGES[params.get('stage') ?? ''] ?? STAGE_ORDER[0]);
 const tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
 
 type Scene = 'title' | 'loading' | 'play' | 'result' | 'view';
@@ -112,7 +112,7 @@ function draw(): void {
   if (scene === 'title') {
     renderer.overlay([
       { text: 'METROGRID', scale: 3 },
-      { text: 'PROTOTYPE / TEST STAGE', color: '#8d857a' },
+      { text: stage.def.name.replace(/(\d+)$/, ' $1'), color: '#8d857a' },
       { text: '' },
       { text: 'HOLD ARROWS (WASD) TO WALK' },
       { text: 'ONE STEP PER COUNT' },
