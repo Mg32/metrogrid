@@ -9,7 +9,7 @@ import { buildHub, hubReturnCell, UPSTAIRS } from './game/stages/hub.ts';
 import { STAGE_ORDER, STAGES, tutorial } from './game/stages/index.ts';
 import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
-import { loadCleared, loadTotal, saveCleared, saveTotal } from './progress.ts';
+import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
 import { ENDING } from './render/ending.ts';
 import { CLEAR, Renderer } from './render/renderer.ts';
 
@@ -28,6 +28,13 @@ import { CLEAR, Renderer } from './render/renderer.ts';
  *   ?clear=SEC        音を鳴らさず、ゴールしてから SEC 秒後のクリア演出を静止表示する
  *   ?ending=SEC       音を鳴らさず、エンディングの SEC 秒目を静止表示する
  *   ?total=N          これまでに溜めた得点をこの値に差し替える（保存しない）
+ */
+/*
+ * タッチ（スマホ）での操作
+ *   歩く：画面に指を置いたままにすると、少女から見て指のある方向へ歩く（指が右上なら上、右下なら右、左下なら下、左上なら左。
+ *         クォータービューの画面の斜めにそのまま対応する）。指を離すか、少女のすぐそばに指を置くと止まる
+ *   キーの代わり：画面の下の隅のボタン（戻る、やり直す、チュートリアルを飛ばす）。それ以外の場面ではタップが Enter の代わり
+ *   二階へ昇るかの確認は、YES を2回タップで決まる（取り返しがつかないので、うっかり1回では決まらないようにする）
  */
 const params = new URLSearchParams(location.search);
 const fixedSeed = params.has('seed') ? Number(params.get('seed')) : null;
@@ -49,6 +56,7 @@ renderer.portalNote = (name) => (cleared.has(name) ? 'CLEARED' : null);
 /** これまでに溜めた得点（エンディングで使われる） */
 const devTotal = params.get('total');
 let total = devTotal !== null ? Number(devTotal) : loadTotal();
+renderer.totalScore = total;
 
 /** ?stage=NAME で直接遊ぶステージ */
 const devStage = params.get('stage');
@@ -62,10 +70,69 @@ let newlyUnlocked: string | null = null;
 const stageLabel = (name: string) => name.replace(/(\d+)$/, ' $1');
 
 type Scene = 'title' | 'loading' | 'play' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
+
+/** タッチで遊んでいるか（はじめから指で操作する端末か、一度でも画面に触れたら） */
+let touchUI = matchMedia('(pointer: coarse)').matches;
+renderer.touchUI = touchUI;
+/** 歩く向きを決めている指（バッファ上の位置） */
+let steer: { id: number; x: number; y: number } | null = null;
+/** 指が少女からこの距離（バッファのドット）より近ければ止まる */
+const STEER_DEAD = 10;
+
+/** 指の位置から歩く向き：少女から見て右上は up、右下は right、左下は down、左上は left */
+function touchDir(): Dir | null {
+  const p = renderer.playerScreen;
+  if (!steer || !p) return null;
+  const dx = steer.x - p.x;
+  const dy = steer.y - p.y;
+  if (Math.hypot(dx, dy) < STEER_DEAD) return null;
+  if (dx > 0) return dy < 0 ? 'up' : 'right';
+  return dy > 0 ? 'down' : 'left';
+}
+
+interface Button {
+  label: string;
+  /** 押したことにするキー */
+  key: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  selected?: boolean;
+}
+
+/** ボタンの大きさ（バッファのドット）。スマホで指で押しやすいように大きめ */
+const BTN_W = 60;
+const BTN_H = 22;
+const left = (label: string, key: string): Button => ({ label, key, x: 4, y: 288 - BTN_H - 4, w: BTN_W, h: BTN_H });
+const right = (label: string, key: string): Button => ({ label, key, x: 288 - BTN_W - 4, y: 288 - BTN_H - 4, w: BTN_W, h: BTN_H });
+
+/** いまの場面のボタン（タイトルの RESET と確認の YES・NO はいつでも、ほかはタッチで遊んでいるときだけ） */
+function touchButtons(): Button[] {
+  if (scene === 'title') return [{ ...left('RESET', 'Delete'), w: 40 }];
+  if (scene === 'confirm') {
+    // 確認の画面の YES・NO の文字を囲む。YES は選んでから、もう一度で決まる
+    return [
+      { label: '', key: confirmYes ? 'Enter' : 'ArrowLeft', x: 288 / 2 - 62, y: 288 / 2 + 11, w: 64, h: 19, selected: confirmYes },
+      { label: '', key: 'Escape', x: 288 / 2 + 6, y: 288 / 2 + 11, w: 56, h: 19 },
+    ];
+  }
+  if (!touchUI) return [];
+  if (scene === 'result') return [left('HOME', 'Escape'), right('AGAIN', 'KeyR')];
+  if (scene === 'play' && sim) {
+    if (sim.stage.kind === 'hub') return [left('TITLE', 'Escape')];
+    if (sim.stage.kind === 'tutorial') return [left('BACK', 'Escape'), right('SKIP', 'KeyS')];
+    return [left('HOME', 'Escape'), right('RETRY', 'KeyR')];
+  }
+  return [];
+}
+
 let scene: Scene = 'title';
 let sim: Sim | null = null;
 let seed = 0;
 let recorder = new InputRecorder();
+/** sim.events のうち、効果音を鳴らし終えた数 */
+let heardEvents = 0;
 /** view のときに表示する tick */
 let viewTick = 0;
 /** ゴールした時刻（performance.now() の秒）。クリア演出の経過秒はここから数える。?clear では固定の経過秒 */
@@ -73,6 +140,28 @@ let clearedAt = 0;
 let fixedClearSec: number | null = null;
 /** 二階へ昇るかの確認で、YES を選んでいるか（はじめは NO） */
 let confirmYes = false;
+/** 何の確認か：二階へ昇る（エンディングへ）か、すべての記録を消して最初からやり直すか */
+let confirmKind: 'upstairs' | 'reset' = 'upstairs';
+
+/** タイトルの RESET：記録を消すかを確かめる */
+function openReset(): void {
+  input.clearPressed();
+  confirmKind = 'reset';
+  confirmYes = false;
+  scene = 'confirm';
+}
+
+/**
+ * すべてをリセットして、最初のチュートリアルからやり直す。クリアの記録と得点の総計を消す。
+ * ?cleared・?total で差し替えているときは、保存された記録には触れない
+ */
+function resetAll(): void {
+  cleared.clear();
+  total = 0;
+  renderer.totalScore = 0;
+  if (devCleared === null && devTotal === null) resetProgress();
+  void play(tutorial);
+}
 /** エンディングが始まった時刻（performance.now() の秒）。?ending では固定の経過秒 */
 let endingAt = 0;
 let fixedEndingSec: number | null = null;
@@ -115,6 +204,8 @@ async function play(def: StageDef, start?: Vec): Promise<void> {
   input.clearPressed();
   setStage(def);
   sim = newSim(start);
+  heardEvents = 0;
+  steer = null;
   // 拠点はカウントなしですぐ歩ける
   await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: stage.kind === 'hub' ? 0 : 1 });
   scene = 'play';
@@ -155,6 +246,7 @@ function finishPlay(s: Sim): void {
   newlyUnlocked = null;
   // これまでに溜めた得点（クリアでも時間切れでも、そのプレイの得点を足す）
   total += s.score;
+  renderer.totalScore = total;
   if (devTotal === null && devCleared === null) saveTotal(total);
   if (s.status === 'cleared') {
     clearedAt = performance.now() / 1000;
@@ -179,16 +271,59 @@ function resultContinue(s: Sim): void {
   else void play(s.stage.def);
 }
 
-/** 結果画面で Esc：拠点へ戻る（?stage で直接遊んでいたときはタイトルへ） */
+/**
+ * 結果画面で Esc（スマホでは HOME）：拠点へ戻る。ステージからは、?stage で直接遊んでいたときも拠点へ
+ * （拠点の、そのステージの入口の前に立つ）。?stage で直接遊んでいたチュートリアルなどはタイトルへ
+ */
 function resultBack(s: Sim): void {
-  if (devDef()) toTitle();
+  if (s.stage.kind !== 'stage' && devDef()) toTitle();
   else goHub(s.stage.def.name);
 }
 
-canvas.addEventListener('pointerdown', () => {
-  if (scene === 'title') startGame();
-  else if (scene === 'result' && sim) resultContinue(sim);
+// 音はキーやタップのイベントの処理の中で鳴らせるようにしておく（スマホでは、そうしないと音が出ない）
+const unlockAudio = () => {
+  conductor.unlock();
+  sfx.unlock();
+};
+window.addEventListener('keydown', unlockAudio);
+
+canvas.addEventListener('pointerdown', (e) => {
+  unlockAudio();
+  if (e.pointerType !== 'mouse') {
+    touchUI = true;
+    renderer.touchUI = true;
+  }
+  e.preventDefault();
+  const b = renderer.toBuffer(e.clientX, e.clientY);
+  const hit = touchButtons().find((btn) => b.x >= btn.x && b.x < btn.x + btn.w && b.y >= btn.y && b.y < btn.y + btn.h);
+  if (hit) {
+    input.press(hit.key);
+    return;
+  }
+  if (scene === 'play') {
+    // 指を置いた方向へ歩く（マウスでも、押しているあいだは同じ）
+    steer = { id: e.pointerId, x: b.x, y: b.y };
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {
+      // 指がもう離れているなど。捕まえられなくても歩ける
+    }
+  } else if (scene === 'title' || scene === 'result') {
+    input.press('Enter');
+  }
 });
+canvas.addEventListener('pointermove', (e) => {
+  if (steer?.id !== e.pointerId) return;
+  const b = renderer.toBuffer(e.clientX, e.clientY);
+  steer = { id: e.pointerId, x: b.x, y: b.y };
+});
+const endSteer = (e: PointerEvent) => {
+  if (steer?.id === e.pointerId) steer = null;
+};
+canvas.addEventListener('pointerup', endSteer);
+canvas.addEventListener('pointercancel', endSteer);
+// 長押しのメニューやスクロールを出さない
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 function update(): void {
   const start = input.consumePressed('Enter') || input.consumePressed('Space');
@@ -198,7 +333,8 @@ function update(): void {
   const tut = input.consumePressed('KeyT');
 
   if (scene === 'title') {
-    if (start) startGame();
+    if (input.consumePressed('Delete') || input.consumePressed('Backspace')) openReset();
+    else if (start) startGame();
     else if (skip && !cleared.has(tutorial.name)) skipTutorial();
     else if (tut && cleared.has(tutorial.name)) void play(tutorial);
   } else if (scene === 'result' && sim) {
@@ -214,8 +350,14 @@ function update(): void {
     // 左右で選び、Enter で決める。Esc は「いいえ」
     if (input.consumePressed('ArrowLeft') || input.consumePressed('KeyA')) confirmYes = true;
     if (input.consumePressed('ArrowRight') || input.consumePressed('KeyD')) confirmYes = false;
-    if (start && confirmYes) startEnding();
-    else if (esc || (start && !confirmYes)) goHub(UPSTAIRS);
+    const no = esc || (start && !confirmYes);
+    if (start && confirmYes) {
+      if (confirmKind === 'upstairs') startEnding();
+      else resetAll();
+    } else if (no) {
+      if (confirmKind === 'upstairs') goHub(UPSTAIRS);
+      else scene = 'title';
+    }
   } else if (scene === 'ending') {
     // エンディングは飛ばせない。終わると、ガレキだけが残った画面へ
     if (fixedEndingSec === null && endingSec() > ENDING.end + 2) {
@@ -225,7 +367,8 @@ function update(): void {
   } else if (scene === 'play' && sim) {
     const kind = sim.stage.kind;
     if (esc) {
-      if (kind === 'stage' && !devDef()) goHub(sim.stage.def.name);
+      // ステージからは拠点へ（?stage で直接遊んでいたときも）。チュートリアルと拠点からはタイトルへ
+      if (kind === 'stage') goHub(sim.stage.def.name);
       else toTitle();
       return;
     }
@@ -236,20 +379,38 @@ function update(): void {
     }
     const now = Math.floor(conductor.songTime() / tickSec);
     while (sim.tick < now && sim.status === 'playing') {
-      const held = input.current();
+      const held = touchDir() ?? input.current();
       recorder.record(sim.tick + 1, held);
       sim.step(sim.tick + 1, held);
+    }
+    // 得点マスを取った音
+    for (; heardEvents < sim.events.length; heardEvents++) {
+      if (sim.events[heardEvents].kind === 'pickup') sfx.pickup(sim.multiplier);
     }
     if (sim.status === 'portal' && sim.portal === UPSTAIRS) {
       conductor.stop();
       input.clearPressed();
       confirmYes = false;
+      confirmKind = 'upstairs';
       scene = 'confirm';
     } else if (sim.status === 'portal') {
       const target = STAGES[sim.portal!];
       if (target) void play(target);
     } else if (sim.status !== 'playing') finishPlay(sim);
   }
+}
+
+/** タイトル：闇に浮かぶ家と、その前に立つ少女。窓の明かりはクリアしたステージの数 */
+function drawTitle(): void {
+  // 遊び方は文字で書かず、チュートリアルで覚えてもらう（チュートリアルは途中でも S・SKIP で飛ばせる）
+  const dev = devDef();
+  const go = touchUI ? 'TAP TO START' : 'PRESS ENTER';
+  renderer.title(performance.now() / 1000, {
+    cleared: STAGE_ORDER.filter((d) => cleared.has(d.name)).length,
+    collapsed: false,
+    prompt: dev ? `${go} - DEV: ${stageLabel(dev.name)}` : go,
+    beatSec: 60 / 100,
+  });
 }
 
 function draw(): void {
@@ -260,29 +421,20 @@ function draw(): void {
   if (scene === 'ending') {
     renderer.ending(endingSec(), total);
   } else if (scene === 'ruins') {
-    renderer.ruinsTitle();
+    renderer.title(performance.now() / 1000, { cleared: 0, collapsed: true, prompt: null, beatSec: 0.6 });
   } else if (sim && scene !== 'title') {
     renderer.world(sim, songTime, tickSec, clearSec());
     // クリア演出のあいだは HUD を消す（得点は結果の欄で数え上げる）
     if (scene !== 'loading' && clearSec() === null) renderer.hud(sim, songTime, tickSec);
   }
 
-  if (scene === 'confirm') {
-    renderer.confirmUpstairs(confirmYes);
+  if (scene === 'confirm' && confirmKind === 'upstairs') {
+    renderer.confirm('REALLY GO UPSTAIRS?', 'THERE WILL BE NO TURNING BACK.', confirmYes);
+  } else if (scene === 'confirm') {
+    drawTitle();
+    renderer.confirm('ERASE ALL PROGRESS?', 'CLEARED STAGES AND TOTAL SCORE WILL BE LOST.', confirmYes);
   } else if (scene === 'title') {
-    const first = !cleared.has(tutorial.name);
-    const dev = devDef();
-    renderer.overlay([
-      { text: 'METROGRID', scale: 3 },
-      { text: dev ? `DEV: ${stageLabel(dev.name)}` : '', color: '#8d857a' },
-      { text: '' },
-      { text: 'HOLD ARROWS (WASD) TO WALK' },
-      { text: 'ONE STEP PER COUNT' },
-      { text: 'FADED ROADS ARE FASTER: 1/4 1/8 1/16', color: '#8d857a' },
-      { text: '' },
-      { text: 'ENTER / SPACE / CLICK TO START', color: '#e3c56e' },
-      { text: first ? 'S: SKIP TUTORIAL' : 'T: PLAY TUTORIAL AGAIN', color: '#8d857a' },
-    ]);
+    drawTitle();
   } else if (sim && scene === 'result') {
     const e = clearSec();
     const tutorialDone = sim.stage.kind === 'tutorial' && e !== null;
@@ -291,7 +443,7 @@ function draw(): void {
         sim,
         e,
         newlyUnlocked ? `A NEW DOOR AT HOME: ${stageLabel(newlyUnlocked)}` : null,
-        tutorialDone ? 'ENTER: GO HOME   R: AGAIN' : 'ENTER: RETRY   ESC: HOME',
+        touchUI ? (tutorialDone ? 'TAP: GO HOME' : 'TAP: RETRY') : tutorialDone ? 'ENTER: GO HOME   R: AGAIN' : 'ENTER: RETRY   ESC: HOME',
       );
     } else {
       renderer.overlay([
@@ -301,11 +453,12 @@ function draw(): void {
         { text: 'NO GOAL (SCORE KEPT)', color: '#8d857a' },
         { text: `MISS ${sim.misses}`, color: '#8d857a' },
         { text: '' },
-        { text: 'ENTER: RETRY   ESC: HOME', color: '#e3c56e' },
+        { text: touchUI ? 'TAP: RETRY' : 'ENTER: RETRY   ESC: HOME', color: '#e3c56e' },
       ]);
     }
   }
 
+  renderer.buttons(touchButtons());
   renderer.present();
 }
 

@@ -38,6 +38,16 @@ export function saveTotal(total: number): void {
   }
 }
 
+/** すべての記録を消す（タイトルの RESET から。プレイヤーが自分で選んだときだけ） */
+export function resetProgress(): void {
+  try {
+    localStorage.removeItem(KEY);
+    localStorage.removeItem(TOTAL_KEY);
+  } catch {
+    // 消せなくても、この場の記録は空にして続ける
+  }
+}
+
 export function saveCleared(cleared: Set<string>): void {
   try {
     localStorage.setItem(KEY, JSON.stringify([...cleared]));

@@ -1,5 +1,5 @@
 /**
- * 効果音（曲とは別。クリアのジングルと、エンディングの音）。
+ * 効果音（曲とは別。得点マスを取った音、クリアのジングル、エンディングの音）。
  * プレイ開始のキー操作のあとに鳴らすので、AudioContext はその時点で作ってよい
  */
 export class Sfx {
@@ -106,12 +106,35 @@ export class Sfx {
     }
   }
 
+  /** 音を鳴らせるようにする（タップやキーのイベントの処理の中で呼ぶ。スマホでは、そうしないと音が出ない） */
+  unlock(): void {
+    this.ctx ??= new AudioContext();
+    void this.ctx.resume();
+  }
+
+  /**
+   * 得点マスを取った音：短く2音上がる。連続で取って倍率が上がるほど高くなる（倍率 1 で C6、1 上がるごとに全音ずつ）。
+   * クリアのジングルとは別の出口から鳴らすので、stop() では止まらない
+   */
+  pickup(multiplier: number): void {
+    this.ctx ??= new AudioContext();
+    const ctx = this.ctx;
+    const out = ctx.createGain();
+    out.gain.value = 0.18;
+    out.connect(ctx.destination);
+    const now = ctx.currentTime + 0.01;
+    const base = 1046.5 * 2 ** ((Math.min(multiplier, 8) - 1) / 6);
+    this.note(now, base, 0.07, 'square', 0.5, out);
+    this.note(now + 0.06, base * 1.5, 0.22, 'square', 0.45, out);
+    setTimeout(() => out.disconnect(), 600);
+  }
+
   stop(): void {
     this.master?.disconnect();
     this.master = null;
   }
 
-  private note(at: number, freq: number, len: number, type: OscillatorType, level: number): void {
+  private note(at: number, freq: number, len: number, type: OscillatorType, level: number, out: AudioNode = this.master!): void {
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const env = ctx.createGain();
@@ -120,7 +143,7 @@ export class Sfx {
     env.gain.setValueAtTime(0, at);
     env.gain.linearRampToValueAtTime(level, at + 0.01);
     env.gain.exponentialRampToValueAtTime(0.001, at + len);
-    osc.connect(env).connect(this.master!);
+    osc.connect(env).connect(out);
     osc.start(at);
     osc.stop(at + len + 0.05);
   }

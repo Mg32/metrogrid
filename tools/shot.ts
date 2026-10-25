@@ -27,6 +27,9 @@ const SCENES: [string, string][] = args.view
   ? [[args.name, `view=${args.view}${args.stage ? `&stage=${args.stage}` : ''}`]]
   : [
       ['title', ''],
+      ['title-progress', 'cleared=TUTORIAL,STAGE1,STAGE2,STAGE3'],
+      ['tutorial-stop', 'stage=TUTORIAL&view=11,13,60'],
+      ['tutorial-stop-on', 'stage=TUTORIAL&view=11,11,60'],
       ['start', 'view=5,38,0'],
       ['early', 'view=12,31,40'],
       ['middle-kaisento', 'view=10,24,90'],
@@ -44,7 +47,7 @@ const SCENES: [string, string][] = args.view
       ['tutorial-start', 'stage=TUTORIAL&view=3,30,0'],
       ['tutorial-fast', 'stage=TUTORIAL&view=16,19,20'],
       ['hub-first', 'stage=HUB&cleared=TUTORIAL&view=6,11,0'],
-      ['hub-all', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4&view=6,8,0'],
+      ['hub-all', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4&total=48210&view=6,8,0'],
       ['s3-start', 'stage=STAGE3&view=5,49,0'],
       ['s3-tram', 'stage=STAGE3&view=19,31,90'],
       ['s3-late', 'stage=STAGE3&view=12,15,170'],

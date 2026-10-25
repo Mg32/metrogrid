@@ -77,6 +77,9 @@ const C = {
   light: '#9cc6ff',
   lightCore: '#e6f2ff',
   lightDeep: '#4f7fd0',
+  warm: '#c9a467',
+  warmDim: '#8a6c45',
+  mote: '#5d5a66',
   dust: '#6f685e',
   dustLight: '#8d867a',
   text: '#e8e1d6',
@@ -314,6 +317,91 @@ export function drawEnding(ctx: CanvasRenderingContext2D, t: number, total: numb
   }
 }
 
+/**
+ * タイトル：闇に浮かぶ家と、その前に立つ少女。家はゆっくり上下に漂い、闇には細かな塵が漂う。
+ * cleared はクリアしたステージの数で、その数だけ窓に暖かい明かりがともる（拠点と同じく、家が少しずつ元に戻っていく）。
+ * collapsed ならエンディングのあとで、家はなくガレキの山だけが残っていて、少女もいない。
+ * 文字はタイトルのロゴと、prompt（はじめ方の一言。null なら出さない）だけ
+ */
+export function drawTitle(
+  ctx: CanvasRenderingContext2D,
+  t: number,
+  opts: { cleared: number; collapsed: boolean; prompt: string | null; beatSec: number },
+  sprites: EndingSprites,
+): void {
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, W, H);
+  motes(ctx, t);
+
+  // 家と土地は、ゆっくり上下に漂う
+  const bob = Math.round(Math.sin(t * 0.8) * 2);
+  ctx.save();
+  ctx.translate(0, bob + 18);
+  const P = (gx: number, gy: number, h: number): P => ({ x: Math.round(OX + (gx - gy) * 12), y: Math.round(OY + (gx + gy) * 6 - h) });
+  const quad = (pts: [number, number, number][], color: string) => fillQuad(ctx, pts.map(([x, y, h]) => P(x, y, h)), color);
+  lot(ctx);
+  if (opts.collapsed) {
+    rubble(ctx, 1);
+  } else {
+    house(ctx, 0, 0, quad, P, sprites, opts.cleared);
+    // 明かりのともった窓の下の土に、うっすら光が落ちる
+    for (const [i, w] of WINDOWS.entries()) {
+      if (i >= opts.cleared || w.h0 >= F1) continue;
+      const mid = (w.u0 + w.u1) / 2;
+      const q = w.face === 'y' ? P(mid, 5.6, 0) : P(6.6, mid, 0);
+      ctx.globalAlpha = 0.1;
+      fillEllipse(ctx, q.x, q.y, 7, 2, C.warm);
+      ctx.globalAlpha = 1;
+    }
+    // 少女：玄関の前の敷石に立って、拍に合わせて身体を揺らしている
+    const g = P(1.2, 6.2, 0);
+    const dip = (t % opts.beatSec) / opts.beatSec < 0.5 ? 1 : 0;
+    ctx.globalAlpha = 0.35;
+    fillEllipse(ctx, g.x, g.y, 4, 1, '#000');
+    ctx.globalAlpha = 1;
+    const img = sprites.front[0];
+    // 腰から上だけを沈める（ステージ中の少女と同じ揺れ方）
+    const waist = 17;
+    ctx.drawImage(img, 0, waist, img.width, img.height - waist, g.x - GIRL_FOOT_X, g.y - GIRL_FOOT_Y + waist, img.width, img.height - waist);
+    ctx.drawImage(img, 0, 0, img.width, waist, g.x - GIRL_FOOT_X, g.y - GIRL_FOOT_Y + dip, img.width, waist);
+  }
+  ctx.restore();
+
+  logo(ctx, t, opts.collapsed);
+  if (opts.prompt && Math.floor(t * 1.6) % 2 === 0) {
+    const scale = 1;
+    const tw = textWidth(opts.prompt, scale);
+    drawText(ctx, opts.prompt, Math.round(W / 2 - tw / 2) + 1, 257, scale, C.bg);
+    drawText(ctx, opts.prompt, Math.round(W / 2 - tw / 2), 256, scale, C.text);
+  }
+}
+
+/** タイトルのロゴ。大きな文字の下に、細い線を一本。エンディングのあとは色が沈む */
+function logo(ctx: CanvasRenderingContext2D, t: number, collapsed: boolean): void {
+  const text = 'METROGRID';
+  const scale = 4;
+  const tw = textWidth(text, scale);
+  const x = Math.round(W / 2 - tw / 2);
+  const y = 30;
+  drawText(ctx, text, x + 2, y + 2, scale, '#000');
+  drawText(ctx, text, x, y, scale, collapsed ? C.textDim : C.text);
+  // 線は、ゆっくり左右へ伸び縮みする（呼吸のように）
+  const half = Math.round(tw / 2 - 6 - Math.sin(t * 0.8) * 4);
+  ctx.fillStyle = collapsed ? C.rubbleWoodDark : C.textDim;
+  ctx.fillRect(W / 2 - half, y + GLYPH_H * scale + 6, half * 2, 1);
+}
+
+/** 闇に漂う細かな塵：ゆっくり上へ流れ、ときどき瞬く */
+function motes(ctx: CanvasRenderingContext2D, t: number): void {
+  for (let i = 0; i < 48; i++) {
+    const x = Math.round((hash(i) * W + Math.sin(t * 0.3 + i) * 6 + W) % W);
+    const y = Math.round((((hash(i + 100) * H - t * (4 + hash(i + 200) * 6)) % H) + H) % H);
+    if (hash(i + 300 + Math.floor(t * 2)) < 0.15) continue;
+    ctx.fillStyle = hash(i + 400) < 0.2 ? C.textDim : C.mote;
+    ctx.fillRect(x, y, 1, 1);
+  }
+}
+
 /** 家の建っていた土地：闇に浮かぶ板。上面は土と敷石 */
 function lot(ctx: CanvasRenderingContext2D): void {
   const pt = (gx: number, gy: number, h = 0): P => ({ x: Math.round(OX + (gx - gy) * 12), y: Math.round(OY + (gx + gy) * 6 - h) });
@@ -349,6 +437,7 @@ function house(
   quad: (pts: [number, number, number][], color: string) => void,
   P: (gx: number, gy: number, h: number) => P,
   sprites: EndingSprites,
+  warm = 0,
 ): void {
   const faceQuad = (face: 'x' | 'y', u0: number, u1: number, h0: number, h1: number, plane: number, color: string) =>
     face === 'y'
@@ -371,12 +460,13 @@ function house(
   faceQuad('y', 5.0, 5.6, F1 + 2, F1 + 12, F2_FRONT, C.stain);
   faceQuad('x', 2.8, 3.3, F1 + 4, F1 + 16, 6, C.stain);
 
-  // 窓：ふだんは暗い。光が強まると、家の窓という窓から少女と同じ青い光が漏れる
-  for (const w of WINDOWS) {
+  // 窓：ふだんは暗い（タイトルでは、はじめの warm 枚に暖かい明かりがともる）。
+  // 光が強まると、家の窓という窓から少女と同じ青い光が漏れる
+  for (const [i, w] of WINDOWS.entries()) {
     const plane = w.face === 'y' ? (w.h0 >= F1 ? F2_FRONT : 5) : 6;
     faceQuad(w.face, w.u0 - 0.08, w.u1 + 0.08, w.h0 - 1, w.h1 + 1, plane, C.woodDark);
     const glow = clamp01((L - w.at) / 0.2);
-    faceQuad(w.face, w.u0, w.u1, w.h0, w.h1, plane, glow > 0 ? C.lightDeep : C.glass);
+    faceQuad(w.face, w.u0, w.u1, w.h0, w.h1, plane, glow > 0 ? C.lightDeep : i < warm ? C.warm : C.glass);
     if (glow > 0) {
       ctx.globalAlpha = glow;
       faceQuad(w.face, w.u0, w.u1, w.h0, w.h1, plane, C.light);

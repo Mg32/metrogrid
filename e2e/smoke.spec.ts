@@ -48,6 +48,30 @@ test('はじめてはチュートリアルから。S でスキップすると拠
   expect(errors).toEqual([]);
 });
 
+test('タイトルの RESET：確認で NO ならそのまま、YES なら記録を消してチュートリアルから', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto('/?seed=1');
+  await page.evaluate(() => {
+    localStorage.setItem('metrogrid.cleared', JSON.stringify(['TUTORIAL', 'STAGE1']));
+    localStorage.setItem('metrogrid.total', '12345');
+  });
+  await page.goto('/?seed=1');
+  await frames(page);
+  await page.keyboard.press('Delete');
+  await expect.poll(async () => (await game(page)).scene).toBe('confirm');
+  await page.keyboard.press('Enter'); // はじめは NO
+  await expect.poll(async () => (await game(page)).scene).toBe('title');
+  expect(await page.evaluate(() => localStorage.getItem('metrogrid.total'))).toBe('12345');
+
+  await page.keyboard.press('Delete');
+  await expect.poll(async () => (await game(page)).scene).toBe('confirm');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('TUTORIAL');
+  expect(await page.evaluate(() => [localStorage.getItem('metrogrid.cleared'), localStorage.getItem('metrogrid.total')])).toEqual([null, null]);
+  expect(errors).toEqual([]);
+});
+
 test('拠点の入口は、前のステージをクリアすると増える', async ({ page }) => {
   const portals = () =>
     page.evaluate(() => {

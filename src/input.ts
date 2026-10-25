@@ -51,6 +51,11 @@ export class Input {
     return this.pressed.delete(code);
   }
 
+  /** キーを押したことにする（タッチのボタンから。キーと同じ道を通す） */
+  press(code: string): void {
+    this.pressed.add(code);
+  }
+
   clearPressed(): void {
     this.pressed.clear();
   }

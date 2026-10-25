@@ -7,6 +7,11 @@ export interface Conductor {
   /** 再生開始。countInBars 小節のカウントのあと songTime() = 0 になる */
   start(opts: { bpm: number; bars: number; countInBars: number }): Promise<void>;
   stop(): void;
+  /**
+   * 音を鳴らせるようにする。スマホ（特に iOS）では、タップやキーのイベントの処理の中で呼ばないと音が出ない。
+   * 何度呼んでもよい
+   */
+  unlock(): void;
   /** 曲の頭からの経過秒（実際に聞こえている位置）。カウント中は負 */
   songTime(): number;
 }
@@ -20,6 +25,11 @@ export class Metronome implements Conductor {
   private endBeat = 0;
   private timer = 0;
   private master: GainNode | null = null;
+
+  unlock(): void {
+    this.ctx ??= new AudioContext({ latencyHint: 'interactive' });
+    void this.ctx.resume();
+  }
 
   async start(opts: { bpm: number; bars: number; countInBars: number }): Promise<void> {
     this.stop();

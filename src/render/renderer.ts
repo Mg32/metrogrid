@@ -17,7 +17,7 @@ import {
   TH,
   TW,
 } from './pixel.ts';
-import { drawEnding, ENDING } from './ending.ts';
+import { drawEnding, drawTitle } from './ending.ts';
 import { GIRL_FOOT_X, GIRL_FOOT_Y, GIRL_FRAMES, GIRL_H, GIRL_RAISE, GIRL_W, GIRL_WAIST_Y, paintGirl } from './girl.ts';
 
 /**
@@ -83,6 +83,28 @@ const FLOOR_STYLES = Object.keys(FLOOR_LIGHT) as FloorStyle[];
 /** 遊具の柱、ブランコの枠などの高さ */
 const POLE_H = 26;
 const FRAME_H = 22;
+/** 振り子を描くときの、グリッドの1マスの長さ（高さのドットと同じ単位にそろえる。クォータービューでの1マスの見た目の長さ） */
+const CELL_LEN = 14;
+/** 振り切ったときの竿の傾き（真下からの角度）の上限 */
+const MAX_SWING_ANGLE = (70 * Math.PI) / 180;
+
+/**
+ * 振り子の竿の長さ（ドット）。振れ幅 reach（マス）を、MAX_SWING_ANGLE までの傾きで振り切れる長さ。
+ * minLength より短くはしない
+ */
+function pendulumLength(reach: number, minLength: number): number {
+  return Math.max(minLength, Math.ceil(((reach + 0.5) * CELL_LEN) / Math.sin(MAX_SWING_ANGLE)));
+}
+
+/**
+ * 支点の高さ pivotH（ドット）から長さ length の竿で吊った錘が、振れの向きに u マス（支点の真下が 0）ずれたときの、錘の高さ（ドット）。
+ * 錘は支点を中心とする円の上を動くので、竿の長さは変わらず、振れるほど持ち上がる。
+ * 錘の真下（地面に落とした位置）は u のままなので、危険なマス（錘の真下のマス）と見た目がずれない
+ */
+function pendulumHeight(u: number, length: number, pivotH: number): number {
+  const d = Math.min(Math.abs(u) * CELL_LEN, length);
+  return pivotH - Math.sqrt(length * length - d * d);
+}
 /** ほかの家の入口の断片と玄関の高さ */
 const FACADE_H = 20;
 
@@ -107,8 +129,12 @@ const COLORS = {
   gem: '#e3c56e',
   gemDark: '#9c7f35',
   goal: '#cfe3f0',
-  stop: '#77707f',
-  stopReady: '#b8b0c0',
+  // 停止マス（ぐらつく踏み石）
+  stop: '#c2b8a0',
+  stopSide: '#6d6658',
+  stopMark: '#4a4438',
+  stopEdge: '#e0a050',
+  stopReady: '#9fc98a',
   arrow: '#26242c',
   text: '#e8e1d6',
   textDim: '#8d857a',
@@ -481,6 +507,42 @@ export class Renderer {
   }
 
   /** 拡大表示の配置（実画素）。自動テストでの検査用 */
+  /** これまでに溜めた得点の総計（拠点の画面に出す）。main.ts が設定する */
+  totalScore = 0;
+  /** タッチで遊んでいるか（ボタンを出し、キーの案内を出さない）。main.ts が設定する */
+  touchUI = false;
+  /** 直前に描いた少女の、画面（288x288 のバッファ）上の位置（体の中ほど）。タッチで歩く向きを決めるのに使う */
+  playerScreen: { x: number; y: number } | null = null;
+
+  /** ページ上の座標（clientX, clientY）→ 288x288 のバッファ上の座標 */
+  toBuffer(clientX: number, clientY: number): { x: number; y: number } {
+    const rect = this.main.getBoundingClientRect();
+    const dx = (clientX - rect.left) * (this.main.width / rect.width);
+    const dy = (clientY - rect.top) * (this.main.height / rect.height);
+    return { x: (dx - this.ox) / this.scale, y: (dy - this.oy) / this.scale };
+  }
+
+  /** タッチ用のボタン（バッファ上の矩形）。selected は選んでいる状態（確認の YES など） */
+  buttons(list: { label: string; x: number; y: number; w: number; h: number; selected?: boolean }[]): void {
+    const ctx = this.lctx;
+    for (const b of list) {
+      // ラベルのないボタンは、もとからある文字を枠で囲むだけ（下地を塗らない）
+      if (b.label) {
+        ctx.globalAlpha = 0.7;
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.globalAlpha = 1;
+      }
+      const edge = b.selected ? COLORS.gem : COLORS.dot;
+      ctx.fillStyle = edge;
+      ctx.fillRect(b.x, b.y, b.w, 1);
+      ctx.fillRect(b.x, b.y + b.h - 1, b.w, 1);
+      ctx.fillRect(b.x, b.y, 1, b.h);
+      ctx.fillRect(b.x + b.w - 1, b.y, 1, b.h);
+      this.text(b.label, b.x + b.w / 2, b.y + b.h / 2, 1, b.selected ? COLORS.gem : COLORS.text, 'center');
+    }
+  }
+
   get layout(): { scale: number; ox: number; oy: number; width: number; height: number } {
     return { scale: this.scale, ox: this.ox, oy: this.oy, width: LW, height: LH };
   }
@@ -546,6 +608,7 @@ export class Renderer {
     const offY = Math.round(LH / 2 - this.camY - 8);
     ctx.save();
     ctx.translate(offX, offY);
+    this.playerScreen = { x: p.sx + offX, y: p.sy + offY + TH / 2 - 10 };
 
     // クリア演出：扉から遠いマスほど遅れて、道が崩れて闇へ落ちていく。扉のマスだけが残る。null は崩れ落ちたあと
     const goal = stage.goal;
@@ -590,8 +653,8 @@ export class Renderer {
           const along = stage.cell(x - 1, y)?.obj?.type === 'rail' || stage.cell(x + 1, y)?.obj?.type === 'rail' ? 'x' : 'y';
           this.rails(sx, sy, along);
         } else if (obj?.type === 'stop') {
-          const ready = sim.x === x && sim.y === y && sim.stillTicks >= TICKS_PER_BEAT;
-          fillDiamond(ctx, sx, sy + 3, TW / 2, TH / 2, ready ? COLORS.stopReady : COLORS.stop);
+          const on = sim.x === x && sim.y === y;
+          this.stopTile(sx, sy, on ? (sim.stillTicks >= TICKS_PER_BEAT ? 'ready' : 'waiting') : 'idle', tickF);
         } else if (obj?.type === 'oneway') {
           this.arrow(sx, sy + TH / 2, DIR_VEC[obj.dir].x, DIR_VEC[obj.dir].y);
         }
@@ -605,6 +668,10 @@ export class Renderer {
     const sprites: { depth: number; draw: () => void }[] = [];
     const labels: { x: number; y: number; text: string; color: string }[] = [];
     const feet = p.sy + TH / 2;
+    // 停止マスの上で、まだ1拍たっていない：足元を確かめるあいだ「WAIT」
+    if (sim.status === 'playing' && stage.cell(sim.x, sim.y)?.obj?.type === 'stop' && sim.stillTicks < TICKS_PER_BEAT) {
+      labels.push({ x: p.sx, y: p.sy - 26, text: 'WAIT', color: COLORS.stopEdge });
+    }
 
     for (let y = 0; y < stage.height; y++) {
       for (let x = 0; x < stage.width; x++) {
@@ -715,7 +782,7 @@ export class Renderer {
         }
         sprites.push({
           depth: seat.x + seat.y + 0.45,
-          draw: () => (h.look === 'pendulum' ? this.pendulum(ends, seat) : this.swing(ends, seat)),
+          draw: () => (h.look === 'pendulum' ? this.pendulum(ends, seat, h.reach) : this.swing(ends, seat, h.reach)),
         });
       } else if (h instanceof PeriodicHazard) {
         const active = h.isActive(now);
@@ -798,6 +865,31 @@ export class Renderer {
       const a = (i / n) * Math.PI * 2;
       ctx.fillRect(Math.round(cx + Math.cos(a) * rx), Math.round(cy + Math.sin(a) * ry), 1, 1);
     }
+  }
+
+  /**
+   * 停止マス（企画書 第5.4節の案「ぐらつく踏み石」）：一段高い淡い色の踏み石に、一時停止の記号（‖）。拍ごとに縁が琥珀色に光る。
+   * 乗って1拍たつまでは石がぐらつき（waiting）、1拍たつと落ち着いて緑がかる（ready。進んでよい）
+   */
+  private stopTile(sx: number, sy: number, state: 'idle' | 'waiting' | 'ready', tickF: number): void {
+    const ctx = this.lctx;
+    const beat = mod(tickF, TICKS_PER_BEAT) / TICKS_PER_BEAT;
+    // 縁の光：拍の頭で強く、次の拍までに引く
+    if (state !== 'ready') {
+      ctx.globalAlpha = 0.6 + 0.4 * (1 - beat);
+      strokeDiamond(ctx, sx, sy, TW, TH, COLORS.stopEdge);
+      ctx.globalAlpha = 1;
+    }
+    const wobble = state === 'waiting' ? (Math.floor(tickF * 2) % 2 === 0 ? -1 : 1) : 0;
+    const top = sy + 2 - 2;
+    const cx = sx + wobble;
+    fillPrismSides(ctx, cx, top, TW - 6, TH - 3, 2, COLORS.stopSide, COLORS.stopSide);
+    fillDiamond(ctx, cx, top, TW - 6, TH - 3, state === 'ready' ? COLORS.stopReady : COLORS.stop);
+    // 一時停止の記号
+    ctx.fillStyle = COLORS.stopMark;
+    const my = top + Math.floor((TH - 3) / 2);
+    ctx.fillRect(cx - 3, my - 2, 2, 4);
+    ctx.fillRect(cx + 1, my - 2, 2, 4);
   }
 
   private arrow(cx: number, cy: number, dx: number, dy: number): void {
@@ -1290,16 +1382,20 @@ export class Renderer {
 
   /**
    * 柱時計の振り子：闇に浮かぶ柱時計から長い竿が下り、先の錘が道の上を横切るように揺れる。
-   * ends は振れ幅の両端（グリッド座標）、seat は錘の位置。錘の真下のマスが危険
+   * ends は振れ幅の両端（グリッド座標）、seat は錘の真下の位置、reach は振れ幅（マス）。錘の真下のマスが危険。
+   * 錘は時計の中の支点を中心に、決まった長さの竿で円を描いて揺れる
    */
-  private pendulum(ends: { x: number; y: number }[], seat: { x: number; y: number }): void {
+  private pendulum(ends: { x: number; y: number }[], seat: { x: number; y: number }, reach: number): void {
     const ctx = this.lctx;
     const mid = { x: (ends[0].x + ends[1].x) / 2, y: (ends[0].y + ends[1].y) / 2 };
     const at = (gx: number, gy: number, h = 0) => {
       const q = iso(gx, gy);
       return { x: q.sx, y: q.sy + TH / 2 - h };
     };
-    const HANG = 52;
+    // 錘のいちばん低い所が地面から 6 ドット。支点（時計の振り子の窓の上）はその竿の長さだけ上
+    const LOW = 6;
+    const length = pendulumLength(reach, 46);
+    const HANG = LOW + length + 7;
     const top = at(mid.x, mid.y, HANG);
     // 時計の箱：文字盤と、振り子の窓。下は闇へ竿が抜けている
     ctx.fillStyle = COLORS.woodDark;
@@ -1314,10 +1410,10 @@ export class Renderer {
     ctx.fillRect(top.x, top.y - 15, 3, 1);
     ctx.fillStyle = COLORS.glassDim;
     ctx.fillRect(top.x - 4, top.y - 8, 8, 9);
-    // 錘：振り切ると少し持ち上がる
-    const swingOut = Math.abs(seat.x - mid.x + (seat.y - mid.y));
+    // 錘：支点を中心に円を描く（振り切るほど持ち上がる）
+    const u = seat.x - mid.x + (seat.y - mid.y);
     const s = at(seat.x, seat.y);
-    const bob = at(seat.x, seat.y, 6 + Math.round(swingOut * 3));
+    const bob = at(seat.x, seat.y, Math.round(pendulumHeight(u, length, HANG - 7)));
     ctx.globalAlpha = 0.45;
     fillEllipse(ctx, s.x, s.y, 5, 1, '#000');
     ctx.globalAlpha = 1;
@@ -1453,9 +1549,10 @@ export class Renderer {
 
   /**
    * 箱ブランコ。枠の梁は揺れる向きと直角に渡してあり、座席が振り子のように揺れる。
-   * ends は振れ幅の両端（グリッド座標）、seat は座席の位置
+   * ends は振れ幅の両端（グリッド座標）、seat は座席の真下の位置、reach は振れ幅（マス）。
+   * 座席は梁を中心に、決まった長さの吊り棒で円を描いて揺れる。枠の高さは、振れ幅を吊り棒で振り切れる高さにする
    */
-  private swing(ends: { x: number; y: number }[], seat: { x: number; y: number }): void {
+  private swing(ends: { x: number; y: number }[], seat: { x: number; y: number }, reach: number): void {
     const ctx = this.lctx;
     const mid = { x: (ends[0].x + ends[1].x) / 2, y: (ends[0].y + ends[1].y) / 2 };
     // 揺れる向きと直角の向き（グリッド）
@@ -1466,28 +1563,32 @@ export class Renderer {
       const q = iso(gx, gy);
       return { x: q.sx, y: q.sy + TH / 2 - h };
     };
-    const swingOut = Math.abs(seat.x - mid.x + (seat.y - mid.y));
-    const seatLift = 5 + Math.round(swingOut * 3);
+    // 座席のいちばん低い所が地面から LOW。梁はその吊り棒の長さだけ上
+    const LOW = 9;
+    const length = pendulumLength(reach, FRAME_H - LOW);
+    const frameH = LOW + length;
+    const u = seat.x - mid.x + (seat.y - mid.y);
+    const lift = Math.round(pendulumHeight(u, length, frameH));
     // 枠：両側の A 字の脚（揺れる向きに開く）と、その上に渡した梁
+    const spread = 0.35 * (frameH / FRAME_H);
     for (const k of [-0.7, 0.7]) {
       const px = mid.x + perp.x * k;
       const py = mid.y + perp.y * k;
-      const apex = at(px, py, FRAME_H);
-      for (const [a, color] of [[-0.35, COLORS.rust], [0.35, COLORS.rustDark]] as const) {
+      const apex = at(px, py, frameH);
+      for (const [a, color] of [[-spread, COLORS.rust], [spread, COLORS.rustDark]] as const) {
         const foot = at(px + along.x * a, py + along.y * a);
         plotLine(ctx, foot.x, foot.y, apex.x, apex.y, color);
       }
     }
-    const beam = [-0.7, 0.7].map((k) => at(mid.x + perp.x * k, mid.y + perp.y * k, FRAME_H));
+    const beam = [-0.7, 0.7].map((k) => at(mid.x + perp.x * k, mid.y + perp.y * k, frameH));
     plotLine(ctx, beam[0].x, beam[0].y, beam[1].x, beam[1].y, COLORS.rustLight);
     // 座席の影、吊り棒、座席（梁と平行な板）
     const s = at(seat.x, seat.y);
     ctx.globalAlpha = 0.45;
     fillEllipse(ctx, s.x, s.y, 5, 1, '#000');
     ctx.globalAlpha = 1;
-    const lift = seatLift + 4;
     for (const k of [-0.3, 0.3]) {
-      const hook = at(mid.x + perp.x * k, mid.y + perp.y * k, FRAME_H);
+      const hook = at(mid.x + perp.x * k, mid.y + perp.y * k, frameH);
       const hang = at(seat.x + perp.x * k, seat.y + perp.y * k, lift);
       plotLine(ctx, hook.x, hook.y, hang.x, hang.y, COLORS.rustDark);
     }
@@ -1647,12 +1748,14 @@ export class Renderer {
     if (sim.stage.kind === 'hub') {
       this.beatDots(songTime, beatSec);
       this.text('HOME', 6, 7, 1, COLORS.textDim);
+      // これまでに溜めた得点の総計（エンディングで使われる値）
+      this.text(`TOTAL ${String(this.totalScore).padStart(7, '0')}`, 6, 15, 1, COLORS.gem);
       this.text('WALK INTO A GLOWING DOOR', LW / 2, LH - 14, 1, COLORS.textDim, 'center');
-      this.text('ESC: TITLE', LW - 6, 7, 1, COLORS.textDim, 'right');
+      if (!this.touchUI) this.text('ESC: TITLE', LW - 6, 7, 1, COLORS.textDim, 'right');
       return;
     }
     if (sim.stage.kind === 'tutorial') {
-      this.text('S: SKIP TUTORIAL', LW / 2, LH - 10, 1, COLORS.textDim, 'center');
+      if (!this.touchUI) this.text('S: SKIP TUTORIAL', LW / 2, LH - 10, 1, COLORS.textDim, 'center');
       // 案内：いちばん近い1つを、近づいたときだけ画面の下に字幕で出す
       let best: { text: string; d: number } | null = null;
       for (const h of sim.stage.def.hints ?? []) {
@@ -1750,24 +1853,33 @@ export class Renderer {
     });
   }
 
-  /** エンディングが終わったあと（ガレキだけが残った）のタイトル。操作の案内は出さない */
-  ruinsTitle(): void {
-    this.ending(ENDING.end, 0);
-    this.text('METROGRID', LW / 2, 40, 3, COLORS.textDim, 'center');
+  /**
+   * タイトル（ending.ts の drawTitle）：闇に浮かぶ家と、その前に立つ少女。t は秒。
+   * cleared はクリアしたステージの数（その数だけ窓に明かりがともる）。collapsed はエンディングのあと（ガレキだけが残る）
+   */
+  title(t: number, opts: { cleared: number; collapsed: boolean; prompt: string | null; beatSec: number }): void {
+    drawTitle(this.lctx, t, opts, {
+      front: this.girl[GIRL_DIR.down],
+      back: this.girl[GIRL_DIR.up],
+      raise: this.girlRaise,
+    });
   }
 
-  /** 二階へ昇るかの確認（企画書 第2.3節）。取り返しのつかないことが起きると、意図的に予告する */
-  confirmUpstairs(yes: boolean): void {
+  /**
+   * はい・いいえの確認（二階へ昇るか、記録を消すか）。はじめは「いいえ」が選ばれている。
+   * 二階へ昇るとき（企画書 第2.3節）は、取り返しのつかないことが起きると意図的に予告する
+   */
+  confirm(question: string, note: string, yes: boolean): void {
     const ctx = this.lctx;
     ctx.globalAlpha = 0.8;
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, LW, LH);
     ctx.globalAlpha = 1;
-    this.text('REALLY GO UPSTAIRS?', LW / 2, LH / 2 - 30, 2, COLORS.text, 'center');
-    this.text('THERE WILL BE NO TURNING BACK.', LW / 2, LH / 2 - 10, 1, COLORS.textDim, 'center');
+    this.text(question, LW / 2, LH / 2 - 30, 2, COLORS.text, 'center');
+    this.text(note, LW / 2, LH / 2 - 10, 1, COLORS.textDim, 'center');
     this.text(yes ? '> YES' : '  YES', LW / 2 - 30, LH / 2 + 20, 2, yes ? COLORS.gem : COLORS.textDim, 'center');
     this.text(!yes ? '> NO' : '  NO', LW / 2 + 34, LH / 2 + 20, 2, !yes ? COLORS.gem : COLORS.textDim, 'center');
-    this.text('LEFT / RIGHT, ENTER', LW / 2, LH / 2 + 46, 1, COLORS.textDim, 'center');
+    this.text(this.touchUI ? 'TAP YES TWICE TO GO' : 'LEFT / RIGHT, ENTER (OR CLICK YES TWICE)', LW / 2, LH / 2 + 46, 1, COLORS.textDim, 'center');
   }
 
   overlay(lines: { text: string; scale?: number; color?: string }[]): void {
