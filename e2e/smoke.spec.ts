@@ -8,8 +8,8 @@ test('タイトルから始めて歩ける', async ({ page }) => {
   expect((await game(page)).scene).toBe('title');
 
   await page.keyboard.press('Enter');
-  // カウント（1小節 = 2秒）が終わるまで待つ
-  await expect.poll(async () => (await game(page)).sim?.tick ?? -1, { timeout: 5000 }).toBeGreaterThan(0);
+  // カウント（1小節 = 2.4秒）が終わるまで待つ。テストを並べて動かすと、音の出力が動き出すまでに1秒以上かかることがあるので長めに
+  await expect.poll(async () => (await game(page)).sim?.tick ?? -1, { timeout: 10000 }).toBeGreaterThan(0);
   expect((await game(page)).scene).toBe('play');
 
   // スタート（玄関の前）からは上（画面の右上）へ道が続いている

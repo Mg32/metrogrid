@@ -1,5 +1,5 @@
 import './style.css';
-import { Metronome, type Conductor } from './audio/conductor.ts';
+import { Music, type Conductor } from './audio/conductor.ts';
 import { Sfx } from './audio/sfx.ts';
 import { InputRecorder, makePlayLog } from './game/playlog.ts';
 import { createRandom, randomSeed } from './game/random.ts';
@@ -12,11 +12,12 @@ import { Input } from './input.ts';
 import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
 import { ENDING } from './render/ending.ts';
 import { CLEAR, Renderer } from './render/renderer.ts';
+import { Stick } from './touch.ts';
 
 /**
  * 遊ぶ流れ：タイトル →（はじめてならチュートリアル。S でスキップ）→ 拠点（家の中）→ 入口からステージへ → 結果 → 拠点へ戻る
  * ステージ5をクリアすると拠点に二階への階段が現れ、上り口で「本当に二階へ昇る？」と確かめてエンディングへ（企画書 第2.3節・第4.6節）。
- * エンディングのあとは、ガレキだけが残った画面のまま（崩壊後の画面。第2.4節 TODO を仮に決めたもの：操作はできず、案内も出さない）。
+ * エンディングのあとは、ガレキだけが残った画面のまま（崩壊後の画面。第2.4節で暫定合意：操作はできず、案内も出さない）。
  * クリアの記録は書き換えないので、ページを読み込み直すと階段が現れた時点（家がそろった状態）に戻る
  *
  * 開発用の URL パラメータ
@@ -28,23 +29,27 @@ import { CLEAR, Renderer } from './render/renderer.ts';
  *   ?clear=SEC        音を鳴らさず、ゴールしてから SEC 秒後のクリア演出を静止表示する
  *   ?ending=SEC       音を鳴らさず、エンディングの SEC 秒目を静止表示する
  *   ?total=N          これまでに溜めた得点をこの値に差し替える（保存しない）
+ *   ?bpm=N            ステージ（拠点以外）の BPM をこの値にする（曲を作る前に試す用。ステージの定義は変えない）
+ *   ?bars=N           ステージ（拠点以外）の長さ（小節）をこの値にする
  */
 /*
  * タッチ（スマホ）での操作
- *   歩く：画面に指を置いたままにすると、少女から見て指のある方向へ歩く（指が右上なら上、右下なら右、左下なら下、左上なら左。
- *         クォータービューの画面の斜めにそのまま対応する）。指を離すか、少女のすぐそばに指を置くと止まる
+ *   歩く：画面のどこかに指を置き、そのまま指をずらした向きへ歩く（右上へずらすと上、右下は右、左下は下、左上は左。
+ *         クォータービューの画面の斜めにそのまま対応する）。指を離すか、置いたところへ戻すと止まる（src/touch.ts）
  *   キーの代わり：画面の下の隅のボタン（戻る、やり直す、チュートリアルを飛ばす）。それ以外の場面ではタップが Enter の代わり
  *   二階へ昇るかの確認は、YES を2回タップで決まる（取り返しがつかないので、うっかり1回では決まらないようにする）
  */
 const params = new URLSearchParams(location.search);
 const fixedSeed = params.has('seed') ? Number(params.get('seed')) : null;
+const devBpm = params.has('bpm') ? Number(params.get('bpm')) : null;
+const devBars = params.has('bars') ? Number(params.get('bars')) : null;
 
 const canvas = document.createElement('canvas');
 document.querySelector<HTMLDivElement>('#app')!.append(canvas);
 
 const input = new Input(window);
 const renderer = new Renderer(canvas);
-const conductor: Conductor = new Metronome();
+const conductor: Conductor = new Music();
 const sfx = new Sfx();
 /** クリアしたステージ（チュートリアルは、クリアかスキップで 'TUTORIAL' が入る） */
 const devCleared = params.get('cleared');
@@ -74,21 +79,8 @@ type Scene = 'title' | 'loading' | 'play' | 'result' | 'view' | 'confirm' | 'end
 /** タッチで遊んでいるか（はじめから指で操作する端末か、一度でも画面に触れたら） */
 let touchUI = matchMedia('(pointer: coarse)').matches;
 renderer.touchUI = touchUI;
-/** 歩く向きを決めている指（バッファ上の位置） */
-let steer: { id: number; x: number; y: number } | null = null;
-/** 指が少女からこの距離（バッファのドット）より近ければ止まる */
-const STEER_DEAD = 10;
-
-/** 指の位置から歩く向き：少女から見て右上は up、右下は right、左下は down、左上は left */
-function touchDir(): Dir | null {
-  const p = renderer.playerScreen;
-  if (!steer || !p) return null;
-  const dx = steer.x - p.x;
-  const dy = steer.y - p.y;
-  if (Math.hypot(dx, dy) < STEER_DEAD) return null;
-  if (dx > 0) return dy < 0 ? 'up' : 'right';
-  return dy > 0 ? 'down' : 'left';
-}
+/** 歩く向きを決めている指 */
+let steer: Stick | null = null;
 
 interface Button {
   label: string;
@@ -185,6 +177,7 @@ function clearSec(): number | null {
 }
 
 function setStage(def: StageDef): void {
+  if (def.kind !== 'hub' && (devBpm || devBars)) def = { ...def, bpm: devBpm || def.bpm, bars: devBars || def.bars };
   stage = new Stage(def);
   tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
 }
@@ -207,7 +200,9 @@ async function play(def: StageDef, start?: Vec): Promise<void> {
   heardEvents = 0;
   steer = null;
   // 拠点はカウントなしですぐ歩ける
-  await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: stage.kind === 'hub' ? 0 : 1 });
+  // 曲のファイル（sound/music/<名前>.wav）があればそれを、なければメトロノームを鳴らす。拠点の曲は繰り返す
+  const hub = stage.kind === 'hub';
+  await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: hub ? 0 : 1, track: stage.def.name, loop: hub });
   scene = 'play';
 }
 
@@ -301,8 +296,8 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
   if (scene === 'play') {
-    // 指を置いた方向へ歩く（マウスでも、押しているあいだは同じ）
-    steer = { id: e.pointerId, x: b.x, y: b.y };
+    // 指を置いたところから、ずらした向きへ歩く（マウスでも、押したままずらせば同じ）
+    steer = new Stick(e.pointerId, b.x, b.y);
     try {
       canvas.setPointerCapture(e.pointerId);
     } catch {
@@ -315,7 +310,7 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   if (steer?.id !== e.pointerId) return;
   const b = renderer.toBuffer(e.clientX, e.clientY);
-  steer = { id: e.pointerId, x: b.x, y: b.y };
+  steer.move(b.x, b.y);
 });
 const endSteer = (e: PointerEvent) => {
   if (steer?.id === e.pointerId) steer = null;
@@ -379,7 +374,7 @@ function update(): void {
     }
     const now = Math.floor(conductor.songTime() / tickSec);
     while (sim.tick < now && sim.status === 'playing') {
-      const held = touchDir() ?? input.current();
+      const held = steer?.dir ?? input.current();
       recorder.record(sim.tick + 1, held);
       sim.step(sim.tick + 1, held);
     }
@@ -458,6 +453,7 @@ function draw(): void {
     }
   }
 
+  if (scene === 'play' && steer) renderer.stick(steer);
   renderer.buttons(touchButtons());
   renderer.present();
 }

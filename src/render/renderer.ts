@@ -18,6 +18,7 @@ import {
   TW,
 } from './pixel.ts';
 import { drawEnding, drawTitle } from './ending.ts';
+import { STICK_RADIUS } from '../touch.ts';
 import { GIRL_FOOT_X, GIRL_FOOT_Y, GIRL_FRAMES, GIRL_H, GIRL_RAISE, GIRL_W, GIRL_WAIST_Y, paintGirl } from './girl.ts';
 
 /**
@@ -511,8 +512,6 @@ export class Renderer {
   totalScore = 0;
   /** タッチで遊んでいるか（ボタンを出し、キーの案内を出さない）。main.ts が設定する */
   touchUI = false;
-  /** 直前に描いた少女の、画面（288x288 のバッファ）上の位置（体の中ほど）。タッチで歩く向きを決めるのに使う */
-  playerScreen: { x: number; y: number } | null = null;
 
   /** ページ上の座標（clientX, clientY）→ 288x288 のバッファ上の座標 */
   toBuffer(clientX: number, clientY: number): { x: number; y: number } {
@@ -520,6 +519,40 @@ export class Renderer {
     const dx = (clientX - rect.left) * (this.main.width / rect.width);
     const dy = (clientY - rect.top) * (this.main.height / rect.height);
     return { x: (dx - this.ox) / this.scale, y: (dy - this.oy) / this.scale };
+  }
+
+  /**
+   * タッチで歩くときの目印：指を置いた中心に菱形の枠（タイルと同じ向き）、指の位置に小さな菱形。
+   * 歩いている向きの辺（右上の辺なら up）を明るくする。指で隠れても、指のまわりからはみ出して見える大きさにする
+   */
+  stick(s: { cx: number; cy: number; x: number; y: number; dir: Dir | null }): void {
+    const ctx = this.lctx;
+    const cx = Math.round(s.cx);
+    const cy = Math.round(s.cy);
+    const w = STICK_RADIUS * 2 + 8;
+    const h = w / 2;
+    const top = cy - h / 2;
+    ctx.globalAlpha = 0.45;
+    strokeDiamond(ctx, cx, top, w, h, COLORS.textDim);
+    ctx.globalAlpha = 1;
+    if (s.dir) {
+      // 菱形の頂点：上・右・下・左。up は上→右の辺、right は右→下、down は下→左、left は左→上
+      const v = [
+        [cx, top],
+        [cx + w / 2, cy],
+        [cx, top + h],
+        [cx - w / 2, cy],
+      ];
+      const i = { up: 0, right: 1, down: 2, left: 3 }[s.dir];
+      const [a, b] = [v[i], v[(i + 1) % 4]];
+      plotLine(ctx, a[0], a[1], b[0], b[1], COLORS.gem);
+      // 内側にもう1本重ねて太くする
+      const inward = [1, -1, -1, 1][i];
+      plotLine(ctx, a[0], a[1] + inward, b[0], b[1] + inward, COLORS.gem);
+    }
+    ctx.globalAlpha = 0.7;
+    fillDiamond(ctx, Math.round(s.x), Math.round(s.y) - 3, 12, 6, COLORS.text);
+    ctx.globalAlpha = 1;
   }
 
   /** タッチ用のボタン（バッファ上の矩形）。selected は選んでいる状態（確認の YES など） */
@@ -608,7 +641,6 @@ export class Renderer {
     const offY = Math.round(LH / 2 - this.camY - 8);
     ctx.save();
     ctx.translate(offX, offY);
-    this.playerScreen = { x: p.sx + offX, y: p.sy + offY + TH / 2 - 10 };
 
     // クリア演出：扉から遠いマスほど遅れて、道が崩れて闇へ落ちていく。扉のマスだけが残る。null は崩れ落ちたあと
     const goal = stage.goal;
@@ -1760,7 +1792,7 @@ export class Renderer {
       let best: { text: string; d: number } | null = null;
       for (const h of sim.stage.def.hints ?? []) {
         const d = Math.abs(h.x - sim.x) + Math.abs(h.y - sim.y);
-        if (d <= 3 && (!best || d < best.d)) best = { text: h.text, d };
+        if (d <= 3 && (!best || d < best.d)) best = { text: (this.touchUI && h.touch) || h.text, d };
       }
       if (best) {
         const ctx = this.lctx;

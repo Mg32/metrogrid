@@ -13,6 +13,7 @@
     "replay": "node tools/replay.ts",
     "e2e": "playwright test",
     "shot": "node tools/shot.ts",
+    "sound": "node tools/sound.ts",
     "check": "npm run typecheck && npm test && npm run bots && npm run e2e"
   },
   "devDependencies": {

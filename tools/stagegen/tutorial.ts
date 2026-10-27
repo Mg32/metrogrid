@@ -22,12 +22,12 @@ const line = (x0: number, y0: number, x1: number, y1: number, ch: string) => {
 };
 const hazards: HazardDef[] = [];
 const hints: StageDef['hints'] = [];
-const hint = (x: number, y: number, text: string) => hints.push({ x, y, text });
+const hint = (x: number, y: number, text: string, touch?: string) => hints.push({ x, y, text, ...(touch ? { touch } : {}) });
 
 // 1. 歩く：玄関を出て、まっすぐ上へ
 o(2, 31, 'H'); o(4, 31, 'L');
 line(3, 31, 3, 26, '.'); o(3, 31, 'S');
-hint(3, 30, 'HOLD AN ARROW KEY TO WALK');
+hint(3, 30, 'HOLD AN ARROW KEY TO WALK', 'TOUCH AND SLIDE A FINGER TO WALK');
 // 2. 曲がる・止まる：右へ曲がり、また上へ
 line(3, 25, 8, 25, '.');
 hint(4, 25, 'ONE STEP PER BEAT. LET GO TO STOP');
@@ -100,7 +100,7 @@ ${Object.entries(scores).map(([k, v]) => `    ${k}: { value: ${v.value}, decay: 
 ${hazards.map(h).join('\n')}
   ],
   hints: [
-${hints.map((x) => `    { x: ${x.x}, y: ${x.y}, text: '${x.text}' },`).join('\n')}
+${hints.map((x) => `    { x: ${x.x}, y: ${x.y}, text: '${x.text}'${x.touch ? `, touch: '${x.touch}'` : ''} },`).join('\n')}
   ],
 };
 `;

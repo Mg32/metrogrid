@@ -1,23 +1,44 @@
+import { audioContext, unlockAudio } from './context.ts';
+import { preloadSounds, soundNow } from './sounds.ts';
+
 /**
  * 効果音（曲とは別。得点マスを取った音、クリアのジングル、エンディングの音）。
+ * それぞれ sound/sfx/ に WAV（pickup・clear・ending）を置けばそのファイルを鳴らし、なければここで合成した音を鳴らす。
  * プレイ開始のキー操作のあとに鳴らすので、AudioContext はその時点で作ってよい
  */
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
 
+  /** 新しい出口（stop() で止まる）を作る */
+  private open(level: number): AudioContext {
+    this.stop();
+    this.ctx = audioContext();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = level;
+    this.master.connect(this.ctx.destination);
+    return this.ctx;
+  }
+
+  /** ファイルの音を、at（AudioContext の時刻）から、ファイルの from 秒目から鳴らす */
+  private playFile(buf: AudioBuffer, at: number, out: AudioNode, from = 0, rate = 1): void {
+    const src = this.ctx!.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rate;
+    src.connect(out);
+    src.start(at, from);
+  }
+
   /**
    * クリアのジングル。光が立つところで上がっていく分散和音、結果の各行が出るたびに短い音、
    * 合計が出たところで和音。rowTimes は結果の各行が出る時刻（いまからの秒）
    */
   clear(rowTimes: number[]): void {
-    this.stop();
-    this.ctx ??= new AudioContext();
-    const ctx = this.ctx;
-    this.master = ctx.createGain();
-    this.master.gain.value = 0.25;
-    this.master.connect(ctx.destination);
+    const file = soundNow('sfx/clear');
+    const ctx = this.open(file ? 1 : 0.25);
     const now = ctx.currentTime + 0.05;
+    // ファイルは、ゴールした瞬間から鳴らす（結果の行が出る時刻は render/renderer.ts の CLEAR）
+    if (file) return this.playFile(file, now, this.master!);
 
     // 光が立つ：C5 E5 G5 C6 E6 と上がり、最後を伸ばす
     [523.25, 659.25, 783.99, 1046.5, 1318.51].forEach((f, i) => this.note(now + 0.1 + i * 0.09, f, i === 4 ? 1.2 : 0.3, 'triangle', 0.7));
@@ -37,12 +58,11 @@ export class Sfx {
    * 家が潰れるたびに崩れる音。轟音は揺れが収まる頃に消える。times はエンディングの時刻（ENDING）、from はいま何秒目か
    */
   ending(times: { light: number[]; rumble: number; jerks: number[]; settle: number }, from = 0): void {
-    this.stop();
-    this.ctx ??= new AudioContext();
-    const ctx = this.ctx;
-    this.master = ctx.createGain();
-    this.master.gain.value = 0.3;
-    this.master.connect(ctx.destination);
+    const file = soundNow('sfx/ending');
+    const ctx = this.open(file ? 1 : 0.3);
+    // ファイルは、エンディングの 0 秒目（階段の確認で YES）から鳴らす（各場面の時刻は render/ending.ts の ENDING）
+    const master = this.master!;
+    if (file) return this.playFile(file, ctx.currentTime + 0.05, master, from);
     const at = (sec: number) => ctx.currentTime + 0.05 + Math.max(0, sec - from);
     const [l0, l1] = times.light;
 
@@ -60,7 +80,7 @@ export class Sfx {
       env.gain.setValueAtTime(0, at(l0));
       env.gain.linearRampToValueAtTime(level, at(l1));
       env.gain.linearRampToValueAtTime(0, at(l1 + 3));
-      osc.connect(env).connect(this.master);
+      osc.connect(env).connect(master);
       osc.start(at(l0));
       osc.stop(at(l1 + 3.1));
     }
@@ -85,7 +105,7 @@ export class Sfx {
     env.gain.linearRampToValueAtTime(0.9, at(times.rumble + 3));
     env.gain.linearRampToValueAtTime(1.4, at(times.jerks[times.jerks.length - 1]));
     env.gain.linearRampToValueAtTime(0, at(times.settle));
-    rumble.connect(low).connect(env).connect(this.master);
+    rumble.connect(low).connect(env).connect(master);
     rumble.start(at(times.rumble));
     rumble.stop(at(times.settle + 0.1));
 
@@ -100,7 +120,7 @@ export class Sfx {
       e.gain.setValueAtTime(0, at(j));
       e.gain.linearRampToValueAtTime(1.6, at(j + 0.05));
       e.gain.exponentialRampToValueAtTime(0.001, at(j + 1.6));
-      src.connect(band).connect(e).connect(this.master);
+      src.connect(band).connect(e).connect(master);
       src.start(at(j));
       src.stop(at(j + 1.7));
     }
@@ -108,22 +128,31 @@ export class Sfx {
 
   /** 音を鳴らせるようにする（タップやキーのイベントの処理の中で呼ぶ。スマホでは、そうしないと音が出ない） */
   unlock(): void {
-    this.ctx ??= new AudioContext();
-    void this.ctx.resume();
+    unlockAudio();
+    // 効果音のファイルを、鳴らす前に読み込んでおく
+    preloadSounds('sfx/');
   }
 
   /**
    * 得点マスを取った音：短く2音上がる。連続で取って倍率が上がるほど高くなる（倍率 1 で C6、1 上がるごとに全音ずつ）。
+   * ファイルのときも、同じだけ再生速度を上げて高くする。
    * クリアのジングルとは別の出口から鳴らすので、stop() では止まらない
    */
   pickup(multiplier: number): void {
-    this.ctx ??= new AudioContext();
+    const file = soundNow('sfx/pickup');
+    this.ctx = audioContext();
     const ctx = this.ctx;
     const out = ctx.createGain();
-    out.gain.value = 0.18;
+    out.gain.value = file ? 1 : 0.18;
     out.connect(ctx.destination);
     const now = ctx.currentTime + 0.01;
-    const base = 1046.5 * 2 ** ((Math.min(multiplier, 8) - 1) / 6);
+    const rise = 2 ** ((Math.min(multiplier, 8) - 1) / 6);
+    if (file) {
+      this.playFile(file, now, out, 0, rise);
+      setTimeout(() => out.disconnect(), (file.duration / rise) * 1000 + 100);
+      return;
+    }
+    const base = 1046.5 * rise;
     this.note(now, base, 0.07, 'square', 0.5, out);
     this.note(now + 0.06, base * 1.5, 0.22, 'square', 0.45, out);
     setTimeout(() => out.disconnect(), 600);

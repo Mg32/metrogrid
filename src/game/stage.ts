@@ -38,7 +38,7 @@ export interface StageDef {
   scores: Record<string, { value: number; decay: number; pick?: number }>;
   hazards: HazardDef[];
   /** 地面に浮かぶ案内（プレイヤーが近づくと出る）。英大文字・数字・記号のみ */
-  hints?: { x: number; y: number; text: string }[];
+  hints?: { x: number; y: number; text: string; /** タッチで遊んでいるときの文（キーの話をしているもの） */ touch?: string }[];
   /** ハブの入口：objects の数字 → 行き先のステージ名 */
   portals?: Record<string, string>;
 }

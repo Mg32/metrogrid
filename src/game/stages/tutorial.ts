@@ -92,7 +92,7 @@ export const tutorial: StageDef = {
     {type: 'swing', cells: [[11, 14]], axis: 'x', period: 22},
   ],
   hints: [
-    { x: 3, y: 30, text: 'HOLD AN ARROW KEY TO WALK' },
+    { x: 3, y: 30, text: 'HOLD AN ARROW KEY TO WALK', touch: 'TOUCH AND SLIDE A FINGER TO WALK' },
     { x: 4, y: 25, text: 'ONE STEP PER BEAT. LET GO TO STOP' },
     { x: 8, y: 24, text: 'GEMS LOSE VALUE EVERY BEAT' },
     { x: 9, y: 21, text: 'FADED ROAD: 2 STEPS PER BEAT' },

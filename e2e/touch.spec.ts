@@ -11,16 +11,20 @@ async function client(page: Page, bx: number, by: number): Promise<{ x: number; 
   return { x: (layout.ox + bx * layout.scale) / dpr, y: (layout.oy + by * layout.scale) / dpr };
 }
 
-/** 指を置いたままにする（離さない） */
-async function holdTouch(page: Page, bx: number, by: number): Promise<void> {
-  const p = await client(page, bx, by);
-  await page.evaluate(({ x, y }) => {
+/** (bx0, by0) に指を置き、(bx1, by1) までずらしたままにする（離さない） */
+async function slide(page: Page, bx0: number, by0: number, bx1: number, by1: number): Promise<void> {
+  const a = await client(page, bx0, by0);
+  const b = await client(page, bx1, by1);
+  await page.evaluate(({ a, b }) => {
     const canvas = document.querySelector('canvas')!;
-    canvas.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 7, pointerType: 'touch', clientX: x, clientY: y, bubbles: true }));
-  }, p);
+    const ev = (type: string, p: { x: number; y: number }) =>
+      new PointerEvent(type, { pointerId: 7, pointerType: 'touch', clientX: p.x, clientY: p.y, bubbles: true });
+    canvas.dispatchEvent(ev('pointerdown', a));
+    canvas.dispatchEvent(ev('pointermove', b));
+  }, { a, b });
 }
 
-test('タップで始め、ボタンでチュートリアルを飛ばし、指を置いた方へ歩いて入口に入る', async ({ page }) => {
+test('タップで始め、ボタンでチュートリアルを飛ばし、指をずらした向きへ歩いて入口に入る', async ({ page }) => {
   const errors = collectErrors(page);
   await page.goto('/?seed=1');
   await frames(page);
@@ -34,8 +38,8 @@ test('タップで始め、ボタンでチュートリアルを飛ばし、指�
   await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
   await expect.poll(async () => (await game(page)).scene, { timeout: 5000 }).toBe('play');
 
-  // 少女の左下に指を置いたままにすると、下（画面の左下）へ歩いて玄関の戸（STAGE 1 の入口）に入る
-  await holdTouch(page, 100, 190);
+  // 画面の下のほうに指を置いて左下へずらすと、下（画面の左下）へ歩いて玄関の戸（STAGE 1 の入口）に入る
+  await slide(page, 150, 230, 138, 237);
   await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 8000 }).toBe('STAGE1');
   expect(errors).toEqual([]);
 });
