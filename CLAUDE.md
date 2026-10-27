@@ -27,7 +27,7 @@
 
 スマホ（タッチ）：画面のどこかに指を置き、そのままずらした向きへ歩く（右上＝上、右下＝右、左下＝下、左上＝左。`src/touch.ts`）。キーの代わりは画面の下の隅のボタン、それ以外はタップが Enter（`src/main.ts` の先頭のコメント）。
 
-開発用 URL パラメータ：`?autostart`、`?seed=N`、`?stage=NAME`（拠点を通さず直接。TUTORIAL・HUB・TEST も可。ステージから Esc・HOME で戻ると拠点へ）、`?cleared=A,B`（クリアの記録を差し替える。保存しない）、`?view=X,Y,TICK`（音なしの静止表示）、`?clear=SEC`（ゴールして SEC 秒後のクリア演出の静止表示）、`?ending=SEC`（エンディングの SEC 秒目の静止表示）、`?total=N`（これまでに溜めた得点を差し替える。保存しない）、`?bpm=N`・`?bars=N`（ステージの BPM・長さを試しに変える。定義は変えない）。
+開発用 URL パラメータ：`?autostart`、`?seed=N`、`?stage=NAME`（拠点を通さず直接。TUTORIAL・HUB・TEST も可。ステージから Esc・HOME で戻ると拠点へ）、`?cleared=A,B`（クリアの記録を差し替える。保存しない）、`?view=X,Y,TICK`（音なしの静止表示）、`?clear=SEC`（ゴールして SEC 秒後のクリア演出の静止表示）、`?ending=SEC`（エンディングの SEC 秒目の静止表示）、`?total=N`（これまでに溜めた得点を差し替える。保存しない）、`?bpm=N`・`?bars=N`（ステージの BPM・長さを試しに変える。定義は変えない）、`?upstairs`（すべてクリアした拠点の、二階への階段の前から始める。階段の確認とエンディングを通しで確かめる用。保存しない）。
 
 ## 変更したら確かめること
 
@@ -57,6 +57,7 @@
 - `src/render/` 描画。288x288 のバッファに描き、実画素で整数倍に拡大する。`ending.ts` はエンディング（時刻は `ENDING`）、`pixel.ts` はドット単位の図形。
 - `tools/bots/` ボット（`bots.ts` に一覧と目的）。`tools/replay.ts`、`tools/shot.ts`。
 - `tests/` 単体テスト、`e2e/` Playwright。
+- 型の設定：ゲーム本体（`src/`）は `tsconfig.app.json`、Node で動かすもの（`tests/`・`tools/`・`e2e/`）は `tsconfig.node.json`。`tsconfig.json` はエディタ用に両方を参照するだけ。
 
 ## 描画の決まり
 

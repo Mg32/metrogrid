@@ -1899,19 +1899,19 @@ export class Renderer {
 
   /**
    * はい・いいえの確認（二階へ昇るか、記録を消すか）。はじめは「いいえ」が選ばれている。
-   * 二階へ昇るとき（企画書 第2.3節）は、取り返しのつかないことが起きると意図的に予告する
+   * 二階へ昇るとき（企画書 第2.3節）は、取り返しのつかないことが起きると意図的に予告する（問いの一文だけで、説明は足さない）。
+   * 操作の案内も出さない：左右で選んで Enter。クリック・タップは YES を選んでから、もう一度で決まる（選んだほうに > が付く）
    */
-  confirm(question: string, note: string, yes: boolean): void {
+  confirm(question: string, note: string | null, yes: boolean): void {
     const ctx = this.lctx;
     ctx.globalAlpha = 0.8;
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, LW, LH);
     ctx.globalAlpha = 1;
-    this.text(question, LW / 2, LH / 2 - 30, 2, COLORS.text, 'center');
-    this.text(note, LW / 2, LH / 2 - 10, 1, COLORS.textDim, 'center');
+    this.text(question, LW / 2, LH / 2 - (note ? 30 : 16), 2, COLORS.text, 'center');
+    if (note) this.text(note, LW / 2, LH / 2 - 10, 1, COLORS.textDim, 'center');
     this.text(yes ? '> YES' : '  YES', LW / 2 - 30, LH / 2 + 20, 2, yes ? COLORS.gem : COLORS.textDim, 'center');
     this.text(!yes ? '> NO' : '  NO', LW / 2 + 34, LH / 2 + 20, 2, !yes ? COLORS.gem : COLORS.textDim, 'center');
-    this.text(this.touchUI ? 'TAP YES TWICE TO GO' : 'LEFT / RIGHT, ENTER (OR CLICK YES TWICE)', LW / 2, LH / 2 + 46, 1, COLORS.textDim, 'center');
   }
 
   overlay(lines: { text: string; scale?: number; color?: string }[]): void {

@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc -p tsconfig.app.json && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc && tsc -p tsconfig.node.json",
+    "typecheck": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json",
     "test": "node --test \"tests/**/*.test.ts\"",
     "bots": "node tools/bots/run.ts",
     "replay": "node tools/replay.ts",

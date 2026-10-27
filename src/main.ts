@@ -31,6 +31,8 @@ import { Stick } from './touch.ts';
  *   ?total=N          これまでに溜めた得点をこの値に差し替える（保存しない）
  *   ?bpm=N            ステージ（拠点以外）の BPM をこの値にする（曲を作る前に試す用。ステージの定義は変えない）
  *   ?bars=N           ステージ（拠点以外）の長さ（小節）をこの値にする
+ *   ?upstairs         すべてクリアした拠点の、二階への階段の前から始める（階段 → 確認 → エンディングの確認用。
+ *                     ?cleared を付けなければクリアの記録を差し替えたことになり、保存しない）
  */
 /*
  * タッチ（スマホ）での操作
@@ -52,7 +54,7 @@ const renderer = new Renderer(canvas);
 const conductor: Conductor = new Music();
 const sfx = new Sfx();
 /** クリアしたステージ（チュートリアルは、クリアかスキップで 'TUTORIAL' が入る） */
-const devCleared = params.get('cleared');
+const devCleared = params.get('cleared') ?? (params.has('upstairs') ? [tutorial, ...STAGE_ORDER].map((d) => d.name).join(',') : null);
 const cleared = devCleared !== null ? new Set(devCleared.split(',').filter(Boolean)) : loadCleared();
 const save = () => {
   if (devCleared === null) saveCleared(cleared);
@@ -424,7 +426,7 @@ function draw(): void {
   }
 
   if (scene === 'confirm' && confirmKind === 'upstairs') {
-    renderer.confirm('REALLY GO UPSTAIRS?', 'THERE WILL BE NO TURNING BACK.', confirmYes);
+    renderer.confirm('REALLY GO UPSTAIRS?', null, confirmYes);
   } else if (scene === 'confirm') {
     drawTitle();
     renderer.confirm('ERASE ALL PROGRESS?', 'CLEARED STAGES AND TOTAL SCORE WILL BE LOST.', confirmYes);
@@ -487,6 +489,8 @@ if (params.has('view')) {
 } else if (params.has('ending')) {
   fixedEndingSec = Number(params.get('ending'));
   scene = 'ending';
+} else if (params.has('upstairs')) {
+  goHub(UPSTAIRS);
 } else if (params.has('autostart')) {
   startGame();
 }

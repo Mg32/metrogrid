@@ -110,6 +110,18 @@ test('二階への階段：確認で NO なら拠点に戻り、YES ならエン
   expect(errors).toEqual([]);
 });
 
+test('?upstairs：すべてクリアした拠点の階段の前から始まり、記録は保存しない', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto('/?seed=1&upstairs');
+  await expect.poll(async () => (await game(page)).scene, { timeout: 5000 }).toBe('play');
+  const g = await game(page);
+  expect(g.sim?.stage).toBe('HUB');
+  // 階段の上り口（3,10）の隣に立っている
+  expect(Math.abs(g.sim!.x - 3) + Math.abs(g.sim!.y - 10)).toBe(1);
+  expect(await page.evaluate(() => localStorage.getItem('metrogrid.cleared'))).toBeNull();
+  expect(errors).toEqual([]);
+});
+
 test('エンディング（?ending）でエラーが出ない', async ({ page }) => {
   const errors = collectErrors(page);
   for (const sec of [3.5, 6, 14.3, 24]) {
