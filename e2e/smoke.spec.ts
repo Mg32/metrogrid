@@ -144,6 +144,18 @@ test('クリア演出（?clear）でエラーが出ない', async ({ page }) => 
   expect(errors).toEqual([]);
 });
 
+test('クリアしたあとはホームへ戻るだけ（R でやり直さない）', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto('/?seed=1&clear=6');
+  await frames(page);
+  await page.keyboard.press('KeyR');
+  await frames(page);
+  expect((await game(page)).scene).toBe('result');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
+  expect(errors).toEqual([]);
+});
+
 test('静止表示（?view）でエラーが出ない', async ({ page }) => {
   const errors = collectErrors(page);
   await page.goto('/?seed=1&view=12,24,36');

@@ -112,7 +112,8 @@ function touchButtons(): Button[] {
     ];
   }
   if (!touchUI) return [];
-  if (scene === 'result') return [left('HOME', 'Escape'), right('AGAIN', 'KeyR')];
+  // クリアしたあとはホームへ戻るだけ（やり直しは拠点の入口から）。時間切れならやり直せる
+  if (scene === 'result') return sim?.status === 'cleared' ? [left('HOME', 'Escape')] : [left('HOME', 'Escape'), right('RETRY', 'KeyR')];
   if (scene === 'play' && sim) {
     if (sim.stage.kind === 'hub') return [left('TITLE', 'Escape')];
     if (sim.stage.kind === 'tutorial') return [left('BACK', 'Escape'), right('SKIP', 'KeyS')];
@@ -262,9 +263,10 @@ function finishPlay(s: Sim): void {
   }
 }
 
-/** 結果画面で Enter：チュートリアルをクリアしたら拠点へ、それ以外はもう一度 */
+/** 結果画面で Enter：クリアしたら拠点へ（チュートリアルも）、時間切れならもう一度 */
 function resultContinue(s: Sim): void {
   if (s.stage.kind === 'tutorial' && s.status === 'cleared') goHub();
+  else if (s.status === 'cleared') resultBack(s);
   else void play(s.stage.def);
 }
 
@@ -341,7 +343,7 @@ function update(): void {
       clearedAt = performance.now() / 1000 - CLEAR.end;
       sfx.stop();
     } else if (start) resultContinue(sim);
-    else if (retry) void play(sim.stage.def);
+    else if (retry && sim.status !== 'cleared') void play(sim.stage.def);
     else if (esc) resultBack(sim);
   } else if (scene === 'confirm') {
     // 左右で選び、Enter で決める。Esc は「いいえ」
@@ -434,13 +436,12 @@ function draw(): void {
     drawTitle();
   } else if (sim && scene === 'result') {
     const e = clearSec();
-    const tutorialDone = sim.stage.kind === 'tutorial' && e !== null;
     if (e !== null) {
       renderer.clearResult(
         sim,
         e,
         newlyUnlocked ? `A NEW DOOR AT HOME: ${stageLabel(newlyUnlocked)}` : null,
-        touchUI ? (tutorialDone ? 'TAP: GO HOME' : 'TAP: RETRY') : tutorialDone ? 'ENTER: GO HOME   R: AGAIN' : 'ENTER: RETRY   ESC: HOME',
+        touchUI ? 'TAP: GO HOME' : 'ENTER: GO HOME',
       );
     } else {
       renderer.overlay([
