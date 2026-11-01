@@ -87,7 +87,7 @@ export function buildHub(cleared: ReadonlySet<string>): StageDef {
     name: 'HUB',
     kind: 'hub',
     theme: 'house',
-    bpm: 100,
+    bpm: 116,
     // 時間制限はない（実質的に終わらない長さ）
     bars: 100000,
     terrain: T.map((r) => r.join('')),
