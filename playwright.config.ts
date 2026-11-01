@@ -11,6 +11,8 @@ const channel = process.env.PW_CHANNEL ?? 'msedge';
 export default defineConfig({
   testDir: 'e2e',
   fullyParallel: true,
+  // 遊び始めるまでに曲を読み込むテストが多く、並べて動かすと時間がかかるので、1つのテストの上限を長めに
+  timeout: 60_000,
   reporter: [['list']],
   use: {
     baseURL: `http://localhost:${PORT}`,

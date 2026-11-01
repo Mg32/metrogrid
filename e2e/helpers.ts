@@ -60,3 +60,6 @@ export async function dots(page: Page): Promise<number[]> {
     return out;
   }, layout);
 }
+
+/** 曲を読み込んで遊び始めるまで待つ上限（ミリ秒）。テストを並べて動かすと、読み込みに数秒かかることがある */
+export const LOAD_MS = 15000;

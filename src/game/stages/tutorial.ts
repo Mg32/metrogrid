@@ -12,6 +12,7 @@ export const tutorial: StageDef = {
   kind: 'tutorial',
   bpm: 100,
   bars: 20,
+  stairs: 4,
   terrain: [
     '#####################',
     '#####################',

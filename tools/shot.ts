@@ -50,6 +50,12 @@ const SCENES: [string, string][] = args.view
       ['s2-canal', 'stage=STAGE2&view=45,18,80'],
       ['s2-rapids', 'stage=STAGE2&view=13,19,150'],
       ['s2-goal', 'stage=STAGE2&view=3,5,200'],
+      // チュートリアルの冒頭：階段のいちばん下に少女が現れ（tick -32〜-17、曲はまだ鳴らない）、
+      // カウント（曲の前奏。tick -16〜-1）のあいだに1拍1段ずつ昇ってくる（100 BPM）
+      ['tutorial-appear-1', 'stage=TUTORIAL&view=3,31,-28'],
+      ['tutorial-appear-2', 'stage=TUTORIAL&view=3,31,-22'],
+      ['tutorial-climb-1', 'stage=TUTORIAL&view=3,31,-15'],
+      ['tutorial-climb-2', 'stage=TUTORIAL&view=3,31,-6'],
       ['tutorial-start', 'stage=TUTORIAL&view=3,30,0'],
       ['tutorial-fast', 'stage=TUTORIAL&view=16,19,20'],
       ['hub-first', 'stage=HUB&cleared=TUTORIAL&view=6,11,0'],

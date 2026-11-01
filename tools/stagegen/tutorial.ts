@@ -28,6 +28,8 @@ const hint = (x: number, y: number, text: string) => hints.push({ x, y, text });
 o(2, 31, 'H'); o(4, 31, 'L');
 line(3, 31, 3, 26, '.'); o(3, 31, 'S');
 hint(3, 30, 'HOLD AN ARROW KEY OR DRAG TO WALK');
+// 冒頭のカウント（1小節＝4拍）のあいだに、スタートの後ろの階段を1拍1段ずつ昇ってくる（1拍で1マス進むことを見せる）
+const STAIRS = 4;
 // 2. 曲がる・止まる：右へ曲がり、また上へ
 line(3, 25, 8, 25, '.');
 hint(4, 25, 'ONE STEP PER BEAT. LET GO TO STOP');
@@ -66,7 +68,7 @@ for (const [x, y] of [[2, 28], [7, 24], [10, 14]]) o(x, y, 'E');
 const terrain = T.map((r) => r.join(''));
 const objects = O.map((r) => r.join(''));
 const scores = { a: { value: 100, decay: 1 }, b: { value: 200, decay: 2 } };
-const def: StageDef = { name: 'TUTORIAL', kind: 'tutorial', bpm: BPM, bars: BARS, terrain, objects, scores, hazards, hints };
+const def: StageDef = { name: 'TUTORIAL', kind: 'tutorial', bpm: BPM, bars: BARS, terrain, objects, scores, hazards, hints, stairs: STAIRS };
 const st = new Stage(def);
 console.log(`fast ${distanceField(st)[st.index(st.start.x, st.start.y)] / 4} beats, song ${def.bars * 4}`);
 if (process.env.SHOW) console.log(terrain.map((r, y) => `${String(y).padStart(2)} ${r}  ${objects[y]}`).join('\n'));
@@ -87,6 +89,7 @@ export const tutorial: StageDef = {
   kind: 'tutorial',
   bpm: ${def.bpm},
   bars: ${def.bars},
+  stairs: ${STAIRS},
   terrain: [
 ${terrain.map((r) => `    '${r}',`).join('\n')}
   ],

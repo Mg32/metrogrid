@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { client, collectErrors, DESKTOP, frames, game, MOBILE } from './helpers.ts';
+import { client, collectErrors, DESKTOP, frames, game, MOBILE, LOAD_MS } from './helpers.ts';
 
 /**
  * タップだけ・マウスだけで遊べるか。画面と操作は端末で分けていないので、同じ手順をマウス（デスクトップの画面）と
@@ -59,17 +59,17 @@ for (const p of POINTERS) {
       await tap(page, [144, 144]);
       await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('TUTORIAL');
       // 曲を読み込んでいるあいだ（loading）のボタンは効かない
-      await expect.poll(async () => (await game(page)).scene, { timeout: 5000 }).toBe('play');
+      await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 
       await tap(page, LEFT_BTN);
       await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
-      await expect.poll(async () => (await game(page)).scene, { timeout: 5000 }).toBe('play');
+      await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 
       // 画面の下のほうに指を置いて左下へずらすと、下（画面の左下）へ歩いて玄関の戸（STAGE 1 の入口）に入る
       await slide(page, 150, 230, 138, 237);
-      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 8000 }).toBe('STAGE1');
+      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 12000 }).toBe('STAGE1');
       await release(page);
-      await expect.poll(async () => (await game(page)).scene, { timeout: 5000 }).toBe('play');
+      await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 
       await tap(page, LEFT_BTN);
       await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
@@ -116,7 +116,7 @@ for (const p of POINTERS) {
       await page.goto('/?seed=1&stage=STAGE1&autostart');
       await expect.poll(async () => (await game(page)).sim?.tick ?? -1, { timeout: 10000 }).toBeGreaterThan(8);
       await tap(page, RIGHT_BTN);
-      await expect.poll(async () => (await game(page)).sim?.tick ?? 99, { timeout: 5000 }).toBeLessThan(8);
+      await expect.poll(async () => (await game(page)).sim?.tick ?? 99, { timeout: LOAD_MS }).toBeLessThan(8);
       expect((await game(page)).sim?.stage).toBe('STAGE1');
       expect(errors).toEqual([]);
     });

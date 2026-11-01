@@ -8,10 +8,11 @@ import { loadSound } from './sounds.ts';
  */
 export interface Conductor {
   /**
-   * 再生開始。countInBars 小節のカウントのあと songTime() = 0 になる。
+   * 再生開始。waitBars 小節の無音（曲もカウントも鳴らさない。songTime() は進む）と、countInBars 小節のカウント
+   * （曲のファイルなら前奏）のあと songTime() = 0 になる。
    * track は曲のファイルの名前（ステージ名）、loop は曲を繰り返すか（拠点）
    */
-  start(opts: { bpm: number; bars: number; countInBars: number; track?: string; loop?: boolean }): Promise<void>;
+  start(opts: { bpm: number; bars: number; countInBars: number; waitBars?: number; track?: string; loop?: boolean }): Promise<void>;
   stop(): void;
   /** 遊び終わったとき（クリア・時間切れ）。曲はそのまま最後まで鳴らし、メトロノームは止める。次の start()・stop() で止まる */
   finish(): void;
@@ -51,7 +52,7 @@ export class Metronome implements Conductor {
     unlockAudio();
   }
 
-  async start(opts: { bpm: number; bars: number; countInBars: number }): Promise<void> {
+  async start(opts: { bpm: number; bars: number; countInBars: number; waitBars?: number }): Promise<void> {
     this.stop();
     this.ctx = audioContext();
     await this.ctx.resume();
@@ -63,7 +64,9 @@ export class Metronome implements Conductor {
     this.beatSec = 60 / opts.bpm;
     this.nextBeat = -opts.countInBars * 4;
     this.endBeat = opts.bars * 4;
-    this.startAt = ctx.currentTime + 0.1 - this.nextBeat * this.beatSec;
+    // 無音の小節のあいだはクリックを鳴らさない（カウントの頭から鳴らす）
+    const wait = (opts.waitBars ?? 0) * 4 * this.beatSec;
+    this.startAt = ctx.currentTime + 0.1 + wait - this.nextBeat * this.beatSec;
     this.schedule();
     this.timer = window.setInterval(() => this.schedule(), 25);
   }
@@ -129,7 +132,7 @@ export class Music implements Conductor {
     unlockAudio();
   }
 
-  async start(opts: { bpm: number; bars: number; countInBars: number; track?: string; loop?: boolean }): Promise<void> {
+  async start(opts: { bpm: number; bars: number; countInBars: number; waitBars?: number; track?: string; loop?: boolean }): Promise<void> {
     this.stop();
     const gen = this.generation;
     const buf = opts.track ? await loadSound(`music/${opts.track}`) : null;
@@ -156,7 +159,8 @@ export class Music implements Conductor {
     // 拠点の曲は繰り返す（拍がずれないよう、曲の長さはちょうど小節の倍数にしておく）
     src.loop = opts.loop ?? false;
     src.connect(ctx.destination);
-    const at = ctx.currentTime + 0.1;
+    // 無音の小節のぶん、曲のファイルの頭を遅らせる
+    const at = ctx.currentTime + 0.1 + (opts.waitBars ?? 0) * barSec;
     src.start(at);
     this.src = src;
     this.zeroAt = at + offset;

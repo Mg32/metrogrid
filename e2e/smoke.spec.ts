@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { collectErrors, frames, game } from './helpers.ts';
+import { collectErrors, frames, game, LOAD_MS } from './helpers.ts';
 
 // 操作しない場面（URL パラメータでの静止表示など）でエラーが出ないか
 
@@ -24,7 +24,7 @@ test('?upstairs：すべてクリアした拠点の階段の前から始まり�
   const errors = collectErrors(page);
   await page.goto('/?seed=1&upstairs');
   // 曲の読み込みを待つ。テストを並べて動かすと時間がかかることがあるので長めに
-  await expect.poll(async () => (await game(page)).scene, { timeout: 15000 }).toBe('play');
+  await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
   const g = await game(page);
   expect(g.sim?.stage).toBe('HUB');
   // 階段の上り口（3,10）の隣に立っている

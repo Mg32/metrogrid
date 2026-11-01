@@ -33,6 +33,15 @@ const LH = 288;
 const MAX_SCALE = 4;
 /** 闇に浮かぶ道の板の厚み */
 const FLOOR_THICK = 6;
+/** スタートの後ろの階段（StageDef.stairs）の1段の高さ */
+const STAIR_H = 6;
+/**
+ * 階段のあるステージ（チュートリアル）の始まり：はじめは誰もいない。APPEAR_BARS 小節（曲は鳴らさない）で階段のいちばん下に
+ * 少女が現れ、次の1小節（曲の前奏。カウント）で1拍1段ずつ昇ってスタートに着く。main.ts はこのぶん曲の頭を遅らせる
+ */
+export const APPEAR_BARS = 1;
+/** 階段の、昇ってくる段より下に見える段の数（闇に溶けていく） */
+const STAIRS_FADE = 3;
 const PLAYER_H = 21;
 
 /** 床の見た目ごと・街灯の明るさの段階ごとの道の色（0: 闇、1: 街灯から2マス、2: 街灯のすぐそば）。各段階はゾーン別 */
@@ -322,6 +331,14 @@ const PORTAL_LIGHT: Record<string, string> = {
  * 扉から光の柱が立ち、少女は光に溶けて扉の向こうへ消える。道は扉から遠い順に崩れて闇へ落ち、扉だけが残る。
  * そのあと結果の欄が出て、得点を1行ずつ数え上げる
  */
+/**
+ * 拠点からステージへ移る演出（秒）。拠点の入口に入ると、入口のマスまで歩き切り、入口の色の光の柱に包まれて
+ * 少女が溶けて消え（クリア演出と同じ CLEAR.glow〜CLEAR.gone）、画面が闇に沈む（fade〜end）。end で次のステージへ。
+ * ステージでは、闇から明るくなり（カウントの1拍目）、カウントの頭 ARRIVE_BEATS 拍で少女がスタートに現れる
+ */
+export const LEAVE = { fade: 1.0, end: 1.5 };
+const ARRIVE_BEATS = 2;
+
 export const CLEAR = {
   /** 少女が光に包まれ始める／消えきる */
   glow: 0.35,
@@ -585,7 +602,8 @@ export class Renderer {
   private hole: HTMLCanvasElement;
   /** 少女：[正面, 背面][立ち, 歩き]、左右反転したものも */
   private girl: HTMLCanvasElement[][];
-  private girlGlow: HTMLCanvasElement;
+  /** 少女の形の光（向きごと。GIRL_DIR の順） */
+  private girlGlow: HTMLCanvasElement[];
   /** エンディングで手を挙げる少女 */
   private girlRaise: HTMLCanvasElement;
   /** 拠点に新しい入口が現れる演出（def の拠点を描くときだけ。order は stages/hub.ts の hubReveal）。main.ts が設定する */
@@ -617,7 +635,7 @@ export class Renderer {
     this.hole = makeHoleSprite();
     this.lot = makeLotSprite();
     this.girl = makeGirlSprites();
-    this.girlGlow = makeGlowSprite(this.girl[GIRL_DIR.up][0]);
+    this.girlGlow = this.girl.map((frames) => makeGlowSprite(frames[0]));
     this.girlRaise = makeSprite(GIRL_W, GIRL_H, (ctx) => paintGirl(ctx, GIRL_RAISE));
 
     // キャンバスの実画素サイズを正確に取る（CSSピクセル × dpr の丸め誤差でぼやけないように）
@@ -676,19 +694,15 @@ export class Renderer {
     strokeDiamond(ctx, cx, top, w, h, COLORS.textDim);
     ctx.globalAlpha = 1;
     if (s.dir) {
-      // 菱形の頂点：上・右・下・左。up は上→右の辺、right は右→下、down は下→左、left は左→上
-      const v = [
-        [cx, top],
-        [cx + w / 2, cy],
-        [cx, top + h],
-        [cx - w / 2, cy],
-      ];
-      const i = { up: 0, right: 1, down: 2, left: 3 }[s.dir];
-      const [a, b] = [v[i], v[(i + 1) % 4]];
-      plotLine(ctx, a[0], a[1], b[0], b[1], COLORS.gem);
-      // 内側にもう1本重ねて太くする
-      const inward = [1, -1, -1, 1][i];
-      plotLine(ctx, a[0], a[1] + inward, b[0], b[1] + inward, COLORS.gem);
+      // 歩いている向きの辺を、枠と同じ行の並びで内側へ太く塗る（枠の外へはみ出さない）。
+      // up は上→右の辺（上半分の右側）、right は右→下（下半分の右側）、down は下→左、left は左→上
+      const lower = s.dir === 'right' || s.dir === 'down';
+      const right = s.dir === 'up' || s.dir === 'right';
+      ctx.fillStyle = COLORS.gem;
+      for (let r = lower ? h / 2 : 0; r < (lower ? h : h / 2); r++) {
+        const rw = diamondRowWidth(r, w, h);
+        ctx.fillRect(right ? cx + rw / 2 - 3 : cx - rw / 2, top + r, 3, 1);
+      }
     }
     ctx.globalAlpha = 0.7;
     fillDiamond(ctx, Math.round(s.x), Math.round(s.y) - 3, 12, 6, COLORS.text);
@@ -763,9 +777,11 @@ export class Renderer {
 
   /**
    * songTime はカウント中なら負（足元のハイライトはカウント中も拍に合わせる）。
-   * clearSec はゴールしてからの経過秒（クリア演出）。プレイ中は null
+   * clearSec はゴールしてからの経過秒（クリア演出）。leaveSec は拠点で入口に入ってからの経過秒（LEAVE）。プレイ中は null。
+   * ステージ（stage）の曲の頭まで（songTime < 0）は、少女が現れる演出をする。songTime が -Infinity（曲を読み込んでいる
+   * あいだ）なら、まだいない
    */
-  world(sim: Sim, songTime: number, tickSec: number, clearSec: number | null = null): void {
+  world(sim: Sim, songTime: number, tickSec: number, clearSec: number | null = null, leaveSec: number | null = null): void {
     const ctx = this.lctx;
     const stage = sim.stage;
     const tickF = Math.max(0, songTime / tickSec);
@@ -774,17 +790,36 @@ export class Renderer {
     // プレイヤーの補間位置
     const fromZone = stage.cell(sim.fromX, sim.fromY)!.zone;
     const slide = Math.min(ZONE_INTERVAL[fromZone], 2) * 0.6;
-    const k = clamp01((tickF - sim.moveTick) / slide);
-    const px = lerp(sim.fromX, sim.x, k);
-    const py = lerp(sim.fromY, sim.y, k);
+    // クリアしたあとは曲の時刻が止まる（ゴールに入った tick のまま）ので、演出の経過秒でゴールのマスまで歩き切る
+    // 拠点で入口に入ったときも同じ（演出の経過秒で入口のマスまで歩き切る）
+    const exitSec = clearSec ?? leaveSec;
+    const k = clamp01((exitSec !== null ? exitSec / tickSec : tickF - sim.moveTick) / slide);
+    let px = lerp(sim.fromX, sim.x, k);
+    let py = lerp(sim.fromY, sim.y, k);
     // 歩きのコマは、位置の補間より長く、次に動ける拍まで（押し続ければ足が止まらない）
     const moved = sim.fromX !== sim.x || sim.fromY !== sim.y;
-    const walk = moved ? clamp01((tickF - sim.moveTick) / ZONE_INTERVAL[fromZone]) : 1;
+    let walk = moved ? clamp01((tickF - sim.moveTick) / ZONE_INTERVAL[fromZone]) : 1;
+    let odd = (sim.x + sim.y) % 2 !== 0;
+    // スタートの後ろの階段（カウントのあいだ、1拍1段ずつ昇ってくる）
+    const stairs = this.stairsOf(sim);
+    const climb = stairs && this.climbAt(sim, songTime, tickSec);
+    if (stairs && climb) {
+      px = stage.start.x + stairs.back.x * climb.k;
+      py = stage.start.y + stairs.back.y * climb.k;
+      walk = climb.walk;
+      odd = climb.to % 2 !== 0;
+    }
+    const drop = climb ? Math.round(climb.k * STAIR_H) : 0;
+    // ステージの始まり：カウントの頭の拍で、少女がスタートに現れる（チュートリアルは階段の演出 climb）
+    const beatU = songTime / (tickSec * TICKS_PER_BEAT);
+    const atStart = sim.x === stage.start.x && sim.y === stage.start.y && !moved;
+    const arrive = stage.kind === 'stage' && songTime < 0 && atStart ? clamp01((beatU + 4) / ARRIVE_BEATS) : 1;
 
     // 床の高さ（このステージを描くあいだだけ。iso() が持ち上げる）
     elevation = this.elevationOf(stage);
     // カメラはプレイヤーを追う
     const p = iso(px, py);
+    p.sy += drop;
     if (this.camSim !== sim) {
       this.camSim = sim;
       this.camX = p.sx;
@@ -1126,18 +1161,55 @@ export class Renderer {
       }
     }
 
-    if (clearSec !== null) {
-      sprites.push({ depth: px + py + 0.5, draw: () => this.playerEntering(p.sx, p.sy + TH / 2, clearSec) });
+    if (exitSec !== null) {
+      sprites.push({ depth: px + py + 0.5, draw: () => this.playerEntering(p.sx, p.sy + TH / 2, sim.facing, exitSec) });
+    } else if (climb && climb.appear < 1) {
+      sprites.push({ depth: px + py + 0.5, draw: () => this.playerAppearing(p.sx, p.sy + TH / 2, sim.facing, climb.appear) });
+    } else if (arrive < 1) {
+      sprites.push({ depth: px + py + 0.5, draw: () => this.playerAppearing(p.sx, p.sy + TH / 2, sim.facing, arrive) });
     } else if (!(sim.stunned && Math.floor(tickF * 2) % 2 === 0)) {
       sprites.push({
         depth: px + py + 0.5,
-        draw: () => this.player(p.sx, p.sy + TH / 2, sim.facing, walk, (sim.x + sim.y) % 2 !== 0, tickF),
+        draw: () => this.player(p.sx, p.sy + TH / 2, sim.facing, walk, odd, tickF),
       });
     }
 
     // 足元のハイライトは、立っているマスの道の直後に。ただし枠の下半分は手前の列の道と重なって隠れるので、
     // 手前の列の道を描いたあとに描く（プレイヤーより後になるが、下半分は足より下なので重ならない。手前が段差で高いときを除く）
-    if (sim.status === 'playing') {
+    if (stairs) {
+      // 昇ってくる段の先にも数段あり、下の段ほど闇に溶ける。段の側面は1段下の段まで伸ばしてつなげる。
+      // 昇ってくるあいだは、次に乗る段の縁が拍の頭で光って消える
+      const road = this.road(stage.cell(stage.start.x, stage.start.y)!, light[stage.index(stage.start.x, stage.start.y)]);
+      for (let j = 1; j <= stairs.n + STAIRS_FADE; j++) {
+        const c = { x: stage.start.x + stairs.back.x * j, y: stage.start.y + stairs.back.y * j };
+        const { sx, sy } = iso(c.x, c.y);
+        const top = sy + j * STAIR_H;
+        const alpha = j <= stairs.n ? 1 - (j - 1) * 0.1 : (1 - (j - stairs.n) / (STAIRS_FADE + 1)) * 0.6;
+        sprites.push({
+          depth: c.x + c.y,
+          draw: () => {
+            ctx.globalAlpha = alpha;
+            fillSlabSides(ctx, sx, top, TW, TH, STAIR_H + FLOOR_THICK);
+            ctx.drawImage(road, sx - TW / 2, top);
+            ctx.globalAlpha = 1;
+          },
+        });
+      }
+      if (climb && climb.appear >= 1) {
+        const c = { x: stage.start.x + stairs.back.x * climb.to, y: stage.start.y + stairs.back.y * climb.to };
+        const { sx, sy } = iso(c.x, c.y);
+        sprites.push({
+          depth: c.x + c.y + 0.05,
+          draw: () => {
+            ctx.globalAlpha = 1 - climb.beat;
+            strokeDiamond(ctx, sx, sy + climb.to * STAIR_H, TW, TH, COLORS.gem);
+            ctx.globalAlpha = 1;
+          },
+        });
+      }
+    }
+    // 階段を昇ってくるあいだと、現れるあいだは、足元の枠を出さない
+    if (sim.status === 'playing' && !climb && arrive >= 1) {
       const d = sim.x + sim.y;
       sprites.push({ depth: d + 0.05, draw: () => this.beatTile(sim, songTime / tickSec, false) });
       sprites.push({ depth: d + 0.501, draw: () => this.beatTile(sim, songTime / tickSec, true) });
@@ -1160,6 +1232,13 @@ export class Renderer {
       const g = iso(goal.x, goal.y);
       this.clearLight(g.sx, g.sy + TH / 2, clearSec);
     }
+    if (leaveSec !== null) {
+      // 入口の色の光の柱
+      const cell = stage.cell(sim.x, sim.y);
+      const color = (cell?.obj?.type === 'portal' && PORTAL_LIGHT[cell.obj.stage]) || COLORS.goal;
+      const g = iso(sim.x, sim.y);
+      this.clearLight(g.sx, g.sy + TH / 2, leaveSec, color);
+    }
 
     // 演出：ミスの輪、得点の表示
     for (const ev of sim.events) {
@@ -1178,6 +1257,20 @@ export class Renderer {
 
     ctx.restore();
     elevation = () => 0;
+
+    // 闇に沈む（拠点の入口に入ったあと）／闇から明るくなる（ステージの始まり。カウントの1拍目）
+    const dark =
+      leaveSec !== null
+        ? clamp01((leaveSec - LEAVE.fade) / (LEAVE.end - LEAVE.fade))
+        : stage.kind === 'stage' && songTime < 0 && atStart
+          ? 1 - clamp01(beatU + 4)
+          : 0;
+    if (dark > 0) {
+      ctx.globalAlpha = Math.ceil(dark * 4) / 4;
+      ctx.fillStyle = COLORS.bg;
+      ctx.fillRect(0, 0, LW, LH);
+      ctx.globalAlpha = 1;
+    }
   }
 
   private ring(cx: number, cy: number, rx: number, ry: number, color: string): void {
@@ -2216,8 +2309,33 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  /** クリア演出の少女：扉の前で奥を向き、光に包まれて溶け、ふわりと浮いて消える */
-  private playerEntering(cx: number, cy: number, e: number): void {
+  /**
+   * 少女が現れる（チュートリアルの始まり。クリア演出の逆）：足元に光がたまり、少女の形の光が上から降りてきて、
+   * 光が引くと少女が立っている。v は 0〜1
+   */
+  private playerAppearing(cx: number, cy: number, facing: Dir, v: number): void {
+    if (v <= 0) return;
+    const ctx = this.lctx;
+    const left = cx - GIRL_FOOT_X;
+    const top = cy - GIRL_FOOT_Y;
+    const step = (x: number) => Math.round(x * 4) / 4;
+    ctx.globalAlpha = step(Math.sin(Math.PI * v) * 0.4);
+    fillDiamond(ctx, cx, cy - TH / 2 + 1, TW - 4, TH - 2, COLORS.goal);
+    const glow = this.girlGlow[GIRL_DIR[facing]];
+    if (v < 0.5) {
+      ctx.globalAlpha = step(v * 2);
+      ctx.drawImage(glow, left, top - Math.round((0.5 - v) * 24));
+    } else {
+      ctx.globalAlpha = 1;
+      ctx.drawImage(this.girl[GIRL_DIR[facing]][0], left, top);
+      ctx.globalAlpha = step(1 - (v - 0.5) * 2);
+      ctx.drawImage(glow, left, top);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** クリア演出の少女：ゴールに入ってきた向きのまま立ち止まり、光に包まれて溶け、ふわりと浮いて消える */
+  private playerEntering(cx: number, cy: number, facing: Dir, e: number): void {
     if (e >= CLEAR.gone) return;
     const ctx = this.lctx;
     const left = cx - GIRL_FOOT_X;
@@ -2225,34 +2343,34 @@ export class Renderer {
     const u = clamp01((e - CLEAR.glow) / (CLEAR.gone - CLEAR.glow));
     const step = (v: number) => Math.round(v * 4) / 4;
     if (u < 0.5) {
-      ctx.drawImage(this.girl[GIRL_DIR.up][0], left, top);
+      ctx.drawImage(this.girl[GIRL_DIR[facing]][0], left, top);
       ctx.globalAlpha = step(u * 2);
-      ctx.drawImage(this.girlGlow, left, top);
+      ctx.drawImage(this.girlGlow[GIRL_DIR[facing]], left, top);
     } else {
       ctx.globalAlpha = step(1 - (u - 0.5) * 2);
-      ctx.drawImage(this.girlGlow, left, top - Math.round((u - 0.5) * 12));
+      ctx.drawImage(this.girlGlow[GIRL_DIR[facing]], left, top - Math.round((u - 0.5) * 12));
     }
     ctx.globalAlpha = 1;
   }
 
   /** クリア演出の光：扉の足元に広がる光、扉から立ち上る光の柱、昇っていく光の粒 */
-  private clearLight(cx: number, ground: number, e: number): void {
+  private clearLight(cx: number, ground: number, e: number, color: string = COLORS.goal): void {
     const ctx = this.lctx;
     // 足元の光（扉のまわりのマスへ広がる）
     const spread = Math.min(TW * 2, 8 + Math.floor(e * 40) * 2);
     ctx.globalAlpha = 0.25;
-    fillDiamond(ctx, cx, ground - spread / 4, spread, spread / 2, COLORS.goal);
+    fillDiamond(ctx, cx, ground - spread / 4, spread, spread / 2, color);
     // 光の柱。芯は濃く、外側は薄い
     const w = Math.min(12, Math.floor(e * 24) * 2);
     if (w > 0) {
       ctx.globalAlpha = 0.2;
-      ctx.fillStyle = COLORS.goal;
+      ctx.fillStyle = color;
       ctx.fillRect(cx - w / 2, ground - LH * 2, w, LH * 2 - 2);
       ctx.globalAlpha = 0.45;
       ctx.fillRect(cx - w / 4, ground - LH * 2, w / 2, LH * 2 - 2);
     }
     // 光の粒：柱のまわりを昇って消える。位置は番号から決める（毎フレーム同じ動き）
-    ctx.fillStyle = COLORS.goal;
+    ctx.fillStyle = color;
     for (let i = 0; i < 24; i++) {
       const life = 1.6;
       const age = e - 0.2 - ((i * 0.137) % life);
@@ -2341,10 +2459,37 @@ export class Renderer {
     const zone = sim.stage.cell(sim.x, sim.y)!.zone;
     this.text(ZONE_LABEL[zone], LW / 2, 15, 1, zone === 0 ? COLORS.textDim : COLORS.warn, 'center');
 
-    if (songTime < 0) {
-      const n = Math.ceil(-songTime / beatSec);
+    // カウントの数字は曲の頭の4拍だけ（チュートリアルの、少女が現れる小節では出さない）
+    const n = Math.ceil(-songTime / beatSec);
+    if (songTime < 0 && n <= 4) {
       this.text(String(n), LW / 2, LH / 2 - 36, 4, COLORS.text, 'center');
     }
+  }
+
+  /** スタートの後ろの階段（StageDef.stairs）：段数と、スタートから見て階段の下りていく向き（進む向きの反対） */
+  private stairsOf(sim: Sim): { n: number; back: Vec } | null {
+    const n = sim.stage.def.stairs;
+    if (!n) return null;
+    const f = DIR_VEC[sim.stage.startFacing()];
+    return { n, back: { x: -f.x, y: -f.y } };
+  }
+
+  /**
+   * 曲の頭まで（songTime < 0）の、階段での様子。k は補間した段（0 がスタート）、to は昇っていく先の段、
+   * walk は歩きのコマの進み、beat は拍の中の進み（0〜1）、appear は現れる演出の進み（0 はまだいない、1 で現れ終わる）。
+   * 現れるあいだは階段のいちばん下に立ち、そのあと拍の頭で1段ずつ、歩くときと同じ速さで昇る。
+   * songTime が -Infinity（曲を読み込んでいるあいだ）なら、まだいない。スタートから動いていないときだけ。それ以外は null
+   */
+  private climbAt(sim: Sim, songTime: number, tickSec: number): { k: number; to: number; walk: number; beat: number; appear: number } | null {
+    const n = sim.stage.def.stairs ?? 0;
+    if (!n || songTime >= 0 || sim.x !== sim.stage.start.x || sim.y !== sim.stage.start.y) return null;
+    const u = songTime / (tickSec * TICKS_PER_BEAT);
+    if (u < -n) return { k: n, to: n, walk: 1, beat: 0, appear: clamp01((u + n + APPEAR_BARS * 4) / (APPEAR_BARS * 4)) };
+    const b = Math.floor(u);
+    const beat = u - b;
+    // 段から段へ動くのは、ふつうに1マス歩くときと同じ長さ（world の slide と同じ）
+    const slide = (Math.min(ZONE_INTERVAL[0], 2) * 0.6) / TICKS_PER_BEAT;
+    return { k: lerp(-b, -b - 1, clamp01(beat / slide)), to: -b - 1, walk: beat, beat, appear: 1 };
   }
 
   /** 拍の表示：4つの点のうち今の拍が光る */

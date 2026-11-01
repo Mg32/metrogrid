@@ -39,6 +39,11 @@ export interface StageDef {
   hazards: HazardDef[];
   /** 地面に浮かぶ案内（プレイヤーが近づくと出る）。英大文字・数字・記号のみ */
   hints?: { x: number; y: number; text: string }[];
+  /**
+   * スタートの後ろ（進む向きの反対）から昇ってくる階段の段数。カウントの拍ごとに1段ずつ昇ってスタートに着く
+   * （チュートリアルの冒頭で、1拍で1マス進むことを見せる）。見た目だけで、歩けるマスではない
+   */
+  stairs?: number;
   /** ハブの入口：objects の数字 → 行き先のステージ名 */
   portals?: Record<string, string>;
   /**

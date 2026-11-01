@@ -11,7 +11,7 @@ import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
 import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
 import { ENDING } from './render/ending.ts';
-import { CLEAR, Renderer, revealEnd } from './render/renderer.ts';
+import { APPEAR_BARS, CLEAR, LEAVE, Renderer, revealEnd } from './render/renderer.ts';
 import { Stick } from './touch.ts';
 
 /**
@@ -82,7 +82,7 @@ let revealUntil = 0;
 
 const stageLabel = (name: string) => name.replace(/(\d+)$/, ' $1');
 
-type Scene = 'title' | 'loading' | 'play' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
+type Scene = 'title' | 'loading' | 'play' | 'leaving' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
 
 /** 歩く向きを決めている指 */
 let steer: Stick | null = null;
@@ -173,6 +173,10 @@ function resetAll(): void {
 }
 /** エンディングが始まった時刻（performance.now() の秒）。?ending では固定の経過秒 */
 let endingAt = 0;
+/** 拠点で入口に入った時刻（performance.now() の秒）と行き先。光に包まれて闇に沈む演出（LEAVE）のあと、行き先を遊び始める */
+let leaveAt = 0;
+let leaveTarget: StageDef | null = null;
+const leaveSec = () => performance.now() / 1000 - leaveAt;
 let fixedEndingSec: number | null = null;
 /** ?title=SEC：タイトルを止めて表示する秒 */
 const fixedTitleSec = params.has('title') ? Number(params.get('title')) : null;
@@ -222,7 +226,9 @@ async function play(def: StageDef, start?: Vec): Promise<void> {
   // 拠点はカウントなしですぐ歩ける
   // 曲のファイル（sound/music/<名前>.wav）があればそれを、なければメトロノームを鳴らす。拠点の曲は繰り返す
   const hub = stage.kind === 'hub';
-  await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: hub ? 0 : 1, track: stage.def.name, loop: hub });
+  // 階段のあるステージ（チュートリアル）は、曲の前に少女が現れる小節を置く（曲もカウントも鳴らさない）
+  const waitBars = stage.def.stairs ? APPEAR_BARS : 0;
+  await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: hub ? 0 : 1, waitBars, track: stage.def.name, loop: hub });
   scene = 'play';
 }
 
@@ -388,6 +394,9 @@ function update(): void {
       if (confirmKind === 'upstairs') goHub(UPSTAIRS);
       else scene = 'title';
     }
+  } else if (scene === 'leaving') {
+    // 入口の光に包まれて闇に沈むあいだは操作できない（拠点の曲は鳴ったまま）
+    if (leaveSec() >= LEAVE.end) void play(leaveTarget!);
   } else if (scene === 'ending') {
     // エンディングは飛ばせない。終わると、ガレキだけが残った画面へ
     if (fixedEndingSec === null && endingSec() > ENDING.end + 2) {
@@ -426,7 +435,13 @@ function update(): void {
       scene = 'confirm';
     } else if (sim.status === 'portal') {
       const target = STAGES[sim.portal!];
-      if (target) void play(target);
+      if (target) {
+        scene = 'leaving';
+        leaveAt = performance.now() / 1000;
+        leaveTarget = target;
+        steer = null;
+        input.clearPressed();
+      }
     } else if (sim.status !== 'playing') finishPlay(sim);
   }
 }
@@ -448,15 +463,24 @@ function draw(): void {
   renderer.begin();
   // 結果画面では止まった時点の様子を表示する
   const songTime =
-    scene === 'play' ? conductor.songTime() : scene === 'view' ? viewTick * tickSec : sim ? Math.max(sim.tick, 0) * tickSec : 0;
+    scene === 'play' || scene === 'leaving'
+      ? conductor.songTime()
+      : scene === 'view'
+        ? viewTick * tickSec
+        : // 曲を読み込んでいるあいだ、ステージとチュートリアルでは少女はまだいない（現れる前。ステージは闇の中）
+          scene === 'loading' && sim && sim.stage.kind !== 'hub'
+          ? -Infinity
+          : sim
+            ? Math.max(sim.tick, 0) * tickSec
+            : 0;
   if (scene === 'ending') {
     renderer.ending(endingSec(), total);
   } else if (scene === 'ruins') {
     renderer.title(performance.now() / 1000, { cleared: 0, collapsed: true, prompt: null, beatSec: 0.6 });
   } else if (sim && scene !== 'title') {
-    renderer.world(sim, songTime, tickSec, clearSec());
-    // クリア演出のあいだは HUD を消す（得点は結果の欄で数え上げる）
-    if (scene !== 'loading' && clearSec() === null) renderer.hud(sim, songTime, tickSec);
+    renderer.world(sim, songTime, tickSec, clearSec(), scene === 'leaving' ? leaveSec() : null);
+    // クリア演出と、拠点の入口に入る演出のあいだは HUD を消す（得点は結果の欄で数え上げる）
+    if (scene !== 'loading' && scene !== 'leaving' && clearSec() === null) renderer.hud(sim, songTime, tickSec);
   }
 
   if (scene === 'confirm' && confirmKind === 'upstairs') {
