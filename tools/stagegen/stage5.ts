@@ -1,185 +1,214 @@
-// STAGE 5 の地図を組み立てて src/game/stages/stage5.ts を書き出す
+// STAGE 5 の地図を組み立てて src/game/stages/stage5.ts を書き出す（企画書 第4.2節「STAGE 5：夜逃げから廃屋まで」）
 //   node tools/stagegen/stage5.ts          所要時間を表示するだけ（SHOW=1 で地図も表示）
-//   node tools/stagegen/stage5.ts --write  src/game/stages/stage5.ts を上書きする（手で直した分は消える）
+//   node tools/stagegen/stage5.ts --write  src/game/stages/stage5.ts を上書きする
 //
-// 道以外（'#'）は闇で、描かれない。道は闇に浮かぶ。
-// スタート（奥の和室の襖）は画面の下。折り返しながら -y へ登っていき、画面では斜め右上へ進む。
-// 家に近い場所。これまでのステージの景色（路地、庭、通り、屋根）と家の中の床が、別のつながり方でつぎはぎに並ぶ。
-// 危険物は家の中の物（柱時計の振り子と扇風機の首振り）。
-// 組み立ては「進む向き p（スタートから 0, 1, …）」と「横 x」で考え、グリッドには y = YO − p で置く。
-// 扉や小物の見える面は +x / +y 側なので、道が小物の +x 側か −p 側（y の大きい側）に来るように置く。
-import { writeFileSync } from 'node:fs';
-import path from 'node:path';
-import { Stage, type HazardDef, type StageDef } from '../../src/game/stage.ts';
-import { distanceField } from '../bots/nav.ts';
+// 作業座標：x＝横、y＝進む向き（y が大きいほどスタート側）。そのまま -y へ登る（画面では右上へ）。
+// 夜逃げの夜の「物で埋まった広い部屋」から、間取りが消えた「開けた草地」の廃屋まで。年月の間は闇として空け、板一枚で渡る。
+// 記憶の断片は、間の闇から横に大きく張り出して渡る。地図は企画のときのマス目の定義（2026-10-31）を移したもの。
+import { build, Layout, report, write, type Kind, type P } from './lib.ts';
 
-const BPM = 120;
-const BARS = Number(process.env.BARS ?? 64);
-const RUNGS = 11;
-/** 段 k の下の行（安全）の p。上の行は +1、段の間（闇）は +2、+3 */
-const lo = (k: number) => 4 + 4 * k;
-const PMAX = lo(RUNGS - 1) + 7;
-const YO = PMAX;
-const W = 24, H = PMAX + 1;
-const X0 = 3, X1 = 19;
+const BPM = 100;
+const BARS = Number(process.env.BARS ?? 65);
+const L = new Layout(44, 110);
+const line = (pts: P[], k: Kind, h = 0) => L.path(pts, k, h);
+/** 歩けない家具の塊。kind は scenery の1文字（描画で色と形が決まる）、hh は高さ（段） */
+const furn = (kind: string, x0: number, y0: number, x1: number, y1: number, hh: number) => {
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    L.remove(x, y);
+    L.scenery.set(`${x},${y}`, { kind, h: hh });
+  }
+};
+/** 記憶の断片のマス（色合いを分ける） */
+const memory = new Set<string>();
+const mark = (pts: P[]) => {
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [[x0, y0], [x1, y1]] = [pts[i], pts[i + 1]];
+    for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++) for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++) memory.add(`${x},${y}`);
+  }
+};
 
-const T: string[][] = Array.from({ length: H }, () => Array(W).fill('#'));
-const O: string[][] = Array.from({ length: H }, () => Array(W).fill(' '));
-const t = (x: number, p: number, ch: string) => { T[YO - p][x] = ch; };
-const o = (x: number, p: number, ch: string) => { O[YO - p][x] = ch; };
-const at = (x: number, p: number): [number, number] => [x, YO - p];
-const row = (p: number, x0: number, x1: number, ch: string) => { for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++) t(x, p, ch); };
-const hazards: HazardDef[] = [];
-/** 柱時計の振り子：闇に浮かぶ時計から下りた竿の先の錘が、cells の上を period tick で1往復する */
-const pendulum = (cells: [number, number][], axis: 'x' | 'y', period: number) =>
-  hazards.push({ type: 'swing', look: 'pendulum', cells: cells.map(([x, p]) => at(x, p)).sort((a, b) => a[0] - b[0] || a[1] - b[1]), axis, period });
-/**
- * 扇風機の首振り：段の間の闇（pivot）に立ち、首を振って、頭が速い道の上を period tick で1往復する。
- * 頭の真下のマスが危険。振り切ると頭は危険なマスの外に出る（箱ブランコと同じ揺れ方）
- */
-const fan = (k: number, x: number, period: number) =>
-  hazards.push({ type: 'swing', look: 'fan', pivot: at(x, lo(k) + 2), axis: 'x', period, cells: [at(x - 1, lo(k) + 1), at(x, lo(k) + 1), at(x + 1, lo(k) + 1)] });
-
-// 段は 11 段。段 k は下の行 lo(k)（安全）と上の行 lo(k)+1 の2行で、x = 3〜19。
-// 偶数段は +x へ、奇数段は −x へ歩き、端の連絡路（段の間の2行）で次の段へ登る。
-// 安全な道（下の行と端の連絡路）には危険物も欠けも置かない（慣れていなくても、安全な道を歩けば戻されない）。
-const rightEnd = (k: number) => k % 2 === 0;
-for (let k = 0; k < RUNGS; k++) {
-  row(lo(k), X0, X1, '.');
-  row(lo(k) + 1, X0, X0 + 1, '.');
-  row(lo(k) + 1, X1 - 1, X1, '.');
-  if (k < RUNGS - 1) { const x = rightEnd(k) ? X1 : X0; t(x, lo(k) + 2, '.'); t(x, lo(k) + 3, '.'); }
+// ── A 夜逃げの夜：物で埋まった広い部屋（和室 → 居間 → 台所）。家具の間を縫って歩く（密）
+L.seg([14, 105], [14, 106], '.');
+L.put('S', [14, 106]);
+L.rect(10, 90, 30, 104, '.');
+L.rect(32, 92, 37, 98, '.'); // 台所：戸口一つでつながる。部屋の奥から見えてくる
+L.seg([29, 92], [31, 92], ',');
+// 襖の仕切り：開いた所からしか抜けられない
+furn('F', 10, 100, 25, 100, 1.8);
+furn('F', 14, 94, 30, 94, 1.8);
+furn('u', 11, 102, 13, 103, 0.4); // 布団
+furn('T', 16, 103, 17, 104, 1.8); // 箪笥
+furn('x', 20, 102, 21, 102, 0.8); // 荷造りの箱
+furn('x', 24, 103, 24, 104, 0.8);
+furn('T', 29, 101, 30, 103, 1.8);
+furn('t', 18, 96, 21, 98, 0.8); // 食器の残った食卓（画面の焦点）
+furn('R', 36, 92, 37, 92, 1.8); // 冷蔵庫
+furn('v', 32, 98, 34, 98, 1.0); // 流しとこんろ
+furn('x', 36, 97, 37, 98, 0.8);
+furn('V', 27, 96, 28, 96, 1.0); // テレビ
+furn('x', 12, 96, 12, 98, 0.8);
+furn('C', 10, 91, 12, 92, 2.2); // 食器棚
+furn('x', 22, 91, 23, 91, 0.8);
+furn('K', 25, 90, 27, 91, 1.2); // 流し
+// 居間の敷物（八分）：回りっぱなしの扇風機と柱時計の振り子。破れた襖から台所側へ抜けられる
+for (let y = 96; y <= 98; y++) for (let x = 15; x <= 24; x++) if (!(x >= 18 && x <= 21)) L.seg([x, y], [x, y], ',');
+for (const p of [[20, 94], [21, 94]] as P[]) {
+  L.scenery.delete(`${p[0]},${p[1]}`);
+  L.seg(p, p, ',');
 }
-const lane = (k: number, ch: string) => row(lo(k) + 1, X0 + 2, X1 - 2, ch);
-// スタート周辺（段 0〜2）：2行とも安全で道幅が広い
-for (const k of [0, 1, 2]) lane(k, '.');
-// 中間（段 3〜6）：上の行は八分。柱時計の振り子が揺れ、扇風機が首を振る
-for (const k of [3, 4, 5, 6]) lane(k, ',');
-pendulum([[7, lo(3) + 1], [8, lo(3) + 1], [9, lo(3) + 1]], 'x', 22);
-pendulum([[12, lo(4) + 1], [13, lo(4) + 1], [14, lo(4) + 1]], 'x', 18);
-fan(5, 11, 30);
-pendulum([[6, lo(6) + 1], [7, lo(6) + 1], [8, lo(6) + 1]], 'x', 26);
-fan(6, 14, 26);
-// ゴール周辺（段 7〜10）：上の行は十六分。欠けが多い
-for (const k of [7, 8, 9, 10]) lane(k, ':');
-for (const [k, x] of [[4, 8], [5, 6], [5, 15], [6, 11], [7, 6], [7, 14], [8, 9], [8, 6], [9, 7], [9, 16], [10, 10], [10, 15]]) t(x, lo(k) + 1, ' ');
-fan(7, 10, 18);
-pendulum([[14, lo(8) + 1], [15, lo(8) + 1], [16, lo(8) + 1]], 'x', 14);
-fan(9, 12, 18);
-pendulum([[6, lo(10) + 1], [7, lo(10) + 1], [8, lo(10) + 1]], 'x', 14);
-// 段の間の近道（一方通行・危険）。振り子が横切る所もある
-const cut = (k: number, x: number, ch: string, period?: number) => {
-  t(x, lo(k) + 2, ch); t(x, lo(k) + 3, ch); o(x, lo(k) + 2, '^');
-  if (period) pendulum([[x, lo(k) + 2], [x, lo(k) + 3]], 'y', period);
-};
-cut(0, 9, ',');
-cut(2, 11, ',', 22);
-cut(5, 8, ',', 18);
-cut(7, 13, ':', 10);
-cut(9, 9, ':', 10);
+L.rect(20, 95, 21, 95, ',');
+L.hazard({ type: 'swing', look: 'fan', pivot: [18, 97], axis: 'x', period: 30, cells: [[15, 97], [16, 97], [17, 97]] });
+L.hazard({ type: 'swing', look: 'pendulum', axis: 'y', period: 34, cells: [[23, 96], [23, 97], [23, 98]] });
+L.score('room', [15, 96], [22, 97], [17, 96], [10, 90], [30, 104]);
+L.thing('dishes', [19, 97]);
+L.thing('pendant_off', [20, 97]); // 天井の電灯は消えている（灯りのモチーフ）
+L.thing('torn_fusuma', [19, 94]);
+L.thing('calendar', [25, 100]);
+L.thing('shoes_left', [31, 93]);
+// 台所への寄り道（散らかった戸口を抜ける）：開いたままの冷蔵庫、置き去りの鍋、炊飯器
+L.score('kitchen', [34, 96], [35, 94]);
+L.thing('fridge_open', [38, 93]);
+L.thing('rice_cooker', [38, 95]);
+L.thing('pot_left', [33, 99]);
+line([[30, 89], [36, 89], [36, 88]], '.'); // 台所の勝手口から外へ
+// 年月の間：板一枚
+line([[36, 87], [36, 79]], '.');
 
-// --- スタート：奥の和室の襖を開けると、闇の中へ道が続いている ---
-const SX = 5;
-t(SX, 2, '.'); t(SX, 3, '.');
-o(SX, 2, 'S'); o(SX - 1, 2, 'A'); o(SX - 1, 3, 'A');
+// 記憶の断片1：公園の空のブランコ（八分）。間の闇から西へ張り出して渡る
+const PARK: P[] = [[9, 96], [4, 96], [4, 84], [14, 84], [14, 80], [20, 80], [20, 77]];
+line(PARK, ',');
+mark(PARK);
+L.hazard({ type: 'swing', axis: 'y', period: 30, cells: [[4, 89], [4, 90], [4, 91]] });
+L.hazard({ type: 'swing', axis: 'x', period: 30, cells: [[8, 84], [9, 84], [10, 84]] });
+L.hazard({ type: 'swing', axis: 'x', period: 22, cells: [[16, 80], [17, 80], [18, 80]] });
+L.thing('swingframe', [3, 90], [9, 85], [17, 81]);
+L.score('park', [4, 93], [12, 84], [20, 79]);
+L.thing('sandbox', [3, 86]);
+L.thing('bench_old', [10, 85]);
+L.thing('slide', [3, 92]);
+L.thing('drinking_fountain', [5, 94]);
 
-// --- ゴール：最後の段の端から登った先、欠けに囲まれて扉が一枚だけ立っている ---
-const GP = lo(RUNGS - 1) + 5;
-const GX = rightEnd(RUNGS - 1) ? X1 : X0;
-for (let p = lo(RUNGS - 1) + 2; p <= GP; p++) t(GX, p, '.');
-for (const [x, p] of [[GX - 1, GP], [GX + 1, GP], [GX - 1, GP - 1], [GX + 1, GP - 1], [GX, GP + 1]]) t(x, p, ' ');
-o(GX, GP, 'G');
+// ── B 数年後：埃、破れた障子、止まった扇風機（中）。床の抜けた部屋を突っ切る短い八分の近道（停止マス一つ）
+line([[36, 78], [36, 76], [20, 76], [20, 68], [28, 68], [28, 63], [14, 63], [14, 60]], '.');
+line([[24, 75], [24, 69]], ',');
+L.put('P', [24, 72]);
+L.thing('torn_shoji', [35, 77], [27, 77], [21, 70], [36, 75]);
+L.thing('dust', [32, 71], [24, 67], [13, 62]);
+L.thing('weed', [22, 74], [11, 64]);
+L.thing('table_dusty', [25, 70]);
+L.thing('fan_stopped', [18, 64]);
+L.thing('leak_bucket', [21, 62]);
+L.thing('fallen_frame', [17, 62]);
+L.thing('dust_pile', [34, 78], [15, 81]);
+L.thing('stopped_clock', [37, 76]);
+line([[14, 59], [14, 51]], '.');
 
-// 行き止まりの路地。これまでの景色で見た物が、別のつながり方で闇に浮かぶ
-const spur = (cells: [number, number][], end: [number, number], prop: string) => {
-  for (const [x, p] of cells) t(x, p, '.');
-  o(end[0], end[1], prop);
-};
-spur([[2, lo(1)], [1, lo(1)]], [0, lo(1)], 'H');
-spur([[2, lo(3) + 1], [1, lo(3) + 1]], [0, lo(3) + 1], 'V');
-spur([[2, lo(5)], [1, lo(5)]], [0, lo(5)], 'Z');
-spur([[2, lo(8)], [1, lo(8)]], [0, lo(8)], 'N');
-spur([[20, lo(2)]], [21, lo(2)], 'O');
-spur([[20, lo(5) + 1]], [21, lo(5) + 1], 'X');
-const deco = (x: number, p: number, prop: string) => {
-  if (T[YO - p][x] !== '#') throw new Error(`飾りの位置 (${x},${p}) が空いていない`);
-  o(x, p, prop);
-};
-for (const [k, x, prop] of [
-  [0, 5, 'E'], [0, 15, 'L'], [1, 7, 'Q'], [1, 14, 'V'], [2, 4, 'U'], [2, 14, 'Z'], [3, 5, 'N'], [3, 16, 'O'],
-  [4, 5, 'F'], [4, 16, 'E'], [5, 15, 'M'], [5, 5, 'Y'], [6, 7, 'C'], [7, 4, 'J'], [8, 16, 'L'], [9, 14, 'A'],
-] as [number, number, string][]) deco(x, lo(k) + 2, prop);
-
-// 床の見た目：段ごとに、これまでの景色（路地、庭、石畳、アスファルト、瓦屋根）と家の中（畳、板の間、土間）がつぎはぎに並ぶ。
-// 1段の中でも、真ん中で別の景色につながっている
-const PATCH = ['t', 'l', 'g', 's', 'w', 'r', 'a', 'c', 'g', 'l', 't', 'w'];
-const F: string[][] = Array.from({ length: H }, () => Array(W).fill('t'));
-for (let p = 0; p <= PMAX; p++) {
-  const k = Math.max(0, Math.floor((p - lo(0)) / 4));
-  for (let x = 0; x < W; x++) F[YO - p][x] = PATCH[(k + (x > 11 ? 1 : 0)) % PATCH.length];
+// 記憶の断片2：用水路（八分）。東へ張り出し、筋がずれる。深みは一つだけ。誰も映らない水面を、上流から物が流れてくる
+const CANAL: P[] = [[29, 65], [38, 65], [38, 58], [41, 58], [41, 52], [36, 52], [36, 45], [34, 45]];
+line(CANAL, ',');
+mark(CANAL);
+for (const k of memory) {
+  const [x, y] = k.split(',').map(Number);
+  if (y <= 66 && y >= 45 && x >= 29) L.water.add(k);
 }
+L.hole([38, 57]);
+L.water.add('38,57');
+// 流れ：誰も映らない水面を、上流（出口側）から下流（入口側）へ物が流れてくる。水の筋の真っすぐな区間ごとに、
+// 次の物が来るまでの間隔を区間の長さの4倍より長くとる（やりすごしてから入れば、次の物が来る前に区間を抜けられる）
+const flow = (x: number, y0: number, y1: number, every: number) =>
+  L.hazard({ type: 'flow', cells: Array.from({ length: y1 - y0 + 1 }, (_, i) => [x, y0 + i] as P), interval: 2, every });
+flow(38, 58, 65, 36);
+flow(41, 52, 58, 32);
+flow(36, 45, 52, 36);
+L.score('canal', [38, 61], [39, 52], [36, 47]);
 
-// --- 得点マスの候補（文字ごとに4つの候補から2つ選ばれる） ---
-for (const [x, p] of [[1, lo(1)], [1, lo(3) + 1], [20, lo(2)], [1, lo(5)]]) o(x, p, 'a');
-for (const [x, p] of [[9, lo(0) + 3], [11, lo(2) + 3], [10, lo(3) + 1], [16, lo(4) + 1]]) o(x, p, 'b');
-for (const [x, p] of [[8, lo(5) + 3], [20, lo(5) + 1], [12, lo(5) + 1], [9, lo(6) + 1]]) o(x, p, 'c');
-for (const [x, p] of [[13, lo(7) + 3], [11, lo(8) + 1], [9, lo(9) + 3], [13, lo(10) + 1]]) o(x, p, 'd');
+// ── C さらに後：ツタ、錆び、背の高い草（中〜疎）。草むらの奥に得点のある寄り道
+line([[14, 50], [14, 48], [30, 48], [30, 44], [34, 44], [34, 36], [26, 36], [26, 34]], '.');
+L.thing('ivy', [13, 49], [22, 47], [29, 45], [33, 40], [13, 47]);
+L.thing('rust', [18, 47], [27, 37], [15, 47]);
+L.thing('tallgrass', [16, 49], [31, 43], [35, 40], [12, 49], [26, 45]);
+line([[25, 47], [25, 45]], ',');
+L.score('later', [25, 46], [25, 45]);
+line([[26, 33], [26, 25]], '.');
 
-const terrain = T.map((r) => r.join(''));
-const objects = O.map((r) => r.join(''));
-const floors = F.map((r) => r.join(''));
-const scores = { a: { value: 150, decay: 1, pick: 2 }, b: { value: 300, decay: 2, pick: 2 }, c: { value: 500, decay: 3, pick: 2 }, d: { value: 800, decay: 5, pick: 2 } };
-const def: StageDef = { name: 'STAGE5', theme: 'house', bpm: BPM, bars: BARS, terrain, objects, floors, scores, hazards };
-const st = new Stage(def);
-const i = st.index(st.start.x, st.start.y);
-console.log(`safe ${distanceField(st, { safeOnly: true })[i] / 4} beats, fast ${distanceField(st)[i] / 4} beats, song ${def.bars * 4}`);
-if (process.env.SHOW) console.log(terrain.map((r, y) => `${String(y).padStart(2)} ${r}  ${objects[y]}`).join('\n'));
+// 記憶の断片3：空の路面電車の通り（十六分、小節ゲート2つ）。東へ張り出す
+const TRAM: P[] = [[35, 38], [38, 38], [38, 28], [29, 28], [29, 25]];
+line(TRAM, ':');
+mark(TRAM);
+L.put('B', [38, 33], [33, 28]);
+for (const [x, y] of [[36, 38], [37, 38], [38, 37], [38, 36], [38, 35], [38, 34], [38, 32], [38, 31], [38, 30], [38, 29]] as P[]) L.put('=', [x, y]);
+L.score('tram', [38, 36], [31, 28]);
+// 空の路面電車（揺れ型）。STAGE 3 とあわせて作品全体で2か所。振り切ると線路の端から闇へ走り去り、しばらく通りが空く。
+// 線路の上ではプレイヤー（十六分）より速いので、走り去ったすぐ後ろについて行けば追いつかれない
+L.hazard({ type: 'swing', look: 'tram', axis: 'y', period: 40, reach: 10, cells: Array.from({ length: 9 }, (_, i) => [38, 29 + i] as P) });
 
-const OUT = path.resolve(import.meta.dirname, '../../src/game/stages/stage5.ts');
-if (process.argv.includes('--write')) {
-  const h = (x: HazardDef) => '    ' + JSON.stringify(x).replace(/"(\w+)":/g, '$1: ').replace(/"/g, "'").replace(/,(?=\S)/g, ', ') + ',';
-  const src = `import type { StageDef } from '../stage.ts';
+// ── D 廃屋：間取りが消えた、開けた草地（疎）。夜の部屋と同じ並びに、朽ちた食卓の跡だけが残る
+L.rect(8, 6, 32, 24, '.');
+for (let x = 13; x <= 30; x++) for (let y = 9; y <= 19; y++) L.remove(x, y); // 床が抜け落ちた大穴：まわりを回るしかない
+furn('L', 14, 21, 18, 21, 0.5); // 倒れた柱
+furn('b', 9, 12, 10, 13, 0.3); // 朽ちた食卓
+furn('G', 28, 22, 29, 22, 1.4); // 草むら
+furn('G', 31, 8, 31, 9, 1.4);
+L.thing('skyhole', [22, 15]);
+L.seg([18, 5], [18, 5], '.');
+L.put('G', [18, 5]);
+L.thing('stairs', [18, 4]);
+L.thing('broken_window', [16, 5]); // 窓のモチーフ
+L.thing('grassclump', [24, 25]);
+L.thing('rubble', [23, 26]);
+L.thing('dead_lamp', [22, 25]);
+// 記憶の断片4：雪の屋根。東から、はしごで上がって大穴の上を滑り降りる（戻れない）
+const roofCells = [...L.ramp([[31, 19], [30, 19]], 0.5, 1.5, '.', 'h'), ...L.ramp([[29, 19], [29, 14], [19, 14], [19, 9]], 1.5, 0.2, ',')];
+for (const [x, y] of roofCells) memory.add(`${x},${y}`);
+L.hazard({ type: 'periodic', look: 'snow', cells: [[29, 15], [29, 16]], period: 26, from: 0, to: 4 });
+L.hazard({ type: 'periodic', look: 'snow', cells: [[25, 14], [24, 14]], period: 30, from: 12, to: 16 });
+L.score('roof', [29, 17], [21, 14], [19, 11]);
 
-/**
- * STAGE 5 ｜ 入口：奥の和室 ｜ 景色：家に近い場所。これまでの景色が別のつながり方で再登場（企画書 第4.4節。入口・景色・危険物の割り当ては仮）
- *
- * 奥の和室の襖（画面の下）を開けると、闇の中を道が折り返しながら斜め右上へ登っていく。登りきった先に扉が一枚だけ立っている（ゴール）。
- * 段ごとに、これまでの景色（路地、庭、石畳、アスファルト、瓦屋根）と家の中（畳、板の間、土間）の床がつぎはぎに並び、
- * 玄関、縁側、商店、窓、石灯籠、アンテナなど、これまでに見た物が別のつながり方で闇に浮かぶ。
- * - 道は11段。各段の下の行は安全な道で、危険物も欠けもない（慣れていなくても、ここを歩けば戻されない）。
- * - 上の行は速い道（中間は八分、ゴール周辺は十六分）。家の中の物が危険物になる（第4.4節・第5.3節）：
- *   柱時計の振り子（闇に浮かぶ時計から下りた錘が、道の上を横切るように揺れる。定位置型）と、
- *   扇風機の首振り（段の間の闇に立つ扇風機が首を振り、頭が速い道の上を往復する。定位置型）。
- * - 段の間には一方通行の近道があり、振り子が横切る所もある。
- * - 危険物の割り当て（振り子、扇風機）は企画書の候補から選んだ仮のもの。二階への階段とエンディング（第2.3節・第4.6節）はまだない。
- * - 得点マスは文字ごとに4つの候補から2つずつ、プレイのたびに選ばれる（第2.2節の丸暗記対策）。
- *
- * この地図は tools/stagegen/stage5.ts で組み立てて書き出したもの。調整はスクリプト側で行い --write で書き出し直すか、
- * ここを手で直す（その場合スクリプトとずれる）。npm test が整合性と通れるかを、npm run bots がバランスを確かめる。
- */
-// prettier-ignore
-export const stage5: StageDef = {
+const band = (x: number, y: number) => {
+  if (memory.has(`${x},${y}`)) return 'q';
+  return y >= 88 ? 'k' : y >= 79 ? 'g' : y >= 60 ? 'y' : y >= 51 ? 'g' : y >= 34 ? 'l' : y >= 25 ? 'g' : 'x';
+};
+const def = build(L, {
   name: 'STAGE5',
   theme: 'house',
-  bpm: ${def.bpm},
-  bars: ${def.bars},
-  terrain: [
-${terrain.map((r) => `    '${r}',`).join('\n')}
-  ],
-  objects: [
-${objects.map((r) => `    '${r}',`).join('\n')}
-  ],
-  floors: [
-${floors.map((r) => `    '${r}',`).join('\n')}
-  ],
+  bpm: BPM,
+  bars: BARS,
   scores: {
-${Object.entries(scores).map(([k, v]) => `    ${k}: { value: ${v.value}, decay: ${v.decay}, pick: ${v.pick} },`).join('\n')}
+    room: { value: 150, decay: 1, pick: 4 },
+    kitchen: { value: 200, decay: 1 },
+    park: { value: 250, decay: 1, pick: 2 },
+    canal: { value: 300, decay: 2, pick: 2 },
+    later: { value: 300, decay: 1, pick: 1 },
+    tram: { value: 500, decay: 3 },
+    roof: { value: 600, decay: 3, pick: 2 },
   },
-  hazards: [
-${hazards.map(h).join('\n')}
-  ],
-};
-`;
-  writeFileSync(OUT, src);
-  console.log('wrote', path.relative(process.cwd(), OUT));
-}
+  floorOf: (x, y) => {
+    if (memory.has(`${x},${y}`)) return y >= 77 ? 'd' : y >= 45 ? 'l' : y >= 25 && x >= 29 ? 'a' : 'r';
+    if (y >= 90 && x >= 31) return 'w';
+    if (y >= 90) return 't';
+    if (y >= 79 && y <= 89) return 'w';
+    if (y >= 60) return 'w';
+    if (y >= 34) return (x + y) % 3 === 0 ? 'd' : 'w';
+    return y >= 25 ? 'w' : 'd';
+  },
+  tintOf: band,
+});
+report(def);
+write(
+  def,
+  'stage5',
+  'stage5',
+  `
+STAGE 5 ｜ 入口：奥の和室 ｜ 夜逃げから廃屋まで（企画書 第4.2節。暫定合意）
+
+夜逃げの夜の物で埋まった部屋から、壁も間取りも消えた草地の廃屋まで、進むほど年月が経つ。
+記憶の断片へ入れば速いが危うく、朽ちていく現在を歩けば遅い、という選択がステージ全体の軸。
+- 年月は場所で置き分ける（tints）。夜逃げの夜 → 数年後（埃、破れた障子、止まった扇風機）→ さらに後（ツタ、錆び、背の高い草）→ 廃屋。年月の間は闇として空け、板一枚で渡る。
+- 夜の部屋は家具の間を縫って歩く。焦点は食器の残った食卓。食卓のまわりの敷物（八分）に、回りっぱなしの扇風機と柱時計の振り子。
+  奥の台所への寄り道（開いたままの冷蔵庫、置き去りの鍋）は、部屋の後半で見えてくる。天井の電灯は消えている。
+- 記憶の断片は、間の闇から横に張り出す近道で、元のステージの判断の型と危険物をそのまま持ち、人はいない（公園の空のブランコ、用水路、空の路面電車、雪の屋根）。
+- 廃屋の真ん中には床が抜け落ちた大穴があり、安全な道はそのまわりを回る。記憶の雪の屋根は、はしごで上がって大穴の上を滑り降りる近道（床の高さは企画書 第2.4節）。
+- ゴールは二階への階段の下。脇に割れた窓。ヘッドホンは見せない。
+- 人影は0。
+`,
+);

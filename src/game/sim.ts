@@ -172,6 +172,7 @@ export class Sim {
     const ny = this.y + DIR_VEC[dir].y;
     const next = this.stage.cell(nx, ny);
     if (!next || next.terrain === 'wall') return;
+    if (!this.stage.canStep(this.x, this.y, nx, ny)) return;
     if (next.obj?.type === 'gate' && this.isGateClosed(nx, ny, t)) return;
     if (next.obj?.type === 'oneway' && next.obj.dir !== dir) return;
 

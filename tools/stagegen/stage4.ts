@@ -1,177 +1,230 @@
-// STAGE 4 の地図を組み立てて src/game/stages/stage4.ts を書き出す
+// STAGE 4 の地図を組み立てて src/game/stages/stage4.ts を書き出す（企画書 第4.2節「STAGE 4：屋根の連なり」）
 //   node tools/stagegen/stage4.ts          所要時間を表示するだけ（SHOW=1 で地図も表示）
-//   node tools/stagegen/stage4.ts --write  src/game/stages/stage4.ts を上書きする（手で直した分は消える）
+//   node tools/stagegen/stage4.ts --write  src/game/stages/stage4.ts を上書きする
 //
-// 道以外（'#'）は闇で、描かれない。道は闇に浮かぶ。
-// スタート（台所の勝手口）は画面の下。家の裏手に連なる屋根の棟を、折り返しながら -x へ登っていき、画面では斜め左上へ進む。
-// 屋根と屋根の間は物干し台の板でつながっている。屋根の斜面を近道すると、上の屋根から雪が滑り落ちてくる。
-// 組み立ては「進む向き p（スタートから 0, 1, …）」と「横 l」で考え、グリッドには x = XO − p、y = l で置く。
-// 扉や小物の見える面は +x / +y 側なので、道が小物の −p 側（x の大きい側）か +l 側に来るように置く。
-import { writeFileSync } from 'node:fs';
-import path from 'node:path';
-import { Stage, type HazardDef, type StageDef } from '../../src/game/stage.ts';
-import { distanceField } from '../bots/nav.ts';
+// 作業座標：x＝横、y＝進む向き（y が大きいほどスタート側）。そのまま -y へ登る（画面では右上へ）。x ≥ 34 は崖、その下に街並み。
+// 床の高さ（企画書 第2.4節）が主役。勝手口の地面から、下屋・物置・隣家・母屋と段々に登り、いちばん高い二階の窓の外に着く。
+// 上りは雨どい・はしご（climb）でしか上がれず、下りは飛び降り・滑り降り（戻れない）。
+// 地図は企画のときのマス目の定義（2026-10-31）を移したもの。季節ごとに組んだあとで y をずらして間を空け、秋と冬の間に「秋の大屋根」を差し込む。
+import { createRandom } from '../../src/game/random.ts';
+import { build, Layout, report, write, type Kind, type P } from './lib.ts';
 
-const BPM = 120;
-const BARS = Number(process.env.BARS ?? 64);
-const RUNGS = 11;
-/** 段 k の下の行（安全）の p。上の行は +1、段の間（闇）は +2、+3 */
-const lo = (k: number) => 4 + 4 * k;
-const PMAX = lo(RUNGS - 1) + 7;
-const XO = PMAX;
-const W = PMAX + 1, H = 23;
-const L0 = 3, L1 = 19;
+const BPM = 128;
+const BARS = Number(process.env.BARS ?? 80);
+const L = new Layout(34, 61);
+const line = (pts: P[], h: number, k: Kind) => L.path(pts, k, h);
+/** 歩けない屋根面（見た目の高さ） */
+const roof = (x0: number, y0: number, x1: number, y1: number, h: number) => L.sceneryRect(x0, y0, x1, y1, 'r', h);
 
-const T: string[][] = Array.from({ length: H }, () => Array(W).fill('#'));
-const O: string[][] = Array.from({ length: H }, () => Array(W).fill(' '));
-const F: string[][] = Array.from({ length: H }, () => Array(W).fill('r'));
-const t = (p: number, l: number, ch: string) => { T[l][XO - p] = ch; };
-const o = (p: number, l: number, ch: string) => { O[l][XO - p] = ch; };
-const f = (p: number, l: number, ch: string) => { F[l][XO - p] = ch; };
-const at = (p: number, l: number): [number, number] => [XO - p, l];
-const row = (p: number, l0: number, l1: number, ch: string) => { for (let l = Math.min(l0, l1); l <= Math.max(l0, l1); l++) t(p, l, ch); };
-const hazards: HazardDef[] = [];
-/** 色あせた鯉のぼり：段の上の行（速い道）の l0〜l1 を、3マス分の胴で往復して泳ぐ */
-const koinobori = (k: number, interval: number, l0 = L0 + 2, l1 = L1 - 2) =>
-  hazards.push({ type: 'patrol', look: 'koinobori', length: 3, interval, waypoints: [at(lo(k) + 1, l0), at(lo(k) + 1, l1)] });
-/** 屋根から滑り落ちる雪：cells（上 → 下）を、周期 period のうち [0, dur) の間に滑り落ちる */
-const snow = (cells: [number, number][], period: number, dur: number, pivot?: [number, number]) =>
-  hazards.push({ type: 'periodic', look: 'snow', cells: cells.map(([p, l]) => at(p, l)), period, from: 0, to: dur, ...(pivot ? { pivot: at(...pivot) } : {}) });
+// ── 春：勝手口 → 雨どい → 下屋（高さ2）。中央に物干し台（高さ4）、そこから三本の斜面（戻れない）
+L.seg([4, 59], [4, 60], '.');
+L.put('S', [4, 60]);
+L.ramp([[4, 58], [4, 57]], 1, 2, '.', 'g'); // 雨どいを登る
+line([[4, 56], [4, 53], [0, 53], [0, 48], [8, 48], [8, 55], [28, 55], [28, 47], [32, 47]], 2, '.'); // 下屋の軒づたい（安全）
+line([[28, 55], [31, 55], [31, 58], [33, 58]], 2, '.'); // 崖の縁の特等席へ（行き止まり。まわりに何もない）
+L.thing('seat', [33, 59]);
+L.thing('telescope', [33, 57]);
+L.score('spring', [32, 58]);
+roof(9, 54, 27, 54, 2.4);
+roof(9, 49, 10, 53, 2.4);
+roof(16, 51, 27, 53, 2.4);
+L.ramp([[11, 54], [11, 53]], 3, 4, '.', 'h'); // はしごで物干し台へ
+line([[11, 52], [15, 52], [15, 48], [11, 48], [11, 52]], 4, '.');
+line([[12, 49], [14, 51]], 4, '.');
+const slideA = L.ramp([[13, 47], [13, 46], [18, 46], [18, 45]], 3.6, 3, ','); // 斜面A：夏の屋根へ一気に（大）
+L.ramp([[16, 50], [21, 50]], 3.5, 2, ','); // 斜面B：下屋の奥へ（中）
+line([[22, 50], [27, 50]], 2, ',');
+L.ramp([[10, 50], [9, 50]], 3.5, 2.5, ','); // 斜面C：すぐ下へ（小・得点）
+L.score('spring', [16, 46], [19, 50], [24, 50], [9, 50]);
+L.thing('sandals', [3, 60]);
+L.thing('basket_empty', [5, 60]);
+L.thing('kitchen_dark', [6, 60]);
+L.thing('scuff', [5, 58]);
 
-// 屋根の棟は 11 段。段 k は下の行 lo(k)（安全。棟の上の歩み板）と上の行 lo(k)+1（瓦の斜面）の2行で、l = 3〜19。
-// 偶数段は +l へ、奇数段は −l へ歩き、端の連絡路（物干し台の板）で次の段へ登る。
-// 安全な道（下の行と端の連絡路）には危険物も欠けも置かない（慣れていなくても、安全な道を歩けば戻されない）。
-const rightEnd = (k: number) => k % 2 === 0;
-for (let k = 0; k < RUNGS; k++) {
-  row(lo(k), L0, L1, '.');
-  row(lo(k) + 1, L0, L0 + 1, '.');
-  row(lo(k) + 1, L1 - 1, L1, '.');
-  if (k < RUNGS - 1) {
-    const l = rightEnd(k) ? L1 : L0;
-    for (const d of [2, 3]) { t(lo(k) + d, l, '.'); f(lo(k) + d, l, 'w'); }
+// ── 夏：車庫と物置の屋根（高さ3）。物干し竿の下をくぐる近道と、崖ぎわの寄り道
+L.ramp([[32, 46], [32, 45]], 2.5, 3, '.', 'g');
+line([[32, 45], [32, 43], [22, 43], [22, 44], [8, 44], [8, 36], [14, 36], [14, 33], [20, 33]], 3, '.');
+line([[14, 43], [14, 37]], 3, ','); // 竿の下（八分）。判断の型は企画書で未決（第4.2節 STAGE 4「夏の判断」）。危険物は置いていない
+L.score('summer', [14, 42], [14, 38]);
+line([[31, 42], [31, 35], [25, 35], [25, 38]], 3, ','); // 崖ぎわの寄り道（八分）
+L.score('summer', [31, 37], [26, 35]);
+roof(7, 43, 13, 43, 3.4);
+roof(15, 37, 21, 40, 3.4);
+L.thing('greentree', [33, 43], [33, 38], [33, 34]); // 茂った庭木が崖の向こうを半分隠す
+
+// ── 秋：隣家・物置・渡り廊下が入り組む（高さ3〜4）。網目の近道と、落ちる柿
+L.ramp([[20, 32], [20, 31]], 3.5, 4, '.', 'h');
+line([[20, 31], [20, 28], [11, 28], [11, 22], [16, 22], [16, 19], [26, 19]], 4, '.'); // 渡り板（安全、高さ4）
+line([[21, 28], [31, 28], [31, 21], [24, 21], [24, 28]], 3, ','); // 低い屋根の網目（八分、高さ3）
+line([[27, 28], [27, 24], [31, 24]], 3, ',');
+L.ramp([[26, 21], [26, 20]], 3.5, 4, ',', 'h'); // 網目から渡り板へ上がるはしご
+L.thing('persimmon_tree', [29, 26]);
+L.put('P', [24, 26], [31, 22], [22, 28], [24, 23], [25, 21]);
+L.put('B', [27, 26]);
+L.score('autumn', [31, 28], [27, 24], [24, 22]);
+roof(9, 27, 19, 27, 4.4);
+roof(9, 23, 9, 26, 4.4);
+roof(25, 25, 26, 27, 3.4);
+roof(28, 22, 30, 23, 3.4);
+L.thing('leaves', [12, 29], [26, 25]);
+
+// ── 冬：母屋の屋根。雪の斜面が二階の壁まで上がっていく
+line([[26, 19], [30, 19], [30, 16], [4, 16]], 4, '.'); // 軒先（安全）
+L.ramp([[4, 15], [4, 5]], 4.4, 8, '.', 'g'); // 壁ぎわの雨どい（安全、遅い）
+line([[4, 4], [22, 4]], 8, '.'); // 二階の窓の外のひさし
+L.ramp([[20, 15], [20, 5]], 4.4, 8, ',', 's'); // 雪の斜面を這い上がる（八分）
+L.ramp([[12, 15], [12, 5]], 4.4, 8, ',', 's');
+L.score('winter', [20, 14], [12, 13], [20, 6]);
+L.put('B', [20, 10]);
+L.put('P', [20, 13], [12, 12]);
+for (let x = 5; x <= 23; x++) for (let y = 5; y <= 15; y++) if (!L.has(x, y)) L.scenery.set(`${x},${y}`, { kind: 's', h: 4.4 + (15 - y) * 0.36 });
+L.seg([12, 3], [12, 3], '.', 8);
+L.put('G', [12, 3]);
+L.thing('window', [12, 2]);
+L.thing('sticker', [11, 2]);
+L.thing('seat_snow', [21, 3]);
+L.thing('telescope_snow', [22, 3]);
+for (let x = 7; x <= 17; x++) for (const y of [1, 2]) if (!L.scenery.has(`${x},${y}`)) L.scenery.set(`${x},${y}`, { kind: 'p', h: 8 });
+
+// ── 粗密：生活の物が密に溜まる場所と、何もない開けた場所をはっきり分ける
+// 春：勝手口まわりと物干し台は、物がひしめく（密）
+L.thing('pot', [3, 59], [5, 59], [6, 58], [2, 57], [5, 57], [3, 55], [5, 54], [2, 54]);
+L.thing('bucket', [6, 59]);
+L.thing('ac', [7, 58], [9, 56]);
+L.thing('crate', [7, 57], [3, 58]);
+L.thing('laundry', [10, 49], [16, 51]);
+L.thing('pot', [10, 52], [16, 52], [10, 48], [16, 48], [15, 53]);
+L.thing('pot', [20, 56], [24, 56], [9, 47], [26, 54]);
+L.thing('antenna', [18, 53], [25, 52]);
+// 夏：庭木の梢が屋根に覆いかぶさる（密）
+L.thing('canopy', [9, 42], [11, 40], [8, 38], [16, 42], [19, 40], [24, 42], [27, 39], [29, 42], [17, 35], [10, 34], [30, 33], [25, 36]);
+L.thing('ac', [28, 44]);
+// 秋：ほどほど。柿の木のまわりにだけ落ち葉
+L.thing('leaf', [28, 25], [30, 27], [27, 27], [29, 23], [26, 23], [25, 27]);
+L.thing('antenna', [12, 24]);
+L.thing('crate', [18, 21]);
+// 春の終わり：崖の縁の特等席のまわりは何も置かない（疎）。冬：雪の斜面には、ぽつんと一つだけ（雪に半分埋もれた物干し竿）
+L.trimScenery(1, (kind) => kind === 's' || kind === 'p');
+L.thing('buried_pole', [16, 8]);
+
+// ── 季節の間を空ける：春・夏・秋をそれぞれ下へずらし、その間を何もない細い道だけでつなぐ（季節の色は持たない）
+L.remapY((y) => (y >= 46 ? y + 24 : y >= 32 ? y + 16 : y >= 17 ? y + 8 : y));
+L.H = 85;
+/** 季節の間の一本道。両端の道の高さのあいだをならす */
+const bridge = (x: number, y0: number, y1: number, k: Kind = '.', climb?: 'h' | 'g') => {
+  const h0 = L.at(x, y0 + 1)?.h ?? L.at(x, y0 - 1)!.h;
+  const h1 = L.at(x, y1 - 1)?.h ?? L.at(x, y1 + 1)!.h;
+  const n = y0 - y1;
+  for (let i = 0, y = y0; y >= y1; i++, y--) {
+    L.seg([x, y], [x, y], k, h0 + ((h1 - h0) * (i + 1)) / (n + 2));
+    if (climb) L.climb.set(`${x},${y}`, climb);
   }
-}
-const lane = (k: number, ch: string) => row(lo(k) + 1, L0 + 2, L1 - 2, ch);
-// スタート周辺（段 0〜2）：2行とも安全で道幅が広い
-for (const k of [0, 1, 2]) lane(k, '.');
-// 中間（段 3〜6）：上の行は八分。鯉のぼりが泳ぐ
-for (const k of [3, 4, 5, 6]) lane(k, ',');
-koinobori(3, 2);
-koinobori(5, 2);
-// ゴール周辺（段 7〜10）：上の行は十六分。瓦の抜けが多く、上の屋根の軒から雪が落ちてくる
-for (const k of [7, 8, 9, 10]) lane(k, ':');
-// 十六分の道では、端で折り返してくる鯉のぼりと鉢合わせないよう、道の中ほどだけを泳ぐ
-koinobori(8, 1, 8, 13);
-for (const [k, l] of [[4, 7], [4, 15], [6, 9], [7, 6], [7, 12], [9, 6], [9, 14], [10, 9], [10, 15]]) t(lo(k) + 1, l, ' ');
-snow([[lo(7) + 1, 9]], 26, 4, [lo(7) + 2, 9]);
-snow([[lo(9) + 1, 11]], 22, 4, [lo(9) + 2, 11]);
-snow([[lo(10) + 1, 12]], 26, 4, [lo(10) + 2, 12]);
-// 段の間の近道（一方通行・危険）：上の屋根の斜面を滑り降りるように登る。雪が滑り落ちてくる所もある
-const cut = (k: number, l: number, ch: string, period?: number) => {
-  t(lo(k) + 2, l, ch); t(lo(k) + 3, l, ch); o(lo(k) + 2, l, '<');
-  if (period) snow([[lo(k) + 3, l], [lo(k) + 2, l]], period, 6);
 };
-cut(0, 11, ',');
-cut(2, 9, ',', 22);
-cut(5, 10, ',', 26);
-cut(7, 13, ':', 18);
-cut(9, 8, ':', 18);
+bridge(32, 69, 62, '.', 'g'); // 春 → 夏：細い雨どい一本
+bridge(18, 69, 62, ','); // 斜面Aも、闇を渡る長い滑り台になる
+bridge(20, 47, 40, '.', 'h'); // 夏 → 秋
+bridge(30, 24, 17); // 秋 → 冬
 
-// --- スタート：台所の勝手口から屋根へ出る ---
-const SL = 5;
-t(2, SL, '.'); t(3, SL, '.');
-f(2, SL, 'w'); f(3, SL, 'w');
-o(2, SL, 'S'); o(2, SL - 1, 'E'); o(3, SL - 1, 'L');
+// ── 秋の大屋根：秋の区間より上を20行ぶん空けて差し込む。安全な道は横に大回りせず、前へ進みながら左右に振る
+const N = 20;
+L.remapY((y) => (y >= 25 ? y + N : y));
+L.H = 85 + N;
+line([[30, 45], [30, 42], [20, 42], [20, 36], [10, 36], [10, 30], [20, 30], [20, 26], [30, 26], [30, 25]], 4, '.'); // 大屋根の棟（安全、高さ4）
+// 網目：瓦の低い屋根（高さ3）を縫う近道。棟から飛び降りて入り、はしごで棟へ戻る。入口は二つ（東の端と、西へ振る手前）
+line([[29, 41], [29, 38], [25, 38], [25, 34], [29, 34], [29, 28], [25, 28], [25, 27]], 3, ',');
+L.seg([25, 27], [25, 27], ',', 3.5);
+L.climb.set('25,27', 'h');
+L.climb.set('25,26', 'h');
+line([[21, 36], [24, 36]], 3, ',');
+L.put('P', [29, 39], [27, 38], [25, 36], [27, 34], [29, 31], [27, 28]); // 瓦の継ぎ目で足が止まる
+L.put('B', [29, 33]); // 雨戸の開け閉め（小節ゲート）
+L.score('autumn2', [28, 38], [26, 34], [28, 28]);
+roof(21, 27, 29, 41, 3.4);
+L.trimScenery(1, (kind) => kind === 's' || kind === 'p');
+L.thing('leaf', [9, 37], [19, 43], [11, 29], [21, 31], [31, 40], [31, 27]);
+L.thing('dry_persimmon', [9, 33]);
+L.thing('kite_tangled', [31, 43]);
+L.thing('antenna', [19, 25]);
+L.thing('crate', [21, 37]);
+L.thing('persimmon_tree', [27, 31]);
 
-// --- ゴール：最後の段の端から登った先、欠けに囲まれて扉が一枚だけ立っている ---
-const GP = lo(RUNGS - 1) + 5;
-const GL = rightEnd(RUNGS - 1) ? L1 : L0;
-for (let p = lo(RUNGS - 1) + 2; p <= GP; p++) { t(p, GL, '.'); f(p, GL, 'w'); }
-for (const [p, l] of [[GP, GL - 1], [GP, GL + 1], [GP - 1, GL - 1], [GP - 1, GL + 1], [GP + 1, GL]]) t(p, l, ' ');
-o(GP, GL, 'G');
+// ── 崖ぎわの寄り道の先：得点と蝉の抜け殻。季節に入った直後の小物、灯りのモチーフ
+L.score('cliff', [25, 74]);
+L.thing('cicada', [24, 75]);
+L.thing('sudare', [31, 81]);
+L.thing('furin', [29, 81]);
+L.thing('katorisenko', [30, 80]);
+L.thing('dry_persimmon', [19, 59], [4, 28], [4, 24]);
+L.thing('leaves_pile', [17, 59], [5, 61], [9, 60]);
+L.thing('crate', [18, 58]);
+L.thing('icicle', [30, 15]);
+L.thing('porch_lamp_snow', [10, 3]);
+L.thing('porch_lamp', [1, 104]); // 勝手口の軒灯
 
-// 行き止まりの物干し台。端に物干し、アンテナ、煙突が立つ
-const spur = (cells: [number, number][], end: [number, number], prop: string) => {
-  for (const [p, l] of cells) { t(p, l, '.'); f(p, l, 'w'); }
-  o(end[0], end[1], prop);
+// ── 危険物
+// 春：色あせた鯉のぼりが、物干し台の下の斜面Aの上を行き来して泳ぐ（揺れる型）。斜面は戻れないので、正面から鉢合わせて
+// 逃げ場がなくならないよう、振り切ると斜面の外へ出る（企画書 第2.2節）
+const a = slideA.map(([x, y]) => [x, y >= 46 ? y + 24 + N : y >= 32 ? y + 16 + N : y] as P);
+L.hazard({ type: 'swing', look: 'koinobori', axis: 'x', period: 30, cells: a.filter(([, y]) => y === 90).sort((p, q) => p[0] - q[0]) });
+// 秋：熟して落ちる柿の実（定位置型）。柿の木の枝から網目の道へ落ちる
+const rand = createRandom(4);
+const kaki = (cell: P, tree: P) => {
+  const from = Math.floor(rand() * 20);
+  L.hazard({ type: 'periodic', look: 'kaki', cells: [cell], pivot: tree, period: 26 + Math.floor(rand() * 3) * 4, from, to: from + 6 });
 };
-spur([[lo(1), 2], [lo(1), 1]], [lo(1), 0], 'F');
-spur([[lo(3) + 1, 2], [lo(3) + 1, 1]], [lo(3) + 1, 0], 'X');
-spur([[lo(5), 2], [lo(5), 1]], [lo(5), 0], 'F');
-spur([[lo(8), 2], [lo(8), 1]], [lo(8), 0], 'C');
-spur([[lo(2), 20]], [lo(2), 21], 'X');
-spur([[lo(5) + 1, 20]], [lo(5) + 1, 21], 'L');
-// 段の間の闇に浮かぶアンテナ・煙突・物干し・街灯
-const deco = (p: number, l: number, prop: string) => {
-  if (T[l][XO - p] !== '#') throw new Error(`飾りの位置 (${p},${l}) が空いていない`);
-  o(p, l, prop);
-};
-for (const [k, l, prop] of [
-  [0, 5, 'X'], [0, 15, 'C'], [1, 7, 'F'], [1, 14, 'X'], [2, 4, 'L'], [2, 13, 'X'], [3, 6, 'C'], [3, 15, 'X'],
-  [4, 5, 'F'], [4, 14, 'X'], [5, 15, 'L'], [5, 6, 'X'], [6, 12, 'C'], [7, 5, 'X'], [8, 15, 'F'], [9, 12, 'X'],
-] as [number, number, string][]) deco(lo(k) + 2, l, prop);
+kaki([28, 56], [29, 54]);
+kaki([31, 53], [29, 54]);
+kaki([24, 52], [29, 54]);
+kaki([25, 35], [27, 31]);
+kaki([29, 30], [27, 31]);
+kaki([28, 34], [27, 31]);
+kaki([26, 28], [27, 31]);
+// 冬：滑り落ちてくる雪に逆らって、雪の斜面を這い上がる（定位置型）。安全な道は壁ぎわの雨どい
+L.hazard({ type: 'periodic', look: 'snow', cells: [[20, 11], [20, 12]], period: 26, from: 0, to: 6 });
+L.hazard({ type: 'periodic', look: 'snow', cells: [[20, 7], [20, 8]], period: 30, from: 10, to: 16 });
+L.hazard({ type: 'periodic', look: 'snow', cells: [[12, 9], [12, 10]], period: 22, from: 6, to: 12 });
+L.hazard({ type: 'periodic', look: 'snow', cells: [[12, 13], [12, 14]], period: 34, from: 20, to: 26 });
 
-// --- 得点マスの候補（文字ごとに4つの候補から2つ選ばれる） ---
-for (const [p, l] of [[lo(1), 1], [lo(3) + 1, 1], [lo(2), 20], [lo(5), 1]]) o(p, l, 'a');
-for (const [p, l] of [[lo(0) + 3, 11], [lo(2) + 3, 9], [lo(3) + 1, 8], [lo(4) + 1, 13]]) o(p, l, 'b');
-for (const [p, l] of [[lo(5) + 3, 10], [lo(5) + 1, 12], [lo(6) + 1, 6], [lo(5) + 1, 20]]) o(p, l, 'c');
-for (const [p, l] of [[lo(7) + 3, 13], [lo(8) + 1, 10], [lo(9) + 3, 8], [lo(10) + 1, 6]]) o(p, l, 'd');
-
-const terrain = T.map((r) => r.join(''));
-const objects = O.map((r) => r.join(''));
-const floors = F.map((r) => r.join(''));
-const scores = { a: { value: 150, decay: 1, pick: 2 }, b: { value: 300, decay: 2, pick: 2 }, c: { value: 500, decay: 3, pick: 2 }, d: { value: 800, decay: 5, pick: 2 } };
-const def: StageDef = { name: 'STAGE4', theme: 'roof', bpm: BPM, bars: BARS, terrain, objects, floors, scores, hazards };
-const st = new Stage(def);
-const i = st.index(st.start.x, st.start.y);
-console.log(`safe ${distanceField(st, { safeOnly: true })[i] / 4} beats, fast ${distanceField(st)[i] / 4} beats, song ${def.bars * 4}`);
-if (process.env.SHOW) console.log(terrain.map((r, y) => `${String(y).padStart(2)} ${r}  ${objects[y]}`).join('\n'));
-
-const OUT = path.resolve(import.meta.dirname, '../../src/game/stages/stage4.ts');
-if (process.argv.includes('--write')) {
-  const h = (x: HazardDef) => '    ' + JSON.stringify(x).replace(/"(\w+)":/g, '$1: ').replace(/"/g, "'").replace(/,(?=\S)/g, ', ') + ',';
-  const src = `import type { StageDef } from '../stage.ts';
-
-/**
- * STAGE 4 ｜ 入口：台所の勝手口 ｜ 景色：裏手の屋根の連なり（企画書 第4.4節。入口・景色・危険物の割り当ては仮）
- *
- * 台所の勝手口（画面の下）から屋根へ出ると、瓦屋根の棟が折り返しながら斜め左上へ連なっていく。登りきった先に扉が一枚だけ立っている（ゴール）。
- * 屋根と屋根の間は物干し台の板でつながり、テレビのアンテナ、煙突、物干しが闇に浮かぶ。
- * - 棟は11段。各段の下の行（棟の上の歩み板）は安全な道で、危険物も欠けもない（慣れていなくても、ここを歩けば戻されない）。
- * - 上の行（瓦の斜面）は速い道（中間は八分、ゴール周辺は十六分）。竿から外れた色あせた鯉のぼりが、3マス分の胴で斜面を往復して泳ぐ
- *   （第5.3節「色あせた鯉のぼり」。巡回型）。同じ向きに歩けば追いつかれず、鉢合わせたら下の行へよければよい。
- * - 段の間には一方通行の近道（上の屋根の斜面）がある。上の屋根から雪が滑り落ちてくる所がある（第5.3節「屋根から滑り落ちる雪」。定位置型）。
- *   ゴール周辺では上の屋根の軒から速い道へも雪が落ちてくる。落ちる1拍前に点滅して知らせる。
- * - 瓦の抜けた所（欠け）がある。
- * - 危険物の割り当て（鯉のぼり、雪）は企画書の候補から選んだ仮のもの。
- * - 得点マスは文字ごとに4つの候補から2つずつ、プレイのたびに選ばれる（第2.2節の丸暗記対策）。
- *
- * この地図は tools/stagegen/stage4.ts で組み立てて書き出したもの。調整はスクリプト側で行い --write で書き出し直すか、
- * ここを手で直す（その場合スクリプトとずれる）。npm test が整合性と通れるかを、npm run bots がバランスを確かめる。
- */
-// prettier-ignore
-export const stage4: StageDef = {
+const band = (_x: number, y: number) =>
+  y >= 90 ? 'p' : y >= 82 ? 'g' : y >= 68 ? 'u' : y >= 60 ? 'g' : y >= 25 ? 'f' : y >= 17 ? 'g' : 'w';
+const def = build(L, {
   name: 'STAGE4',
   theme: 'roof',
-  bpm: ${def.bpm},
-  bars: ${def.bars},
-  terrain: [
-${terrain.map((r) => `    '${r}',`).join('\n')}
-  ],
-  objects: [
-${objects.map((r) => `    '${r}',`).join('\n')}
-  ],
-  floors: [
-${floors.map((r) => `    '${r}',`).join('\n')}
-  ],
+  bpm: BPM,
+  bars: BARS,
   scores: {
-${Object.entries(scores).map(([k, v]) => `    ${k}: { value: ${v.value}, decay: ${v.decay}, pick: ${v.pick} },`).join('\n')}
+    spring: { value: 150, decay: 1, pick: 3 },
+    summer: { value: 250, decay: 1, pick: 3 },
+    cliff: { value: 250, decay: 1 },
+    autumn: { value: 400, decay: 2, pick: 2 },
+    autumn2: { value: 450, decay: 2, pick: 2 },
+    winter: { value: 700, decay: 4, pick: 2 },
   },
-  hazards: [
-${hazards.map(h).join('\n')}
-  ],
-};
-`;
-  writeFileSync(OUT, src);
-  console.log('wrote', path.relative(process.cwd(), OUT));
-}
+  floorOf: (x, y) => {
+    const f = L.at(x, y);
+    if (y >= 103) return 'c'; // 勝手口の土間
+    if (f && f.h >= 3.9 && y >= 92 && y <= 96 && x >= 11 && x <= 15) return 'w'; // 物干し台の板
+    if (band(x, y) === 'g') return 'w'; // 季節の間の渡り板
+    return 'r';
+  },
+  tintOf: band,
+});
+report(def);
+write(
+  def,
+  'stage4',
+  'stage4',
+  `
+STAGE 4 ｜ 入口：台所の勝手口 ｜ 屋根の連なり（企画書 第4.2節。暫定合意）
+
+勝手口の地面から、下屋、物置、隣家、母屋と段々に登り、いちばん高い二階の窓の外に着く。屋根に登っていた子が登らなくなったことを、人影なしで伝える。
+- 床の高さ（企画書 第2.4節）を使う。上りは雨どいとはしごに限り、斜面や飛び降りは戻れない一方通行になる。
+- 季節は場所で置き分ける（tints）。春 → 夏 → 秋 → 冬。季節と季節の間は何もない間を空け、雨どいか渡り板一本で渡る（季節の色は持たない）。
+- 春：物干し台から三本の斜面のどれで滑り降りるか（戻れない）。色あせた鯉のぼりが斜面の上を行き来して泳ぐ。崖の縁の特等席に座布団と望遠鏡。
+- 夏：車庫と物置の屋根。物干し竿の下をくぐる近道。判断の型と危険物は企画書で未決なので、この区間には危険物を置いていない。
+- 秋：低い屋根の網目を渡り歩く（瓦の継ぎ目の停止マス、落ちる柿、雨戸の小節ゲート）。後半の大屋根では、安全な棟を前へ進みながら左右に振り、網目へ飛び降りてははしごで棟へ戻る。
+- 冬：滑り落ちてくる雪に逆らって、雪の斜面を這い上がる。安全な道は壁ぎわの雨どい。白い面に、雪に埋もれた物干し竿が一本。
+- ゴールは二階の窓の外。カーテンが閉じて内側に灯りがあり、中には入れない。ひさしに雪をかぶった座布団と望遠鏡。
+- 人影は0。
+`,
+);

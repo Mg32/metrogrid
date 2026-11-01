@@ -1,6 +1,6 @@
 import { FlowHazard, PatrolHazard, PeriodicHazard, SwingHazard } from '../game/hazard.ts';
 import { GOAL_BONUS_PER_BEAT, type Sim } from '../game/sim.ts';
-import type { FloorStyle, PropKind, Stage } from '../game/stage.ts';
+import type { Cell, FloorStyle, PropKind, Stage } from '../game/stage.ts';
 import { DIR_VEC, mod, TICKS_PER_BEAT, ZONE_INTERVAL, type Dir, type Vec, type Zone } from '../game/types.ts';
 import { drawText, GLYPH_H, textWidth } from './font.ts';
 import {
@@ -9,7 +9,7 @@ import {
   fillEllipse,
   fillPrismSides,
   fillQuad,
-  iso,
+  iso as isoFlat,
   makeSprite,
   plotLine,
   strokeDiamond,
@@ -18,6 +18,7 @@ import {
   TW,
 } from './pixel.ts';
 import { drawEnding, drawTitle } from './ending.ts';
+import { THINGS } from './things.ts';
 import { STICK_RADIUS } from '../touch.ts';
 import { GIRL_FOOT_X, GIRL_FOOT_Y, GIRL_FRAMES, GIRL_H, GIRL_RAISE, GIRL_W, GIRL_WAIST_Y, paintGirl } from './girl.ts';
 
@@ -78,7 +79,57 @@ const FLOOR_LIGHT: Record<FloorStyle, { edge: string; road: string[] }[]> = {
     { edge: '#33363d', road: ['#535866', '#454a55', '#363a42'] },
     { edge: '#3d3e42', road: ['#626670', '#52555e', '#404349'] },
   ],
+  // 土：公園の地面、草地
+  dirt: [
+    { edge: '#30291f', road: ['#4a3f31', '#3c3329', '#2f2821'] },
+    { edge: '#3a3024', road: ['#5a4c39', '#4a3f30', '#3a3127'] },
+    { edge: '#44382a', road: ['#6b5a43', '#584a37', '#45392c'] },
+  ],
 };
+
+/**
+ * 場面の置き分け（ステージ定義の tints）。道の色をこの色へ k の割合だけ寄せる。
+ * 曲の進みや操作では変えず、場所ごとに決まっている（企画書 第4.1節）
+ */
+const TINTS: Record<string, { color: string; k: number }> = {
+  // STAGE 1：昼 → 午後 → 日没前（上面が橙に染まる）
+  n: { color: '#fff4dc', k: 0.06 },
+  a: { color: '#e0b070', k: 0.14 },
+  d: { color: '#f08a48', k: 0.3 },
+  // STAGE 2：晴れ → 曇り → 雨（濡れて暗い）→ 雨上がり
+  s: { color: '#e8f0d0', k: 0.06 },
+  c: { color: '#8a909c', k: 0.2 },
+  r: { color: '#1e3450', k: 0.32 },
+  e: { color: '#a8c4d4', k: 0.16 },
+  // STAGE 3：古い時代（すすけた茶）→ まだら → 新しい時代（冷たい灰）
+  O: { color: '#b0905c', k: 0.2 },
+  M: { color: '#9a9488', k: 0.08 },
+  N: { color: '#7486a8', k: 0.14 },
+  // STAGE 4：春 → 夏 → 秋 → 冬（雪）。季節の間（g）はどの季節の色も持たない
+  p: { color: '#e0b4bc', k: 0.12 },
+  u: { color: '#7eae6a', k: 0.14 },
+  f: { color: '#c47a3a', k: 0.2 },
+  w: { color: '#e4eaf0', k: 0.22 },
+  g: { color: '#000000', k: 0 },
+  // STAGE 5：夜逃げの夜 → 数年後（埃）→ さらに後（緑）→ 廃屋。記憶の断片（q）は色が抜けて淡い
+  k: { color: '#2c3c6c', k: 0.26 },
+  y: { color: '#8e7c60', k: 0.16 },
+  l: { color: '#5c7c42', k: 0.18 },
+  x: { color: '#76885a', k: 0.16 },
+  q: { color: '#c4c4cc', k: 0.36 },
+};
+
+function mixColor(a: string, b: string, k: number): string {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const ch = (sh: number) => Math.round(lerp((pa >> sh) & 255, (pb >> sh) & 255, k));
+  return `#${((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, '0')}`;
+}
+
+function tinted(color: string, tint: string): string {
+  const t = TINTS[tint];
+  return t && t.k > 0 ? mixColor(color, t.color, t.k) : color;
+}
 const ROAD_LIGHT = FLOOR_LIGHT.alley;
 const FLOOR_STYLES = Object.keys(FLOOR_LIGHT) as FloorStyle[];
 /** 遊具の柱、ブランコの枠などの高さ */
@@ -106,6 +157,30 @@ function pendulumHeight(u: number, length: number, pivotH: number): number {
   const d = Math.min(Math.abs(u) * CELL_LEN, length);
   return pivotH - Math.sqrt(length * length - d * d);
 }
+/** 床の高さ 1/4 段あたりのドット（1段 = 6 ドット） */
+const PX_PER_UNIT = 1.5;
+/** いま描いているステージの床の高さ（ドット）。world() の間だけ設定する。グリッドの小数の位置は、まわりの4マスからならす */
+let elevation: (x: number, y: number) => number = () => 0;
+
+/** グリッド座標 → 菱形の上の頂点。床の高さのぶん持ち上げる（高さのないステージでは pixel.ts の iso と同じ） */
+function iso(x: number, y: number): { sx: number; sy: number } {
+  const q = isoFlat(x, y);
+  return { sx: q.sx, sy: q.sy - elevation(x, y) };
+}
+
+function makeElevation(stage: Stage): (x: number, y: number) => number {
+  const h = (x: number, y: number) => stage.cell(x, y)?.height ?? 0;
+  return (x, y) => {
+    const x0 = Math.floor(x);
+    const y0 = Math.floor(y);
+    const kx = x - x0;
+    const ky = y - y0;
+    const top = lerp(h(x0, y0), kx > 0 ? h(x0 + 1, y0) : 0, kx);
+    const bottom = ky > 0 ? lerp(h(x0, y0 + 1), kx > 0 ? h(x0 + 1, y0 + 1) : 0, kx) : 0;
+    return Math.round(lerp(top, bottom, ky) * PX_PER_UNIT);
+  };
+}
+
 /** ほかの家の入口の断片と玄関の高さ */
 const FACADE_H = 20;
 
@@ -221,6 +296,10 @@ const COLORS = {
   fanDark: '#6f8274',
   fanGuard: '#8e9394',
   fanBlade: '#cfdcd4',
+  // 水辺の生き物、柿の実
+  zari: '#a3442f',
+  zariDark: '#6e2c20',
+  kaki: '#d8752e',
 };
 
 /** ハブの入口の光の色（行き先の景色の色） */
@@ -285,9 +364,10 @@ function fillSlabSides(ctx: CanvasRenderingContext2D, cx: number, top: number, w
   fillPrismSides(ctx, cx, top, w, h, Math.ceil(depth / 3), COLORS.roadSideL, COLORS.roadSideR);
 }
 
-function makeRoadSprite(zone: Zone, light: number, style: FloorStyle): HTMLCanvasElement {
-  const pal = FLOOR_LIGHT[style][light];
-  const seam = FLOOR_LIGHT[style][0].edge;
+function makeRoadSprite(zone: Zone, light: number, style: FloorStyle, tint = ' '): HTMLCanvasElement {
+  const raw = FLOOR_LIGHT[style][light];
+  const pal = { edge: tinted(raw.edge, tint), road: raw.road.map((c) => tinted(c, tint)) };
+  const seam = tinted(FLOOR_LIGHT[style][0].edge, tint);
   return makeSprite(TW, TH + FLOOR_THICK + 1, (ctx) => {
     const cx = TW / 2;
     fillSlabSides(ctx, cx, 0, TW, TH, FLOOR_THICK);
@@ -358,6 +438,26 @@ function makeFacadeSprite(): HTMLCanvasElement {
 const BLOCK_PROPS = new Set<PropKind>(['entrance', 'door', 'engawa', 'fence', 'shop', 'window', 'getabako', 'sink', 'fusuma']);
 /** 背の高い小物（プレイヤーに重なるときに透かす範囲が広い） */
 const TALL_PROPS = new Set<PropKind>(['lamp', 'pole', 'antenna', 'chimney']);
+
+/** 歩けない面のうち、床と一緒に描く平らな面（それ以外は家具の塊として立体物と一緒に描く） */
+const SURFACES = new Set(['w', 'r', 's', 'p', 'g']);
+
+/** 家具の塊の色：[上面, 左の面, 右の面] */
+const FURNITURE: Record<string, [string, string, string]> = {
+  F: ['#bdb39a', '#978a6c', '#7a6f56'], // 襖
+  u: ['#7a6a8a', '#5a4e66', '#4a4054'], // 布団
+  T: ['#5a4634', '#3b2c24', '#2e231c'], // 箪笥
+  x: ['#8a7a5a', '#6a5c42', '#5a4e38'], // 荷造りの箱
+  t: ['#5a4634', '#3b2c24', '#2e231c'], // 食卓
+  R: ['#c8c4b8', '#9a968a', '#86827a'], // 冷蔵庫
+  v: ['#8c9096', '#5f6268', '#4f5258'], // 流しとこんろ
+  V: ['#3a3a40', '#26262c', '#1e1e24'], // テレビ
+  C: ['#4a3426', '#3b2c24', '#241a15'], // 食器棚
+  K: ['#8c9096', '#5f6268', '#4f5258'], // 流し
+  L: ['#5a4634', '#3b2c24', '#2e231c'], // 倒れた柱
+  b: ['#3e3226', '#2e2620', '#241e19'], // 朽ちた食卓
+  G: ['#4b5a32', '#3a4628', '#2e3820'], // 草むら
+};
 
 /** 入口の断片の下の板（地面より下）。道のタイルと同じ位置に描く */
 function makeBaseSprite(): HTMLCanvasElement {
@@ -469,6 +569,10 @@ export class Renderer {
   private lot: HTMLCanvasElement;
   /** ステージごとの、各マスの街灯の明るさ */
   private lightMaps = new WeakMap<Stage, Uint8Array>();
+  private tintedRoads = new Map<string, HTMLCanvasElement>();
+  private surfaces = new Map<string, HTMLCanvasElement>();
+  private elevations = new WeakMap<Stage, (x: number, y: number) => number>();
+  private thingMaps = new WeakMap<Stage, Map<number, string>>();
 
   constructor(main: HTMLCanvasElement) {
     this.main = main;
@@ -505,6 +609,18 @@ export class Renderer {
     } catch {
       ro.observe(main);
     }
+  }
+
+  /** 色合いつきの道のタイル（使うときに作って取っておく） */
+  private road(cell: Cell, light: number): HTMLCanvasElement {
+    if (cell.tint === ' ' || !TINTS[cell.tint]) return this.roads[cell.floor][light][cell.zone];
+    const k = `${cell.floor}|${light}|${cell.zone}|${cell.tint}`;
+    let sp = this.tintedRoads.get(k);
+    if (!sp) {
+      sp = makeRoadSprite(cell.zone, light, cell.floor, cell.tint);
+      this.tintedRoads.set(k, sp);
+    }
+    return sp;
   }
 
   /** 拡大表示の配置（実画素）。自動テストでの検査用 */
@@ -628,6 +744,8 @@ export class Renderer {
     const moved = sim.fromX !== sim.x || sim.fromY !== sim.y;
     const walk = moved ? clamp01((tickF - sim.moveTick) / ZONE_INTERVAL[fromZone]) : 1;
 
+    // 床の高さ（このステージを描くあいだだけ。iso() が持ち上げる）
+    elevation = this.elevationOf(stage);
     // カメラはプレイヤーを追う
     const p = iso(px, py);
     if (this.camSim !== sim) {
@@ -655,6 +773,7 @@ export class Renderer {
 
     // 道（奥から手前へ）
     const light = this.lightMap(stage);
+    const things = this.thingMap(stage);
     for (let d = 0; d < stage.width + stage.height - 1; d++) {
       for (let x = 0; x <= d; x++) {
         const y = d - x;
@@ -665,6 +784,7 @@ export class Renderer {
         ctx.globalAlpha = f.alpha;
         const sx = iso(x, y).sx;
         const sy = iso(x, y).sy + f.dy;
+        const rise = elevation(x, y);
         if (cell.terrain === 'hole') ctx.drawImage(this.hole, sx - TW / 2, sy);
         if (cell.terrain === 'wall' && cell.obj?.type === 'prop') {
           // 小物の地面より下の部分（地面より上は立体物として後で描く）
@@ -673,10 +793,23 @@ export class Renderer {
           else if (BLOCK_PROPS.has(kind)) ctx.drawImage(this.base, sx - TW / 2, sy);
           else ctx.drawImage(this.footing, sx - 6, sy + TH / 2 - 3);
         }
+        if (cell.terrain === 'wall') {
+          // 歩けない面（水面、屋根、雪の屋根、二階の壁、人影の足場）。家具の塊は立体物として後で描く
+          if (cell.scenery && SURFACES.has(cell.scenery)) {
+            if (rise > 0) fillSlabSides(ctx, sx, sy, TW, TH, FLOOR_THICK + rise);
+            ctx.drawImage(this.surface(cell, tickF), sx - TW / 2, sy);
+          }
+          const th = things.get(stage.index(x, y));
+          if (th && THINGS[th]?.foot && !cell.scenery) ctx.drawImage(this.footing, sx - 6, sy + TH / 2 - 3);
+          continue;
+        }
         if (cell.terrain !== 'floor') continue;
+        // 高い床は、側面を地面まで伸ばす（企画書 第2.4節「床の高さ」）
+        if (rise > 0) fillSlabSides(ctx, sx, sy, TW, TH, FLOOR_THICK + rise);
         // 水のさざ波は半拍ごとに動く
         if (cell.water) ctx.drawImage(this.water[mod(Math.floor(tickF / (TICKS_PER_BEAT / 2)), 2)][cell.zone], sx - TW / 2, sy);
-        else ctx.drawImage(this.roads[cell.floor][light[stage.index(x, y)]][cell.zone], sx - TW / 2, sy);
+        else ctx.drawImage(this.road(cell, light[stage.index(x, y)]), sx - TW / 2, sy);
+        if (cell.climb) this.climbMark(sx, sy, cell.climb, stage, x, y);
 
         const obj = cell.obj;
         if (obj?.type === 'bridge') {
@@ -712,6 +845,34 @@ export class Renderer {
         if (!f) continue;
         const sx = iso(x, y).sx;
         const sy = iso(x, y).sy + f.dy;
+        const thing = cell.terrain === 'wall' ? things.get(stage.index(x, y)) : undefined;
+        if (cell.terrain === 'wall' && cell.scenery && !SURFACES.has(cell.scenery)) {
+          // 家具の塊：床（高さ 0）から、面の高さまでの箱。プレイヤーより手前で重なるときは透かす
+          const base = isoFlat(x, y);
+          const top = Math.round(cell.height * PX_PER_UNIT);
+          const hides = x + y > px + py && Math.abs(base.sx - p.sx) < TW && base.sy - top < feet && base.sy + TH > feet - PLAYER_H;
+          const kind = cell.scenery;
+          sprites.push({
+            depth: x + y,
+            draw: () => {
+              ctx.globalAlpha = (hides ? 0.45 : 1) * f.alpha;
+              this.furniture(base.sx, base.sy + f.dy, top, kind);
+              ctx.globalAlpha = 1;
+            },
+          });
+        }
+        if (thing && THINGS[thing]) {
+          const info = THINGS[thing];
+          const hides = x + y > px + py && Math.abs(sx - p.sx) < TW && sy - info.height < feet && sy + TH + FLOOR_THICK > feet - PLAYER_H;
+          sprites.push({
+            depth: x + y + 0.1,
+            draw: () => {
+              ctx.globalAlpha = (hides ? 0.4 : 1) * f.alpha;
+              info.draw(ctx, sx, sy + TH / 2, tickF);
+              ctx.globalAlpha = 1;
+            },
+          });
+        }
         // 道の外は闇で何も描かない。小物だけが闇に浮かぶ
         if (cell.terrain === 'wall' && cell.obj?.type === 'prop' && cell.obj.kind !== 'lot') {
           const kind = cell.obj.kind;
@@ -797,6 +958,9 @@ export class Renderer {
             depth: Math.max(hx + hy, tail.x + tail.y) + 0.5,
             draw: () => (h.look === 'tram' ? this.tram(head, tail) : this.koinobori(head, tail, tickF, n)),
           });
+        } else if (h.look === 'zarigani') {
+          const dir = { x: b.x - a.x, y: b.y - a.y };
+          sprites.push({ depth: hx + hy + 0.5, draw: () => this.zarigani(sx, sy + TH / 2, dir, tickF) });
         } else {
           sprites.push({ depth: hx + hy + 0.5, draw: () => this.patrol(sx, sy + TH / 2, tickF) });
         }
@@ -807,6 +971,34 @@ export class Renderer {
           h.axis === 'x' ? { x: base.x + mid + u, y: base.y } : { x: base.x, y: base.y + mid + u };
         const seat = along(h.seatAt(tickF));
         const ends = [along(-(h.reach + 0.5)), along(h.reach + 0.5)];
+        if (h.look === 'tram') {
+          // 路面電車：先頭が座席の位置、車体は走ってくる向きの後ろへ。線路の端から先（闇の上）では薄れて消えていく
+          const u = h.seatAt(tickF);
+          const v = Math.sign(h.seatAt(tickF + 0.5) - u) || 1;
+          const head = along(u);
+          const tail = along(u - v * 1.2);
+          const over = Math.max(0, Math.abs(u) - (mid + 0.5));
+          const alpha = clamp01(1 - over / 2.5);
+          if (alpha > 0) {
+            sprites.push({
+              depth: Math.max(head.x + head.y, tail.x + tail.y) + 0.5,
+              draw: () => {
+                ctx.globalAlpha = alpha;
+                this.tram(head, tail);
+                ctx.globalAlpha = 1;
+              },
+            });
+          }
+          continue;
+        }
+        if (h.look === 'koinobori') {
+          // 鯉のぼり：頭が座席の位置、胴は泳いでくる向きの後ろへ2マス
+          const v = Math.sign(h.seatAt(tickF + 0.5) - h.seatAt(tickF)) || 1;
+          const tail = along(h.seatAt(tickF) - v * 2);
+          const n = hazardIndex;
+          sprites.push({ depth: Math.max(seat.x + seat.y, tail.x + tail.y) + 0.5, draw: () => this.koinobori(seat, tail, tickF, n) });
+          continue;
+        }
         if (h.look === 'fan' && h.pivot) {
           const pv = h.pivot;
           sprites.push({ depth: Math.max(seat.x + seat.y, pv.x + pv.y) + 0.45, draw: () => this.fan(pv, seat, tickF) });
@@ -826,6 +1018,16 @@ export class Renderer {
           sprites.push({
             depth: Math.max(c.x + c.y, pv.x + pv.y) + 0.4,
             draw: () => this.shishiodoshi(pv, c, h, tickF, soon && now % 2 === 0),
+          });
+          continue;
+        }
+        if ((h.look === 'kaki' || h.look === 'barrier') && h.pivot) {
+          const c = h.cells[0];
+          const pv = h.pivot;
+          const look = h.look;
+          sprites.push({
+            depth: Math.max(c.x + c.y, pv.x + pv.y) + 0.4,
+            draw: () => (look === 'kaki' ? this.kaki(pv, c, h, tickF, soon && now % 2 === 0) : this.barrier(pv, c, active, soon && now % 2 === 0)),
           });
           continue;
         }
@@ -887,6 +1089,7 @@ export class Renderer {
     for (const l of labels) this.text(l.text, l.x, l.y, 1, l.color, 'center');
 
     ctx.restore();
+    elevation = () => 0;
   }
 
   private ring(cx: number, cy: number, rx: number, ry: number, color: string): void {
@@ -1041,15 +1244,115 @@ export class Renderer {
     }
   }
 
+  /** ステージの床の高さ（ドット）を返す関数 */
+  private elevationOf(stage: Stage): (x: number, y: number) => number {
+    let f = this.elevations.get(stage);
+    if (!f) {
+      f = stage.def.heights ? makeElevation(stage) : () => 0;
+      this.elevations.set(stage, f);
+    }
+    return f;
+  }
+
+  /** 闇に浮かぶ物：マスの番号 → 種類 */
+  private thingMap(stage: Stage): Map<number, string> {
+    let m = this.thingMaps.get(stage);
+    if (!m) {
+      m = new Map((stage.def.things ?? []).map(([x, y, kind]) => [stage.index(x, y), kind]));
+      this.thingMaps.set(stage, m);
+    }
+    return m;
+  }
+
+  /** 歩けない平らな面のタイル。水面はさざ波が動く */
+  private surface(cell: Cell, tickF: number): HTMLCanvasElement {
+    const kind = cell.scenery!;
+    const frame = kind === 'w' ? mod(Math.floor(tickF / (TICKS_PER_BEAT / 2)), 2) : 0;
+    const k = `${kind}|${cell.tint}|${cell.floor}|${frame}`;
+    let sp = this.surfaces.get(k);
+    if (!sp) {
+      sp = makeSprite(TW, TH + FLOOR_THICK + 1, (ctx) => {
+        const cx = TW / 2;
+        fillSlabSides(ctx, cx, 0, TW, TH, FLOOR_THICK);
+        if (kind === 'w') {
+          fillDiamond(ctx, cx, 0, TW, TH, tinted(COLORS.waterDeep, cell.tint));
+          fillDiamond(ctx, cx, 1, TW - 2, TH - 2, tinted(COLORS.water, cell.tint));
+          ditherDiamond(ctx, cx, 1, TW - 2, TH - 2, COLORS.waterLight, (x, y) => (x - 2 * y + frame * 3 + 40) % 11 === 0 && x % 2 === 0);
+        } else if (kind === 'r' || kind === 's') {
+          // 歩かない屋根面：道より一段暗い瓦。雪の屋根は白く沈む
+          const pal = FLOOR_LIGHT.roof[0];
+          fillDiamond(ctx, cx, 0, TW, TH, tinted(pal.edge, cell.tint));
+          fillDiamond(ctx, cx, 1, TW - 2, TH - 2, tinted(mixColor(pal.road[2], COLORS.bg, 0.25), cell.tint));
+          ditherDiamond(ctx, cx, 1, TW - 2, TH - 2, COLORS.bg, (x, y) => (x - 2 * y + 48) % 6 === 0);
+          if (kind === 's') {
+            // 歩ける雪の斜面と見分けられるよう、歩かない雪の面は暗く沈める
+            fillDiamond(ctx, cx, 1, TW - 4, TH - 3, mixColor(COLORS.snowShade, COLORS.bg, 0.68));
+            ditherDiamond(ctx, cx, 1, TW - 4, TH - 3, mixColor(COLORS.snowShade, COLORS.bg, 0.4), (x, y) => (x * 3 + y * 5) % 7 === 0);
+          }
+        } else if (kind === 'p') {
+          // 二階の壁の上端（窓の外のひさしの奥）
+          fillDiamond(ctx, cx, 0, TW, TH, COLORS.facadeTop);
+          ditherDiamond(ctx, cx, 0, TW, TH, COLORS.facadeSpeck, (x, y) => (x * 5 + y * 11) % 17 === 0);
+        } else {
+          // 人影の足場：別の時代の地面の切れ端
+          const pal = FLOOR_LIGHT[cell.floor][0];
+          fillDiamond(ctx, cx, 0, TW, TH, tinted(pal.edge, cell.tint));
+          fillDiamond(ctx, cx, 1, TW - 4, TH - 2, tinted(pal.road[0], cell.tint));
+        }
+      });
+      this.surfaces.set(k, sp);
+    }
+    return sp;
+  }
+
+  /** 家具の塊。sx, sy は床（高さ 0）での菱形の上の頂点、top は塊の高さ（ドット） */
+  private furniture(sx: number, sy: number, top: number, kind: string): void {
+    const ctx = this.lctx;
+    const [t, l, r] = FURNITURE[kind] ?? FURNITURE.x;
+    fillPrismSides(ctx, sx, sy - top, TW - 2, TH - 1, top, l, r);
+    fillDiamond(ctx, sx, sy - top, TW - 2, TH - 1, t);
+    if (kind === 'F') {
+      // 襖の柄（少女の服と同じ系統の柄。企画書 第5章の手がかり）
+      ditherDiamond(ctx, sx, sy - top, TW - 2, TH - 1, COLORS.fusumaPattern, (x, y) => (x * 3 + y * 5) % 7 === 0);
+    }
+  }
+
+  /** 上れるマスの印：はしご（横木）、雨どい（縦の管）、雪の斜面（爪の跡） */
+  private climbMark(sx: number, sy: number, kind: 'h' | 'g' | 's', stage: Stage, x: number, y: number): void {
+    const ctx = this.lctx;
+    // どちら向きに高くなっているか（はしごの横木はその向きに並べる）
+    const h = stage.cell(x, y)!.height;
+    const upY = (stage.cell(x, y - 1)?.height ?? 0) > h || (stage.cell(x, y + 1)?.height ?? 0) > h;
+    if (kind === 'h') {
+      for (const k of [-0.25, 0, 0.25]) {
+        const a = upY ? { x: -0.3, y: k } : { x: k, y: -0.3 };
+        const b = upY ? { x: 0.3, y: k } : { x: k, y: 0.3 };
+        const pa = { x: sx + ((a.x - a.y) * TW) / 2, y: sy + TH / 2 + ((a.x + a.y) * TH) / 2 };
+        const pb = { x: sx + ((b.x - b.y) * TW) / 2, y: sy + TH / 2 + ((b.x + b.y) * TH) / 2 };
+        plotLine(ctx, Math.round(pa.x), Math.round(pa.y), Math.round(pb.x), Math.round(pb.y), COLORS.bridge);
+      }
+    } else if (kind === 'g') {
+      fillEllipse(ctx, sx, sy + TH / 2, 3, 1, COLORS.antenna);
+      ctx.fillStyle = COLORS.lampPole;
+      ctx.fillRect(sx - 1, sy + TH / 2 - 1, 2, 1);
+    } else {
+      ctx.fillStyle = COLORS.snowShade;
+      for (const dx of [-4, 0, 4]) ctx.fillRect(sx + dx, sy + TH / 2 - 1, 1, 2);
+    }
+  }
+
   /** 各マスの街灯の明るさ（街灯と玄関から 1マス以内: 2、2マス: 1） */
   private lightMap(stage: Stage): Uint8Array {
     let map = this.lightMaps.get(stage);
     if (map) return map;
     map = new Uint8Array(stage.width * stage.height);
+    const things = this.thingMap(stage);
     for (let y = 0; y < stage.height; y++) {
       for (let x = 0; x < stage.width; x++) {
         const obj = stage.cell(x, y)!.obj;
-        if (obj?.type !== 'prop' || !['lamp', 'entrance', 'lantern', 'engawa', 'window'].includes(obj.kind)) continue;
+        const th = things.get(stage.index(x, y));
+        const lit = (th !== undefined && THINGS[th]?.light) || (obj?.type === 'prop' && ['lamp', 'entrance', 'lantern', 'engawa', 'window'].includes(obj.kind));
+        if (!lit) continue;
         for (let dy = -2; dy <= 2; dy++) {
           for (let dx = -2; dx <= 2; dx++) {
             if (!stage.cell(x + dx, y + dy)) continue;
@@ -1284,9 +1587,11 @@ export class Renderer {
     };
     const BODY = 14;
     const ROOF = 17;
-    ctx.globalAlpha = 0.45;
+    // 呼ぶ側の透明度（線路の端から先で薄れていく）に重ねる
+    const a0 = ctx.globalAlpha;
+    ctx.globalAlpha = a0 * 0.45;
     fillQuad(ctx, [pt(x0, y0, 0), pt(x1, y0, 0), pt(x1, y1, 0), pt(x0, y1, 0)], '#000');
-    ctx.globalAlpha = 0.7;
+    ctx.globalAlpha = a0 * 0.7;
     // +y の面（画面の左手前）と +x の面（右手前）。下半分は緑、窓の帯、上は白
     fillQuad(ctx, [pt(x0, y1, 0), pt(x1, y1, 0), pt(x1, y1, BODY), pt(x0, y1, BODY)], COLORS.tramGreen);
     fillQuad(ctx, [pt(x1, y1, 0), pt(x1, y0, 0), pt(x1, y0, BODY), pt(x1, y1, BODY)], COLORS.tramGreenDark);
@@ -1298,7 +1603,7 @@ export class Renderer {
     // 屋根の上の集電ポール
     const c = pt((x0 + x1) / 2, (y0 + y1) / 2, ROOF);
     plotLine(ctx, c.x, c.y, c.x + 6, c.y - 10, COLORS.lampPole);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = a0;
   }
 
   /**
@@ -1506,6 +1811,76 @@ export class Renderer {
     ctx.globalAlpha = 1;
     fillEllipse(ctx, q.x, q.y - 3, 6, 4, COLORS.snowShade);
     fillEllipse(ctx, q.x - 1, q.y - 4, 5, 3, COLORS.snow);
+  }
+
+  /** ザリガニ：浸かった道を横切る。dir は進む向き（グリッド） */
+  private zarigani(cx: number, cy: number, dir: { x: number; y: number }, tickF: number): void {
+    const ctx = this.lctx;
+    const ux = dir.x - dir.y;
+    const uy = (dir.x + dir.y) / 2;
+    const s = Math.sign(ux) || 1;
+    ctx.globalAlpha = 0.35;
+    fillEllipse(ctx, cx, cy, 5, 1, '#000');
+    ctx.globalAlpha = 1;
+    const y = cy - 3;
+    fillEllipse(ctx, cx, y, 4, 2, COLORS.zari);
+    fillEllipse(ctx, cx - s * 4, y + Math.round(uy), 2, 1, COLORS.zariDark);
+    // はさみ：拍に合わせて開け閉め
+    const open = Math.floor(tickF / 2) % 2 === 0 ? 1 : 0;
+    ctx.fillStyle = COLORS.zari;
+    ctx.fillRect(cx + s * 4, y - 2 - open, 3, 2);
+    ctx.fillRect(cx + s * 4, y + 1 + open, 3, 2);
+    ctx.fillStyle = COLORS.zariDark;
+    for (const dx of [-2, 0, 2]) ctx.fillRect(cx + dx, y + 2, 1, 2);
+  }
+
+  /** 熟して落ちる柿の実：枝（pivot の木）に下がった実が、周期の [from, to) の間に道のマスへ落ちる */
+  private kaki(pivot: Vec, target: Vec, h: PeriodicHazard, tickF: number, blink: boolean): void {
+    const ctx = this.lctx;
+    const p = iso(pivot.x, pivot.y);
+    const tg = iso(target.x, target.y);
+    const branch = { x: Math.round(lerp(p.sx, tg.sx, 0.6)), y: tg.sy + TH / 2 - 30 };
+    const phase = mod(tickF, h.period);
+    const falling = phase >= h.from && phase < h.to;
+    if (blink) strokeDiamond(ctx, tg.sx, tg.sy + 2, TW - 8, TH - 4, COLORS.warn);
+    ctx.fillStyle = COLORS.wood;
+    ctx.fillRect(branch.x - 6, branch.y - 2, 12, 1);
+    const u = falling ? (phase - h.from) / (h.to - h.from) : 0;
+    const fx = Math.round(lerp(branch.x, tg.sx, u));
+    const fy = Math.round(lerp(branch.y, tg.sy + TH / 2 - 3, u * u));
+    if (falling) {
+      ctx.globalAlpha = 0.4;
+      fillEllipse(ctx, tg.sx, tg.sy + TH / 2, 4, 1, '#000');
+      ctx.globalAlpha = 1;
+    }
+    fillEllipse(ctx, fx, fy, 2, 2, COLORS.kaki);
+    ctx.fillStyle = COLORS.leaf;
+    ctx.fillRect(fx - 1, fy - 3, 3, 1);
+  }
+
+  /** 踏切の遮断機：pivot の柱から、閉じているあいだ（危険）は道のマスの上へ赤白の棒が下りる */
+  private barrier(pivot: Vec, target: Vec, down: boolean, blink: boolean): void {
+    const ctx = this.lctx;
+    const p = iso(pivot.x, pivot.y);
+    const tg = iso(target.x, target.y);
+    const ground = p.sy + TH / 2;
+    ctx.drawImage(this.footing, p.sx - 6, ground - 3);
+    ctx.fillStyle = '#d8d0c4';
+    ctx.fillRect(p.sx - 1, ground - 14, 2, 14);
+    // 警報灯：閉じる前と閉じているあいだ、交互に点く
+    ctx.fillStyle = blink || down ? COLORS.warn : COLORS.lampPole;
+    ctx.fillRect(p.sx - 3, ground - 16, 2, 2);
+    ctx.fillStyle = !blink && down ? COLORS.warn : COLORS.lampPole;
+    ctx.fillRect(p.sx + 1, ground - 16, 2, 2);
+    const end = down ? { x: tg.sx + (tg.sx - p.sx) * 0.4, y: tg.sy + TH / 2 - 8 } : { x: p.sx + (tg.sx - p.sx) * 0.15, y: ground - 34 };
+    const n = Math.max(1, Math.round(Math.hypot(end.x - p.sx, end.y - (ground - 12))));
+    for (let i = 0; i <= n; i++) {
+      const x = Math.round(lerp(p.sx, end.x, i / n));
+      const y = Math.round(lerp(ground - 12, end.y, i / n));
+      ctx.fillStyle = Math.floor(i / 4) % 2 === 0 ? '#c9473b' : '#e8e1d6';
+      ctx.fillRect(x, y, 1, 2);
+    }
+    if (blink) strokeDiamond(ctx, tg.sx, tg.sy + 2, TW - 8, TH - 4, COLORS.warn);
   }
 
   /**

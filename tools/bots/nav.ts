@@ -30,6 +30,7 @@ export function distanceField(stage: Stage, opts: { safeOnly?: boolean } = {}): 
       if (!p || p.terrain !== 'floor') continue;
       if (opts.safeOnly && p.zone !== 0) continue;
       if (target.obj?.type === 'oneway' && target.obj.dir !== d) continue;
+      if (!stage.canStep(px, py, cx, cy)) continue;
       const cost = ZONE_INTERVAL[p.zone] + (p.obj?.type === 'stop' ? TICKS_PER_BEAT : 0);
       const pi = stage.index(px, py);
       if (dist[cur] + cost < dist[pi]) dist[pi] = dist[cur] + cost;
@@ -48,6 +49,7 @@ export function canEnter(sim: Sim, dir: Dir, t: number): boolean {
   const ny = sim.y + DIR_VEC[dir].y;
   const cell = sim.stage.cell(nx, ny);
   if (!cell || cell.terrain === 'wall') return false;
+  if (!sim.stage.canStep(sim.x, sim.y, nx, ny)) return false;
   if (cell.obj?.type === 'gate' && sim.isGateClosed(nx, ny, t)) return false;
   if (cell.obj?.type === 'oneway' && cell.obj.dir !== dir) return false;
   return true;

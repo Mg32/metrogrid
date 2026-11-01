@@ -173,3 +173,58 @@ describe('流されていく物', () => {
     assert.deepEqual(dense.cellsAt(4).map((c) => c.x).sort(), [1, 3]);
   });
 });
+
+describe('床の高さ（企画書 第2.4節）', () => {
+  /** 1行のステージに高さ（1/4段単位の1文字）と上れるマスを付ける */
+  function mkh(terrain: string, objects: string, heights: string, climbs: string): Sim {
+    const def: StageDef = {
+      name: 't',
+      bpm: 120,
+      bars: 8,
+      terrain: [terrain],
+      objects: [objects],
+      heights: [heights],
+      climbs: [climbs],
+      scores: {},
+      hazards: [],
+    };
+    return new Sim(new Stage(def), () => 0);
+  }
+
+  test('2段までの下りは進める', () => {
+    const s = mkh('#....#', ' S  G ', '088000', '      ');
+    run(s, 0, 4, 'right');
+    assert.equal(s.x, 2);
+    run(s, 4, 8, 'right');
+    assert.equal(s.x, 3);
+  });
+
+  test('2段より深い段差は降りられない', () => {
+    const s = mkh('#....#', ' S  G ', '0c3000', '      ');
+    run(s, 0, 16, 'right');
+    assert.equal(s.x, 1);
+  });
+
+  test('上れるのは、はしご・雨どいのマスから1段までだけ', () => {
+    // はしごのない上りは進めない
+    const blocked = mkh('#....#', ' S  G ', '004000', '      ');
+    run(blocked, 0, 16, 'right');
+    assert.equal(blocked.x, 1);
+    // はしごのマスへは1段まで上れる
+    const ladder = mkh('#....#', ' S  G ', '004800', '  hh  ');
+    run(ladder, 0, 8, 'right');
+    assert.equal(ladder.x, 3);
+    // 1段より高い上りは、はしごでも進めない
+    const tall = mkh('#....#', ' S  G ', '005000', '  h   ');
+    run(tall, 0, 16, 'right');
+    assert.equal(tall.x, 1);
+  });
+
+  test('斜面は滑り降りられるが、登り返せない', () => {
+    const s = mkh('#.....#', ' S   G ', '0432100', '       ');
+    run(s, 0, 12, 'right');
+    assert.equal(s.x, 4);
+    run(s, 12, 28, 'left');
+    assert.equal(s.x, 4);
+  });
+});

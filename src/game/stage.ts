@@ -18,7 +18,7 @@ import type { Dir, Vec, Zone } from './types.ts';
  *            'Z' 商店（シャッター）  'U' 電柱  'J' 下駄箱  'N' 窓
  *            'X' テレビのアンテナ  'F' 物干し  'C' 煙突  'D' 流し台  'A' 襖
  * floors:   床の見た目（省略すると景色の既定）。'l' 路地  'g' 庭  'w' 板の間  'c' 土間  't' 畳  's' 石畳  'a' アスファルト
- *           'r' 瓦屋根
+ *           'r' 瓦屋根  'd' 土（公園、草地）
  */
 export interface StageDef {
   name: string;
@@ -41,10 +41,38 @@ export interface StageDef {
   hints?: { x: number; y: number; text: string; /** タッチで遊んでいるときの文（キーの話をしているもの） */ touch?: string }[];
   /** ハブの入口：objects の数字 → 行き先のステージ名 */
   portals?: Record<string, string>;
+  /**
+   * 床の高さ（企画書 第2.4節「床の高さ」。STAGE 4・5）。1文字が 1/4 段で、'0'〜'9' が 0〜9、'a'〜'z' が 10〜35。省略すると全部 0。
+   * 同じ高さか2段までの下りは自由に進め、上れるのは climbs のマス（から・へ）1段までだけ
+   */
+  heights?: string[];
+  /** 上れるマス：'h' はしご、'g' 雨どい、's' 這い上がれる雪の斜面（' ' はふつうのマス） */
+  climbs?: string[];
+  /** 場面の置き分け（時間帯・天気・季節・年月）。道の色合いだけを変える。文字の意味は描画側（TINTS）で決める */
+  tints?: string[];
+  /** 歩けない面（壁のマスの上に見た目だけ描く）：'w' 水面、'r' 瓦屋根、's' 雪の屋根、'p' 二階の壁、'f' 家具の塊。高さは heights */
+  scenery?: string[];
+  /** 闇に浮かぶ物（物語の物、人影、区間の小物）。壁のマスに置く。[x, y, 種類] */
+  things?: [number, number, ThingKind][];
 }
 
+/** 闇に浮かぶ物の種類。絵は描画側（src/render/things.ts）で決める */
+export type ThingKind = string;
+
+/** 高さの1文字 → 1/4段の数 */
+export function heightUnits(ch: string | undefined): number {
+  if (!ch || ch === ' ') return 0;
+  const n = parseInt(ch, 36);
+  return Number.isNaN(n) ? 0 : n;
+}
+/** 1段 = 4（heights の単位） */
+export const STEP_UNITS = 4;
+/** 下りは2段まで、上り（climbs のマスだけ）は1段まで */
+const MAX_DROP = 2 * STEP_UNITS;
+const MAX_CLIMB = STEP_UNITS;
+
 export type Theme = 'alley' | 'garden' | 'house' | 'street' | 'roof';
-export type FloorStyle = 'alley' | 'garden' | 'wood' | 'tataki' | 'tatami' | 'cobble' | 'asphalt' | 'roof';
+export type FloorStyle = 'alley' | 'garden' | 'wood' | 'tataki' | 'tatami' | 'cobble' | 'asphalt' | 'roof' | 'dirt';
 
 const FLOOR_CHARS: Record<string, FloorStyle> = {
   l: 'alley',
@@ -55,6 +83,7 @@ const FLOOR_CHARS: Record<string, FloorStyle> = {
   s: 'cobble',
   a: 'asphalt',
   r: 'roof',
+  d: 'dirt',
 };
 const THEME_FLOOR: Record<Theme, FloorStyle> = { alley: 'alley', garden: 'garden', house: 'wood', street: 'asphalt', roof: 'roof' };
 
@@ -62,7 +91,8 @@ export type HazardDef =
   /**
    * 巡回型。waypoints を縦横の直線でつないだ経路を interval tick ごとに1マス進む。loop でなければ往復。
    * length は車両の長さ（マス。先頭と、通ってきた length − 1 マスが危険）。
-   * look: 'kaisento' は回旋塔（pivot の柱のまわりを腕が回る）、'tram' は路面電車、'koinobori' は鯉のぼり（length の長さの胴が泳ぐ）として描く
+   * look: 'kaisento' は回旋塔（pivot の柱のまわりを腕が回る）、'tram' は路面電車、'koinobori' は鯉のぼり（length の長さの胴が泳ぐ）、
+   * 'zarigani' はザリガニ（浸かった道を横切る）として描く
    */
   | {
       type: 'patrol';
@@ -70,13 +100,14 @@ export type HazardDef =
       interval: number;
       loop?: boolean;
       length?: number;
-      look?: 'kaisento' | 'tram' | 'koinobori';
+      look?: 'kaisento' | 'tram' | 'koinobori' | 'zarigani';
       pivot?: [number, number];
     }
   /**
    * 定位置型。period tick の周期のうち [from, to) の間だけ cells が危険になる。
    * look: 'shishiodoshi' は鹿威し（pivot の台から竹筒が cells へ打ち下ろされる）、
-   * 'snow' は屋根から滑り落ちる雪（cells の先頭から末尾へ滑り落ちる。pivot があればその屋根の軒から落ちてくる）として描く
+   * 'snow' は屋根から滑り落ちる雪（cells の先頭から末尾へ滑り落ちる。pivot があればその屋根の軒から落ちてくる）、
+   * 'kaki' は熟して落ちる柿の実（pivot の枝から cells へ落ちる）、'barrier' は踏切の遮断機（pivot の柱から cells の上へ棒が下りる）として描く
    */
   | {
       type: 'periodic';
@@ -84,7 +115,7 @@ export type HazardDef =
       period: number;
       from: number;
       to: number;
-      look?: 'shishiodoshi' | 'snow';
+      look?: 'shishiodoshi' | 'snow' | 'kaki' | 'barrier';
       pivot?: [number, number];
     }
   /** 流されていく物。cells（上流 → 下流、縦横に連続）を every tick ごとに1つ、interval tick で1マスずつ流れる */
@@ -93,7 +124,9 @@ export type HazardDef =
    * 箱ブランコ。cells（axis 方向に一直線）の上を、座席が period tick で1往復する。
    * 振れ幅 reach（マス）が cells より広いと、振り切ったときは壁の上に出て、どのマスも危険でなくなる。
    * look: 'pendulum' は柱時計の振り子（闇に浮かぶ時計から長い竿が下りている）、
-   * 'fan' は扇風機の首振り（pivot の台に立つ扇風機が首を振り、頭が cells の上を往復する）として描く
+   * 'fan' は扇風機の首振り（pivot の台に立つ扇風機が首を振り、頭が cells の上を往復する）、
+   * 'koinobori' は色あせた鯉のぼり（屋根の高さを、cells に沿って行き来して泳ぐ）、
+   * 'tram' はもう走っていない路線の車両（線路を行き来し、振り切ると線路の端から闇へ走り去る）として描く
    */
   | {
       type: 'swing';
@@ -101,7 +134,7 @@ export type HazardDef =
       axis: 'x' | 'y';
       period: number;
       reach?: number;
-      look?: 'pendulum' | 'fan';
+      look?: 'pendulum' | 'fan' | 'koinobori' | 'tram';
       pivot?: [number, number];
     };
 
@@ -146,6 +179,14 @@ export interface Cell {
   /** 床の見た目 */
   floor: FloorStyle;
   obj: Obj | null;
+  /** 床の高さ（1/4段単位） */
+  height: number;
+  /** 上れるマス */
+  climb: 'h' | 'g' | 's' | null;
+  /** 場面の置き分けの文字（tints。なければ ' '） */
+  tint: string;
+  /** 歩けない面の見た目（scenery。なければ null） */
+  scenery: string | null;
 }
 
 const ZONE_CHARS: Record<string, Zone> = { '.': 0, ',': 1, ':': 2, '~': 1, '=': 2 };
@@ -188,7 +229,9 @@ export class Stage {
     this.height = def.terrain.length;
     this.width = Math.max(...def.terrain.map((r) => r.length));
     if (def.objects.length !== this.height) throw new Error(`${def.name}: objects の行数が terrain と違う`);
-    if (def.floors && def.floors.length !== this.height) throw new Error(`${def.name}: floors の行数が terrain と違う`);
+    for (const key of ['floors', 'heights', 'climbs', 'tints', 'scenery'] as const) {
+      if (def[key] && def[key].length !== this.height) throw new Error(`${def.name}: ${key} の行数が terrain と違う`);
+    }
     const defaultFloor = THEME_FLOOR[def.theme ?? 'alley'];
 
     this.cells = [];
@@ -200,12 +243,20 @@ export class Stage {
         const o = def.objects[y][x] ?? ' ';
         const water = t === '~' || t === '=';
         const floor = FLOOR_CHARS[def.floors?.[y][x] ?? ''] ?? defaultFloor;
+        const c = def.climbs?.[y][x];
+        const sc = def.scenery?.[y][x];
+        const extra = {
+          height: heightUnits(def.heights?.[y][x]),
+          climb: (c === 'h' || c === 'g' || c === 's' ? c : null) as Cell['climb'],
+          tint: def.tints?.[y][x] ?? ' ',
+          scenery: sc && sc !== ' ' ? sc : null,
+        };
         const cell: Cell =
           t === '#'
-            ? { terrain: 'wall', zone: 0, water, floor, obj: null }
+            ? { terrain: 'wall', zone: 0, water, floor, obj: null, ...extra }
             : t in ZONE_CHARS
-              ? { terrain: 'floor', zone: ZONE_CHARS[t], water, floor, obj: null }
-              : { terrain: 'hole', zone: 0, water, floor, obj: null };
+              ? { terrain: 'floor', zone: ZONE_CHARS[t], water, floor, obj: null, ...extra }
+              : { terrain: 'hole', zone: 0, water, floor, obj: null, ...extra };
 
         if (o === 'S') cell.obj = { type: 'start' };
         else if (o === 'G') cell.obj = { type: 'goal' };
@@ -233,6 +284,9 @@ export class Stage {
         this.cells.push(cell);
       }
     }
+    for (const [x, y, kind] of def.things ?? []) {
+      if (this.cells[y * this.width + x]?.terrain !== 'wall') throw new Error(`${def.name}: (${x},${y}) の物 '${kind}' が壁の上にない`);
+    }
     if (!start) throw new Error(`${def.name}: S が必要`);
     if (!goal && this.kind !== 'hub') throw new Error(`${def.name}: G が必要`);
     this.start = start;
@@ -247,5 +301,18 @@ export class Stage {
 
   index(x: number, y: number): number {
     return y * this.width + x;
+  }
+
+  /**
+   * 隣のマスへ高さの上で進めるか（企画書 第2.4節「床の高さ」）。壁・ゲート・一方通行は見ない。
+   * 同じ高さか2段までの下りは自由。上れるのは、どちらかが climbs のマスで、1段までのとき
+   */
+  canStep(x: number, y: number, nx: number, ny: number): boolean {
+    const a = this.cell(x, y);
+    const b = this.cell(nx, ny);
+    if (!a || !b) return false;
+    const rise = b.height - a.height;
+    if (rise > 0) return (a.climb !== null || b.climb !== null) && rise <= MAX_CLIMB;
+    return -rise <= MAX_DROP;
   }
 }

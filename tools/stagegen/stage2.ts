@@ -1,177 +1,164 @@
-// STAGE 2 の地図を組み立てて src/game/stages/stage2.ts を書き出す
+// STAGE 2 の地図を組み立てて src/game/stages/stage2.ts を書き出す（企画書 第4.2節「STAGE 2：池と用水路」）
 //   node tools/stagegen/stage2.ts          所要時間を表示するだけ（SHOW=1 で地図も表示）
-//   node tools/stagegen/stage2.ts --write  src/game/stages/stage2.ts を上書きする（手で直した分は消える）
+//   node tools/stagegen/stage2.ts --write  src/game/stages/stage2.ts を上書きする
 //
-// 道以外（'#'）は闇で、描かれない。道は闇に浮かぶ。
-// スタート（縁側）は画面の下。STAGE1 とは逆に、段を折り返しながら -x へ登っていき、画面では斜め左上へ進む。
-// 段と段の間の闇を用水路が流れていて、上流（ゴール側）から流されてくる物が下流へ流れていく。
-// 組み立ては「進む向き p（スタートから 0, 1, …）」と「横 l」で考え、グリッドには x = XO − p、y = l で置く。
-// 扉や小物の見える面は +x / +y 側なので、道が小物の −p 側（x の大きい側）か +l 側に来るように置く。
-import { writeFileSync } from 'node:fs';
-import path from 'node:path';
-import { Stage, type HazardDef, type StageDef } from '../../src/game/stage.ts';
-import { distanceField } from '../bots/nav.ts';
+// 作業座標：x＝横、y＝進む向き（y が大きいほどスタート側）。書き出すときに x と y を入れ替え、画面の左上へ登る向きにする
+// （ステージの中で STAGE 2 だけが左上へ登る）。地図は企画のときのマス目の定義（2026-10-31）を移したもの。
+import { build, Layout, report, write, type P } from './lib.ts';
 
-const BPM = 120;
-const BARS = Number(process.env.BARS ?? 64);
-const RUNGS = 11;
-/** 段 k の下の行（安全）の p。上の行は +1、段の間（用水路の流れる闇）は +2〜+4 */
-const lo = (k: number) => 4 + 5 * k;
-const PMAX = lo(RUNGS - 1) + 7;
-const XO = PMAX;
-const W = PMAX + 1, H = 23;
-const L0 = 3, L1 = 19;
+const BPM = 100;
+const BARS = Number(process.env.BARS ?? 61);
+const L = new Layout(40, 77);
+const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 
-const T: string[][] = Array.from({ length: H }, () => Array(W).fill('#'));
-const O: string[][] = Array.from({ length: H }, () => Array(W).fill(' '));
-const t = (p: number, l: number, ch: string) => { T[l][XO - p] = ch; };
-const o = (p: number, l: number, ch: string) => { O[l][XO - p] = ch; };
-const at = (p: number, l: number): [number, number] => [XO - p, l];
-const row = (p: number, l0: number, l1: number, ch: string) => { for (let l = Math.min(l0, l1); l <= Math.max(l0, l1); l++) t(p, l, ch); };
-const hazards: HazardDef[] = [];
-/** 鹿威し：台（闇の上）から、隣の道のマスへ竹筒が打ち下ろされる。周期 period のうち [from, to) が危険 */
-const shishi = (p: number, l: number, pivot: [number, number], period: number, from: number, to: number) =>
-  hazards.push({ type: 'periodic', look: 'shishiodoshi', cells: [at(p, l)], pivot: at(...pivot), period, from, to });
+// ── 家の中：廊下（スタート）→ 縁側。歩けるのは廊下と縁側だけで、障子・応接セット・ガラス戸は背景
+L.path([[32, 76], [32, 72], [20, 72]], '.');
+L.put('S', [32, 76]);
+L.thing('shoji', ...range(21, 31).filter((x) => x % 2 === 1).map((x) => [x, 71] as P));
+L.thing('sofa', [26, 69], [28, 69]);
+L.path([[19, 72], [19, 64]], '.');
+L.thing('glass_door', ...range(65, 71).map((y) => [18, y] as P));
+L.thing('kutsu', [20, 63]);
+L.seg([19, 63], [19, 63], '.');
 
-// 段は 11 段。段 k は下の行 lo(k)（安全）と上の行 lo(k)+1 の2行で、l = 3〜19。
-// 偶数段は +l へ、奇数段は −l へ歩き、端の連絡路（段の間の3行）で次の段へ登る。
-// 安全な道（下の行と端の連絡路）には危険物も欠けも置かない（慣れていなくても、安全な道を歩けば戻されない）。
-const rightEnd = (k: number) => k % 2 === 0;
-for (let k = 0; k < RUNGS; k++) {
-  row(lo(k), L0, L1, '.');
-  // 上の行の両端の2マスは連絡路への角なので安全。中ほどの車線は段ごとに決める
-  row(lo(k) + 1, L0, L0 + 1, '.');
-  row(lo(k) + 1, L1 - 1, L1, '.');
-  if (k < RUNGS - 1) { const l = rightEnd(k) ? L1 : L0; for (let d = 2; d <= 4; d++) t(lo(k) + d, l, '.'); }
-}
-const lane = (k: number, ch: string) => row(lo(k) + 1, L0 + 2, L1 - 2, ch);
-// スタート周辺（段 0〜3）：2行とも安全で道幅が広い
-for (const k of [0, 1, 2, 3]) lane(k, '.');
-// 中間（段 4〜7）：上の行は八分の小径。鹿威しが打ち下ろされ、ところどころ踏み石が抜けている
-for (const k of [4, 5, 6, 7]) lane(k, ',');
-// ゴール周辺（段 8〜10）：上の行は十六分。抜けが多い
-for (const k of [8, 9, 10]) lane(k, ':');
-for (const [k, l] of [[5, 12], [6, 7], [7, 14], [8, 6], [8, 11], [8, 16], [9, 9], [9, 14], [10, 7], [10, 12], [10, 15]]) t(lo(k) + 1, l, ' ');
+// ── 庭と池。安全な道は庭の外周（塀沿い）で、木戸で合流する。池の飛び石（八分）は入門の小さな賭け
+L.path([[19, 62], [1, 62], [1, 56], [3, 56], [3, 52]], '.');
+L.seg([3, 51], [3, 51], '.');
+L.thing('kido', [2, 51]);
+L.waterRect(8, 53, 14, 60);
+L.path([[17, 61], [17, 59], [13, 59], [13, 56], [8, 56], [8, 54], [4, 54]], ',');
+L.put('P', [13, 57]);
+// 鹿威し：台から飛び石へ竹筒が打ち下ろされる（定位置型）
+L.hazard({ type: 'periodic', look: 'shishiodoshi', cells: [[11, 56]], pivot: [11, 55], period: 30, from: 0, to: 4 });
+L.thing('kid_reflect', [9, 55]);
+L.thing('lantern', [16, 61]);
+L.thing('tree', [5, 59], [16, 52], [2, 53]);
 
-// --- 用水路：段の間の闇を流れる。段とは橋で交わる。水の中は歩けて速いが、上流から物が流されてくる ---
-// 段 k と段 k+1 の間の用水路の横位置。下流（スタート側）の端と上流の端は橋（段の上の行と、次の段の下の行）
-const CANAL = [11, 7, 14, 9, 13, 6, 12, 8, 15, 10];
-CANAL.forEach((c, k) => {
-  const rapid = k >= 7;
-  for (let d = 2; d <= 4; d++) t(lo(k) + d, c, rapid ? '=' : '~');
-  o(lo(k) + 1, c, '_');
-  o(lo(k + 1), c, '_');
-  // 上流 → 下流
-  const cells = [4, 3, 2].map((d) => at(lo(k) + d, c));
-  hazards.push(rapid ? { type: 'flow', cells, interval: 1, every: 9 } : { type: 'flow', cells, interval: 2, every: k < 3 ? 20 : 14 });
-});
+// ── 外の道と用水路（池とは切り離し、暗渠から始まる）。石段から水に入って遡る
+L.path([[3, 51], [3, 49], [13, 49], [13, 41]], '.');
+L.path([[13, 31], [13, 29]], '.');
+L.thing('house', [12, 39], [12, 36], [12, 33]);
+L.seg([12, 45], [9, 45], '.');
+L.thing('door', [8, 45]);
+L.waterRect(15, 17, 19, 47);
+L.thing('culvert', [17, 48]);
+L.seg([14, 46], [16, 46], ',');
+// 水の中の筋：左右にずれ、深みは2か所だけ（4マスの直線の先、3マス遡った先）
+L.path([[17, 47], [17, 44], [15, 44], [15, 42]], ',');
+L.hole([17, 43]);
+L.path([[14, 41], [20, 41]], '.');
+L.put('_', ...range(14, 20).map((x) => [x, 41] as P));
+L.path([[15, 40], [15, 38], [18, 38], [18, 35], [16, 35], [16, 32]], ',');
+L.hole([18, 34]);
+L.path([[14, 31], [20, 31]], '.');
+L.put('_', ...range(14, 20).map((x) => [x, 31] as P));
+L.path([[17, 30], [17, 25]], ',');
+L.seg([14, 30], [16, 30], ',');
+L.seg([14, 25], [16, 25], ',');
+// 上流から物が流れてくる（巡回型）。水の筋の真っすぐな区間ごとに、上流（y の小さい側）から下流へ。
+// 筋を遡ると流れてくる物と正面から出会うので、区間は短く、次の物が来るまでの間隔を区間の長さの4倍より長くとる
+// （流れてきた物をやりすごしてから入れば、次の物が来る前に区間を抜けられる）
+const flow = (x: number, y0: number, y1: number, every: number) =>
+  L.hazard({ type: 'flow', cells: range(y0, y1).map((y) => [x, y] as P), interval: 2, every });
+flow(17, 25, 30, 26);
+flow(18, 35, 38, 19);
+flow(17, 44, 47, 18);
+// 安全な道は、左岸が家で塞がれているので、橋を渡って右岸を大回りする
+L.path([[21, 41], [21, 38], [26, 38], [26, 34], [31, 34], [31, 31], [21, 31]], '.');
+L.seg([27, 35], [30, 35], '.');
+L.thing('door', [31, 36]);
+L.thing('plant', [12, 48], [12, 43], [22, 39], [27, 37], [30, 32], [12, 32]);
 
-// --- 鹿威し：中間とゴール周辺の速い小径に打ち下ろされる。台は小径の奥（段の間の闇）に浮かぶ ---
-shishi(lo(4) + 1, 9, [lo(4) + 2, 9], 16, 12, 16);
-shishi(lo(5) + 1, 14, [lo(5) + 2, 14], 16, 4, 8);
-shishi(lo(6) + 1, 10, [lo(6) + 2, 10], 16, 8, 12);
-shishi(lo(7) + 1, 6, [lo(7) + 2, 6], 16, 0, 4);
-shishi(lo(7) + 1, 11, [lo(7) + 2, 11], 16, 8, 12);
-shishi(lo(9) + 1, 12, [lo(9) + 2, 12], 8, 4, 6);
-shishi(lo(10) + 1, 9, [lo(10) + 2, 9], 8, 0, 2);
-// ぐらつく踏み石（停止マス）：中間の連絡路
-o(lo(5) + 3, L0, 'P');
-o(lo(6) + 3, L1, 'P');
+// ── 堰：水の筋が途切れ、全員がいったん岸に上がる。上流でまた入り直せる
+L.waterRect(15, 0, 19, 16);
+L.thing('weir', ...range(15, 19).map((x) => [x, 24] as P));
+L.path([[17, 23], [17, 21], [15, 21], [15, 17]], ',');
+L.seg([14, 19], [16, 19], ',');
+flow(17, 21, 23, 14);
+L.path([[13, 29], [13, 24], [0, 24], [0, 20], [13, 20], [13, 18]], '.');
+L.thing('plant', [12, 26], [3, 22], [9, 21]);
+L.thing('door', [1, 22]);
+L.thing('lantern', [7, 25]);
 
-// --- スタート：縁側から庭へ降りる ---
-const SL = 5;
-t(2, SL, '.'); t(3, SL, '.');
-o(2, SL, 'S');
-o(2, SL - 1, 'V'); o(3, SL - 1, 'V'); o(1, SL - 1, 'V'); o(1, SL, 'O');
+// ── 増水の区間（十六分）と、雨戸の閉じた高台の路地（安全）
+L.rect(14, 7, 22, 16, ':');
+L.waterRect(14, 7, 22, 16);
+// 速い流れ（上流から下流へ）と、浸かった道を横切るザリガニ（巡回型）
+L.hazard({ type: 'flow', cells: range(7, 16).map((y) => [16, y] as P), interval: 1, every: 9 });
+L.hazard({ type: 'flow', cells: range(7, 16).map((y) => [20, y] as P), interval: 1, every: 11 });
+L.hazard({ type: 'patrol', look: 'zarigani', interval: 2, waypoints: [[14, 14], [19, 14]] });
+L.hazard({ type: 'patrol', look: 'zarigani', interval: 2, waypoints: [[17, 10], [22, 10]] });
+L.path([[13, 18], [13, 15], [0, 15], [0, 12], [11, 12], [11, 9], [0, 9], [0, 6], [13, 6]], '.');
+L.thing('amado', [3, 14], [12, 11], [9, 8], [1, 7]);
+L.thing('plant', [7, 13]);
 
-// --- ゴール：最後の段の端から登った先、抜けに囲まれて扉が一枚だけ立っている ---
-const GP = lo(RUNGS - 1) + 5;
-const GL = rightEnd(RUNGS - 1) ? L1 : L0;
-for (let p = lo(RUNGS - 1) + 2; p <= GP; p++) t(p, GL, '.');
-for (const [p, l] of [[GP, GL - 1], [GP, GL + 1], [GP - 1, GL - 1], [GP - 1, GL + 1], [GP + 1, GL]]) t(p, l, ' ');
-o(GP, GL, 'G');
+// ── 雨上がりの帰り道 → 玄関。土間に黄色い長靴と干した傘。ゴールの先も、用水路は闇の奥へ続く
+L.path([[22, 6], [22, 5], [4, 5]], '.');
+L.seg([14, 6], [22, 6], ':');
+L.path([[4, 5], [1, 5], [1, 2], [4, 2]], '.');
+L.seg([4, 1], [4, 1], '.');
+L.put('G', [4, 1]);
+L.put('_', ...range(15, 19).map((x) => [x, 5] as P));
+L.thing('puddle', [8, 4], [6, 4]);
+L.thing('kid_puddle', [11, 4]);
+L.thing('boots', [5, 0]);
+L.thing('umbrella', [3, 0]);
 
-// 行き止まりの小径。−l へ伸びる先には隣家の勝手口、+l へ伸びる先には石灯籠や植木
-const spur = (cells: [number, number][], end: [number, number], prop: string) => {
-  for (const [p, l] of cells) t(p, l, '.');
-  o(end[0], end[1], prop);
-};
-spur([[lo(1), 2], [lo(1), 1]], [lo(1), 0], 'E');
-spur([[lo(2), 20], [lo(2), 21]], [lo(2), 22], 'O');
-spur([[lo(3) + 1, 2], [lo(3) + 1, 1]], [lo(3) + 1, 0], 'E');
-spur([[lo(4), 20], [lo(4), 21]], [lo(4), 22], 'Q');
-spur([[lo(5), 2], [lo(5), 1]], [lo(5), 0], 'E');
-spur([[lo(6) + 1, 20], [lo(6) + 1, 21]], [lo(6) + 1, 22], 'O');
-spur([[lo(7), 2], [lo(7), 1]], [lo(7), 0], 'E');
-spur([[lo(8), 20], [lo(8), 21]], [lo(8), 22], 'Q');
-// 段の間の闇に浮かぶ石灯籠・植木・隣家の塀（用水路と鹿威しの台を避ける）
-const used = new Set(hazards.flatMap((h) => (h.type === 'periodic' && h.pivot ? [h.pivot.join()] : [])));
-const deco = (p: number, l: number, prop: string) => {
-  if (T[l][XO - p] !== '#' || used.has(at(p, l).join())) throw new Error(`飾りの位置 (${p},${l}) が空いていない`);
-  o(p, l, prop);
-};
-for (const [k, l, prop] of [
-  [0, 5, 'O'], [0, 16, 'Y'], [1, 12, 'Q'], [1, 17, 'Y'], [2, 4, 'Y'], [2, 10, 'O'], [3, 15, 'Q'], [3, 5, 'Y'],
-  [4, 16, 'O'], [5, 8, 'Y'], [5, 4, 'Q'], [6, 15, 'Y'], [7, 17, 'O'], [8, 5, 'Q'], [9, 16, 'O'], [9, 5, 'Y'],
-] as [number, number, string][]) deco(lo(k) + 3, l, prop);
+// ── 得点
+L.score('pond', [17, 60], [10, 56], [6, 54]);
+L.score('road', [9, 45], [30, 35]);
+L.score('canal', [15, 42], [18, 37], [16, 34], [17, 29]);
+L.score('flood', [14, 12], [22, 13], [17, 8]);
 
-// --- 得点マスの候補（文字ごとに4つの候補から2つ選ばれる） ---
-for (const [p, l] of [[lo(1), 1], [lo(2), 21], [lo(3) + 1, 1], [lo(4), 21]]) o(p, l, 'a');
-for (const [p, l] of [[lo(0) + 3, CANAL[0]], [lo(1) + 3, CANAL[1]], [lo(2) + 3, CANAL[2]], [lo(5), 1]]) o(p, l, 'b');
-for (const [p, l] of [[lo(4) + 1, 12], [lo(5) + 1, 8], [lo(6) + 3, CANAL[6]], [lo(6) + 1, 21]]) o(p, l, 'c');
-for (const [p, l] of [[lo(8) + 3, CANAL[8]], [lo(9) + 1, 7], [lo(8) + 1, 13], [lo(7) + 3, CANAL[7]]]) o(p, l, 'd');
+// ── 天気（場所ごとの置き分け）：晴れ → 曇り → 雨 → 雨上がり
+const band = (_x: number, y: number) => (y >= 50 ? 's' : y >= 17 ? 'c' : y >= 6 ? 'r' : 'e');
 
-const terrain = T.map((r) => r.join(''));
-const objects = O.map((r) => r.join(''));
-const scores = { a: { value: 150, decay: 1, pick: 2 }, b: { value: 300, decay: 2, pick: 2 }, c: { value: 500, decay: 3, pick: 2 }, d: { value: 800, decay: 5, pick: 2 } };
-const def: StageDef = { name: 'STAGE2', theme: 'garden', bpm: BPM, bars: BARS, terrain, objects, scores, hazards };
-const st = new Stage(def);
-const i = st.index(st.start.x, st.start.y);
-console.log(`safe ${distanceField(st, { safeOnly: true })[i] / 4} beats, fast ${distanceField(st)[i] / 4} beats, song ${def.bars * 4}`);
-if (process.env.SHOW) console.log(terrain.map((r, y) => `${String(y).padStart(2)} ${r}  ${objects[y]}`).join('\n'));
+// ── 区間の変わり目の小物と、曇りと雨上がりの道の8拍ごとの街灯
+L.thing('flower_pot', [3, 48]);
+L.thing('water_gauge', [0, 49]);
+L.thing('bucket', [1, 48], [32, 25]);
+L.thing('amado', [11, 16]);
+L.thing('gutter_overflow', [13, 14]);
+L.thing('umbrella_open', [10, 17]);
+L.thing('puddle', [2, 3]);
+L.thing('drip_marks', [0, 3]);
+L.thing('lamp', [2, 49], [11, 48], [12, 42], [20, 40], [24, 37], [28, 33], [29, 30], [21, 30], [12, 31], [12, 23], [4, 23], [0, 19], [8, 19], [12, 17], [0, 4]);
+L.thing('storage_shed', [0, 68]);
 
-const OUT = path.resolve(import.meta.dirname, '../../src/game/stages/stage2.ts');
-if (process.argv.includes('--write')) {
-  const h = (x: HazardDef) => '    ' + JSON.stringify(x).replace(/"(\w+)":/g, '$1: ').replace(/"/g, "'").replace(/,(?=\S)/g, ', ') + ',';
-  const src = `import type { StageDef } from '../stage.ts';
-
-/**
- * STAGE 2 ｜ 入口：縁側 ｜ 景色：庭と、隣家との間を流れる用水路（企画書 第4.4節。入口・景色・危険物の割り当ては仮）
- *
- * 縁側（画面の下）から庭へ降りると、飛び石の小径が折り返しながら斜め左上へ登っていく。登りきった先に扉が一枚だけ立っている（ゴール）。
- * 段と段の間の闇を用水路が流れていて、小径とは橋で交わる。
- * - 小径は11段。各段の下の行は安全な道で、危険物も抜けもない（慣れていなくても、ここを歩けば戻されない）。
- * - 用水路は浅く、歩いて入れる。水の中は速い（八分。上流の3本は十六分の早瀬）ので、段を飛ばして登る近道になる。
- *   そのかわり上流から、家から失われた物（人形、表札、子どもの靴）が流されてくる（第5.3節「流されていく物」をステージ全体で使う）。
- *   橋の上で待って、流れてくる物の切れ目に水へ入る。
- * - 上の行は速い小径（中間は八分、ゴール周辺は十六分）。鹿威しが拍に合わせて打ち下ろされ、踏み石の抜けた所がある。
- * - 連絡路にはぐらつく踏み石（停止マス。第5.4節の見た目の案）がある。
- * - 危険物の割り当て（流されていく物、鹿威し）は企画書の候補から選んだ仮のもの。水車は使っていない。
- * - 得点マスは文字ごとに4つの候補から2つずつ、プレイのたびに選ばれる（第2.2節の丸暗記対策）。
- *
- * この地図は tools/stagegen/stage2.ts で組み立てて書き出したもの。調整はスクリプト側で行い --write で書き出し直すか、
- * ここを手で直す（その場合スクリプトとずれる）。npm test が整合性と通れるかを、npm run bots がバランスを確かめる。
- */
-// prettier-ignore
-export const stage2: StageDef = {
+const def = build(L, {
   name: 'STAGE2',
   theme: 'garden',
-  bpm: ${def.bpm},
-  bars: ${def.bars},
-  terrain: [
-${terrain.map((r) => `    '${r}',`).join('\n')}
-  ],
-  objects: [
-${objects.map((r) => `    '${r}',`).join('\n')}
-  ],
+  bpm: BPM,
+  bars: BARS,
+  transpose: true,
   scores: {
-${Object.entries(scores).map(([k, v]) => `    ${k}: { value: ${v.value}, decay: ${v.decay}, pick: ${v.pick} },`).join('\n')}
+    pond: { value: 150, decay: 1, pick: 2 },
+    road: { value: 200, decay: 1, pick: 1 },
+    canal: { value: 300, decay: 2, pick: 3 },
+    flood: { value: 600, decay: 4, pick: 2 },
   },
-  hazards: [
-${hazards.map(h).join('\n')}
-  ],
-};
-`;
-  writeFileSync(OUT, src);
-  console.log('wrote', path.relative(process.cwd(), OUT));
-}
+  floorOf: (x, y) => {
+    if (y >= 64 && x >= 19) return 'w';
+    if (y >= 50) return 'g';
+    if (y <= 2 && x <= 4) return 'c';
+    return 'l';
+  },
+  tintOf: band,
+});
+report(def);
+write(
+  def,
+  'stage2',
+  'stage2',
+  `
+STAGE 2 ｜ 入口：縁側 ｜ 池と用水路（企画書 第4.2節。確定）
+
+水遊びの好きだった子の記憶。子どもは実体ではなく、池と水たまりに映る姿としてだけ現れる。ステージの中で唯一、画面の左上へ登る。
+- 天気は場所で置き分ける（tints）。晴れ（廊下、縁側、庭）→ 曇り（用水路）→ 雨（増水の区間、高台の路地）→ 雨上がり（帰り道）。雨は降る動きではなく、濡れた床と閉じた雨戸で表す。
+- 池の飛び石（八分、停止マスと鹿威し）は入門の小さな賭け。安全な道は庭の外周で、木戸で合流する。
+- 用水路（八分）は、上流から流れてくる物を避けながら、左右にずれる水の筋を遡る。深みは2か所だけ。安全な道は橋を渡って対岸を大回りする。
+- 堰で全員がいったん岸へ上がる。増水の区間（十六分）は流れが速く、浸かった道をザリガニが横切る大きな賭け。安全な道は高台の路地。
+- 雨上がりの帰り道の先、玄関の土間に黄色い長靴と干した傘。
+- 人影は2（池の飛び石の奥寄りの水面に映る子、帰り道の水たまりに映る傘の子）。
+`,
+);

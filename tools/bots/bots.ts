@@ -47,8 +47,10 @@ function lookahead(sim: Sim, field: Float64Array, depth = 3): Policy {
   let held: Dir | null = null;
   const canAct = (s: Sim, t: number) => t >= s.stunUntil && t % s.interval === 0;
 
-  const search = (s: Sim, t: number, d: number): { value: number; first: Dir | null } => {
-    let best = { value: Infinity, first: null as Dir | null };
+  // 同じ評価なら、最初の1手でゴールに近づく手を選ぶ（停止マスで待つ手と、横へ寄って戻る手が同点になり、
+  // 寄り道を選び続けて往復しないように）
+  const search = (s: Sim, t: number, d: number): { value: number; first: Dir | null; near: number } => {
+    let best = { value: Infinity, first: null as Dir | null, near: Infinity };
     for (const h of [...DIRS, null]) {
       const c = s.clone();
       c.step(t, h);
@@ -62,7 +64,8 @@ function lookahead(sim: Sim, field: Float64Array, depth = 3): Policy {
       else if (c.status === 'timeup') value = Infinity;
       else if (d <= 1) value = tt + field[c.stage.index(c.x, c.y)];
       else value = search(c, tt, d - 1).value;
-      if (value < best.value) best = { value, first: h };
+      const near = field[c.stage.index(c.x, c.y)];
+      if (value < best.value || (value === best.value && near < best.near)) best = { value, first: h, near };
     }
     return best;
   };
@@ -126,7 +129,20 @@ export const BOTS: BotDef[] = [
   {
     name: 'rush',
     purpose: '最短時間の道を危険物を気にせず突っ込む：ミスの損で割に合わないはず',
-    create: (sim) => followField(sim, distanceField(sim.stage)),
+    create: (sim, _seed, rand) => {
+      // ミスのあと、0〜3 tick おいてから動き出す。毎回まったく同じ間合いで動くと、周期のある危険物と噛み合って
+      // 永久に同じ所で当たり続けるか、決して当たらないかになり、クリア率がステージの難しさを表さなくなる
+      const go = followField(sim, distanceField(sim.stage));
+      let misses = 0;
+      let holdUntil = 0;
+      return (t) => {
+        if (sim.misses > misses) {
+          misses = sim.misses;
+          holdUntil = sim.stunUntil + Math.floor(rand() * 4);
+        }
+        return t < holdUntil ? null : go(t);
+      };
+    },
   },
   {
     name: 'strong',

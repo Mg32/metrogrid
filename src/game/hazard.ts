@@ -14,7 +14,7 @@ export class PatrolHazard implements Hazard {
   readonly interval: number;
   /** 丸暗記対策の開始位置のずらし（route 上のインデックス） */
   readonly phase: number;
-  readonly look: 'kaisento' | 'tram' | 'koinobori' | null;
+  readonly look: 'kaisento' | 'tram' | 'koinobori' | 'zarigani' | null;
   readonly pivot: Vec | null;
   /** 車両の長さ（マス） */
   readonly length: number;
@@ -76,7 +76,7 @@ export class PeriodicHazard implements Hazard {
   readonly period: number;
   readonly from: number;
   readonly to: number;
-  readonly look: 'shishiodoshi' | 'snow' | null;
+  readonly look: 'shishiodoshi' | 'snow' | 'kaki' | 'barrier' | null;
   readonly pivot: Vec | null;
 
   constructor(def: Extract<HazardDef, { type: 'periodic' }>) {
@@ -109,7 +109,7 @@ export class SwingHazard implements Hazard {
   readonly period: number;
   readonly reach: number;
   readonly phase: number;
-  readonly look: 'pendulum' | 'fan' | null;
+  readonly look: 'pendulum' | 'fan' | 'koinobori' | 'tram' | null;
   readonly pivot: Vec | null;
 
   constructor(def: Extract<HazardDef, { type: 'swing' }>, phase: number) {

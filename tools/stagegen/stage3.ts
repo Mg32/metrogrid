@@ -1,183 +1,159 @@
-// STAGE 3 の地図を組み立てて src/game/stages/stage3.ts を書き出す
+// STAGE 3 の地図を組み立てて src/game/stages/stage3.ts を書き出す（企画書 第4.2節「STAGE 3：時代の重なった通り」）
 //   node tools/stagegen/stage3.ts          所要時間を表示するだけ（SHOW=1 で地図も表示）
-//   node tools/stagegen/stage3.ts --write  src/game/stages/stage3.ts を上書きする（手で直した分は消える）
+//   node tools/stagegen/stage3.ts --write  src/game/stages/stage3.ts を上書きする
 //
-// 道以外（'#'）は闇で、描かれない。道は闇に浮かぶ。
-// スタート（居間の窓）は画面の下。横に延びる通り（x 方向）を折り返しながら -y へ登っていき、画面では斜め右上へ進む。
-// 通りの右端の外側を、もう走っていない路面電車の線路が縦に通っている。いくつかの段には踏切があり、線路に入れば段を飛ばして登れる。
-// 組み立ては「進む向き p（スタートから 0, 1, …）」と「横 x」で考え、グリッドには y = YO − p で置く。
-// 扉や小物の見える面は +x / +y 側なので、道が小物の +x 側か −p 側（y の大きい側）に来るように置く。
-import { writeFileSync } from 'node:fs';
-import path from 'node:path';
-import { Stage, type HazardDef, type StageDef } from '../../src/game/stage.ts';
-import { distanceField } from '../bots/nav.ts';
+// 作業座標：x＝横、y＝進む向き（y が大きいほどスタート側）。そのまま -y へ登る（画面では右上へ）。
+// 時代：スタート側がいちばん古く、ゴールへ進むほど新しくなる。地図は企画のときのマス目の定義（2026-10-31）を移したもの。
+import { createRandom } from '../../src/game/random.ts';
+import { build, Layout, report, write, type P } from './lib.ts';
 
-const BPM = 120;
+const BPM = 116;
 const BARS = Number(process.env.BARS ?? 64);
-const RUNGS = 11;
-/** 段 k の下の行（安全）の p。上の行は +1、段の間（闇）は +2、+3 */
-const lo = (k: number) => 4 + 4 * k;
-const PMAX = lo(RUNGS - 1) + 7;
-const YO = PMAX;
-const W = 24, H = PMAX + 1;
-const X0 = 3, X1 = 19;
-/** 線路の x */
-const TRACK = 22;
+const L = new Layout(40, 66);
 
-const T: string[][] = Array.from({ length: H }, () => Array(W).fill('#'));
-const O: string[][] = Array.from({ length: H }, () => Array(W).fill(' '));
-const F: string[][] = Array.from({ length: H }, () => Array(W).fill(' '));
-const t = (x: number, p: number, ch: string) => { T[YO - p][x] = ch; };
-const o = (x: number, p: number, ch: string) => { O[YO - p][x] = ch; };
-const at = (x: number, p: number): [number, number] => [x, YO - p];
-const row = (p: number, x0: number, x1: number, ch: string) => { for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++) t(x, p, ch); };
-const hazards: HazardDef[] = [];
-const swing = (cells: [number, number][], axis: 'x' | 'y', period: number) =>
-  hazards.push({ type: 'swing', cells: cells.map(([x, p]) => at(x, p)).sort((a, b) => a[0] - b[0] || a[1] - b[1]), axis, period });
+const RISK: [P[], ',' | ':'][] = [];
+const bars: P[] = [];
 
-// 段は 11 段。段 k は下の行 lo(k)（安全）と上の行 lo(k)+1 の2行で、x = 3〜19。
-// 偶数段は +x へ、奇数段は −x へ歩き、端の連絡路（段の間の2行）で次の段へ登る。
-// 安全な道（下の行と端の連絡路）には危険物も欠けも置かない（慣れていなくても、安全な道を歩けば戻されない）。
-const rightEnd = (k: number) => k % 2 === 0;
-for (let k = 0; k < RUNGS; k++) {
-  row(lo(k), X0, X1, '.');
-  row(lo(k) + 1, X0, X0 + 1, '.');
-  row(lo(k) + 1, X1 - 1, X1, '.');
-  if (k < RUNGS - 1) { const x = rightEnd(k) ? X1 : X0; t(x, lo(k) + 2, '.'); t(x, lo(k) + 3, '.'); }
+// ── 街区1：いちばん古い時代（土の道と石畳、木の電柱、塗りたての看板、若木、空き地）。表通りは路面電車の線路（伝聞なので薄い）
+const SAFE1: P[] = [[8, 63], [8, 57], [18, 57], [18, 60], [26, 60], [26, 56], [31, 56], [31, 50], [27, 50], [27, 48], [18, 48], [18, 44]];
+const TRAM: P[] = [[13, 56], [13, 53], [23, 53], [23, 49]];
+RISK.push([TRAM, ',']);
+RISK.push([[[26, 61], [33, 61], [33, 53], [32, 53]], ',']); // 裏の通り
+L.seg([8, 64], [8, 64], '.');
+L.put('S', [8, 64]);
+L.thing('entrance', [7, 64]);
+L.score('old', [16, 53], [23, 51], [30, 61]);
+bars.push([33, 57]);
+L.thing('sapling', [7, 57]);
+L.thing('newsign', [17, 58], [25, 57]);
+L.thing('lot', [29, 52]);
+L.thing('post_new', [11, 58]);
+L.thing('rickshaw', [28, 62]);
+L.thing('trike', [19, 55]); // 1組目の家族：三輪車
+const SAFE1b: P[] = [[18, 44], [18, 42]];
+L.put('B', [18, 43]); // 境目：踏切（小節ゲート）
+
+// ── 街区2：時代がまだらに混ざる（石畳とアスファルトのまだら、色あせた看板、中くらいの木、建築中の家）。左右に一本ずつ抜け道
+const SAFE2: P[] = [[18, 42], [18, 39], [14, 39], [14, 36], [7, 36], [7, 31], [12, 31], [12, 28], [19, 28], [19, 33], [24, 33], [24, 35], [31, 35], [31, 29], [25, 29], [25, 26], [30, 26], [30, 23]];
+RISK.push([[[17, 40], [10, 40], [10, 32], [8, 32]], ',']);
+RISK.push([[[25, 33], [34, 33], [34, 27], [26, 27]], ',']);
+bars.push([10, 38], [34, 30], [30, 33], [13, 40], [30, 27]);
+L.score('mixed', [13, 40], [10, 34], [34, 31], [28, 27]);
+L.thing('midtree', [9, 29]);
+L.thing('fadedsign', [15, 30], [26, 36]);
+L.thing('post_faded', [20, 31]);
+L.thing('construct', [22, 38]);
+L.thing('bike', [13, 27]); // 2組目の家族：自転車
+L.thing('girl_small', [37, 30]); // 人影①：小さな女の子（古い石畳の切れ端の上）
+const SAFE2b: P[] = [[30, 23], [30, 21]];
+L.thing('footbridge', [29, 22], [31, 22]); // 境目：歩道橋
+
+// ── 街区3：いちばん新しい時代（アスファルト、コンクリートの電柱、シャッター、大木、取り壊し跡）。新しい大通り（十六分・薄い、信号が小節ゲート）
+const SAFE3: P[] = [[30, 21], [30, 16], [27, 16], [27, 12], [31, 12], [31, 10], [21, 10], [21, 18], [15, 18], [15, 11], [9, 11], [9, 15], [6, 15], [6, 7], [12, 7], [12, 5], [19, 5], [19, 3]];
+RISK.push([[[31, 19], [33, 19], [33, 9], [16, 9], [16, 11]], ':']);
+RISK.push([[[26, 13], [22, 13]], ',']);
+RISK.push([[[14, 14], [10, 14]], ',']);
+L.put('B', [33, 15], [20, 9]);
+bars.push([33, 12], [26, 9], [12, 14], [33, 17], [22, 9]);
+L.score('new', [33, 17], [29, 9], [24, 13], [18, 9]);
+L.thing('bigtree', [7, 9]);
+L.thing('shutter', [17, 16], [29, 14]);
+L.thing('post_rust', [24, 11]);
+L.thing('lot2', [10, 9]);
+L.thing('trike_gone', [7, 13]); // 3組目の家族：何もない玄関先
+L.thing('girl_tall', [36, 6]); // 人影②：背の伸びた女の子（少し前の時代の地面の上）
+L.seg([19, 2], [19, 2], '.');
+L.put('G', [19, 2]);
+
+for (const [pts, ch] of RISK) L.path(pts, ch);
+for (const pts of [SAFE1, SAFE1b, SAFE2, SAFE2b, SAFE3]) L.path(pts, '.');
+// 線路（見た目）：表通りに枕木とレール
+for (let i = 0; i + 1 < TRAM.length; i++) {
+  const [[x0, y0], [x1, y1]] = [TRAM[i], TRAM[i + 1]];
+  for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++) for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++) if (!L.obj.has(`${x},${y}`)) L.put('=', [x, y]);
 }
-const lane = (k: number, ch: string) => row(lo(k) + 1, X0 + 2, X1 - 2, ch);
-// スタート周辺（段 0〜2）：2行とも安全で道幅が広い
-for (const k of [0, 1, 2]) lane(k, '.');
-// 中間（段 3〜6）：上の行は八分。撤去された遊具（箱ブランコ）が揺れている
-for (const k of [3, 4, 5, 6]) lane(k, ',');
-swing([[7, lo(3) + 1], [8, lo(3) + 1], [9, lo(3) + 1]], 'x', 20);
-swing([[12, lo(4) + 1], [13, lo(4) + 1], [14, lo(4) + 1]], 'x', 20);
-swing([[6, lo(6) + 1], [7, lo(6) + 1], [8, lo(6) + 1]], 'x', 16);
-// ゴール周辺（段 7〜10）：上の行は十六分。欠けが多い
-for (const k of [7, 8, 9, 10]) lane(k, ':');
-for (const [k, x] of [[4, 8], [5, 11], [6, 14], [7, 6], [7, 12], [8, 9], [8, 6], [9, 7], [9, 13], [10, 10], [10, 15]]) t(x, lo(k) + 1, ' ');
-swing([[14, lo(8) + 1], [15, lo(8) + 1], [16, lo(8) + 1]], 'x', 12);
-// 段の間の近道（一方通行・危険）
-const cut = (k: number, x: number, ch: string, period?: number) => {
-  t(x, lo(k) + 2, ch); t(x, lo(k) + 3, ch); o(x, lo(k) + 2, '^');
-  if (period) swing([[x, lo(k) + 2], [x, lo(k) + 3]], 'y', period);
-};
-cut(0, 11, ',');
-cut(2, 9, ',', 24);
-cut(5, 10, ',', 16);
-cut(7, 13, ':', 8);
-cut(9, 8, ':', 8);
-
-// --- 路面電車：通りの右端の外側の線路を、半透明の車両が往復している（全体で1箇所） ---
-// 線路は危険ゾーン。踏切（小節ゲート。1小節に1回しか渡れない）のある段から入れる
-// 線路は中ほどの段 3〜8 の脇だけ（両端は闇に途切れている）
-const TRACK_P0 = lo(3) - 1, TRACK_P1 = lo(8) + 1;
-for (let p = TRACK_P0; p <= TRACK_P1; p++) { t(TRACK, p, ':'); o(TRACK, p, '='); }
-const CROSSINGS = [3, 6, 8];
-for (const k of CROSSINGS) {
-  t(20, lo(k), ','); t(21, lo(k), ','); o(21, lo(k), 'B');
+// 路面電車（揺れ型）：もう走っていない路線の車両が、半透明で表通りを行き来する。振り切ると線路の端から闇へ走り去り、
+// しばらく表通りが空く。線路の上ではプレイヤー（八分）より速いので、走り去ったすぐ後ろについて行けば追いつかれない。
+// 往復する巡回型にすると、1本道で正面から鉢合わせて抜けられなくなる（企画書 第2.2節）
+L.hazard({ type: 'swing', look: 'tram', axis: 'x', period: 56, reach: 6, cells: Array.from({ length: 9 }, (_, i) => [14 + i, 53] as P) });
+// 街区の抜け道の危険物：踏切の遮断機（定位置型）。企画書では未決（第4.2節 STAGE 3「街区の抜け道に置く危険物」）。
+// 実装のために仮に決めた（検討ログで、STAGE 3 の定位置型の候補として了承されていた物）。遮断機の柱は道の脇の闇に立つ
+const rand = createRandom(31);
+for (const [i, [x, y]] of bars.entries()) {
+  const pivot = ([[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]] as P[]).find(([px, py]) => !L.has(px, py))!;
+  const period = 36 + (i % 3) * 4;
+  const from = Math.floor(rand() * 16);
+  L.hazard({ type: 'periodic', look: 'barrier', cells: [[x, y]], pivot, period, from, to: from + 14 });
 }
-// 線路は十六分のゾーンで、電車も十六分で進む。同じ向きに歩き続ければ追いつかれないが、鉢合わせると逃げ場がない
-hazards.push({ type: 'patrol', look: 'tram', length: 2, interval: 1, waypoints: [at(TRACK, TRACK_P0), at(TRACK, TRACK_P1)] });
 
-// --- スタート：居間の窓から通りへ降りる ---
-const SX = 5;
-t(SX, 2, '.'); t(SX, 3, '.');
-o(SX, 2, 'S'); o(SX - 1, 2, 'N'); o(SX - 1, 3, 'L');
+// ── 時代の割り当て（混濁：境目の近くで前後の時代がまだらに入り込む）。2 古い、1 まだら、0 新しい
+const era = new Map<string, number>();
+const noise = createRandom(7);
+for (let y = 0; y < L.H; y++) {
+  for (let x = 0; x < L.W; x++) {
+    const base = y >= 43 ? 2 : y >= 23 ? 1 : 0;
+    let e = base;
+    const r = noise();
+    if (base === 2 && y < 50 && r < 0.25) e = 1;
+    if (base === 1 && y > 36 && r < 0.2) e = 2;
+    if (base === 1 && y < 30 && r < 0.3) e = 0;
+    if (base === 0 && y > 16 && r < 0.2) e = 1;
+    era.set(`${x},${y}`, e);
+  }
+}
+for (const p of ['26,59', '27,59', '26,58']) era.set(p, 0); // 古い街に、アスファルトの継ぎ当て
+for (const p of ['8,13', '9,13', '8,12']) era.set(p, 2); // 新しい街に、古い石畳の切れ端
+// 人影の足場：別の時代の地面が、闇をはさんで一切れだけある（渡れない）
+for (const [x, y] of [[36, 29], [37, 29], [36, 30], [37, 30]] as P[]) era.set(`${x},${y}`, 2);
+for (const [x, y] of [[36, 6], [37, 6], [36, 7], [37, 7]] as P[]) era.set(`${x},${y}`, 1);
+L.sceneryRect(36, 29, 37, 30, 'g');
+L.sceneryRect(36, 6, 37, 7, 'g');
 
-// --- ゴール：最後の段の端から登った先、欠けに囲まれて扉が一枚だけ立っている ---
-const GP = lo(RUNGS - 1) + 5;
-const GX = rightEnd(RUNGS - 1) ? X1 : X0;
-for (let p = lo(RUNGS - 1) + 2; p <= GP; p++) t(GX, p, '.');
-for (const [x, p] of [[GX - 1, GP], [GX + 1, GP], [GX - 1, GP - 1], [GX + 1, GP - 1], [GX, GP + 1]]) t(x, p, ' ');
-o(GX, GP, 'G');
+// ── モチーフ：ゴールの居間の窓の下に、そろえた小さな運動靴と門灯
+L.thing('home_window', [18, 1]);
+L.thing('kid_shoes', [17, 2]);
+L.thing('gate_lamp', [20, 1]);
+// 安全な道を8拍進むごとに1本ずつ通り過ぎる電柱（古い区間は木、新しい区間はコンクリート）
+const wpole: P[] = [[7, 60], [12, 56], [17, 60], [25, 59], [30, 55], [30, 49], [24, 47], [17, 46], [17, 38], [6, 33], [21, 32], [27, 34], [30, 31], [20, 17]];
+const cpole: P[] = [[12, 35], [11, 30], [18, 27], [24, 29], [29, 25], [29, 18], [26, 12], [30, 11], [22, 11], [14, 17], [13, 10], [8, 14], [5, 10], [11, 6], [17, 4]];
+L.thing('wpole', ...wpole);
+L.thing('cpole', ...cpole);
+L.thing('bicycle_old', [1, 25]);
+L.thing('faded_poster', [33, 28]);
 
-// 行き止まりの路地。−x へ伸びる先には商店（シャッター）、+x へ伸びる先には電柱や街灯
-const spur = (cells: [number, number][], end: [number, number], prop: string) => {
-  for (const [x, p] of cells) t(x, p, '.');
-  o(end[0], end[1], prop);
-};
-spur([[2, lo(1)], [1, lo(1)]], [0, lo(1)], 'Z');
-spur([[2, lo(3) + 1], [1, lo(3) + 1]], [0, lo(3) + 1], 'Z');
-spur([[2, lo(5)], [1, lo(5)]], [0, lo(5)], 'Z');
-spur([[2, lo(8)], [1, lo(8)]], [0, lo(8)], 'Z');
-spur([[20, lo(2)]], [21, lo(2)], 'U');
-spur([[20, lo(5) + 1]], [21, lo(5) + 1], 'L');
-// 段の間の闇に浮かぶ商店・電柱・街灯・郵便ポスト。商店は +y 側（下の段）から見える
-const deco = (x: number, p: number, prop: string) => {
-  if (T[YO - p][x] !== '#') throw new Error(`飾りの位置 (${x},${p}) が空いていない`);
-  o(x, p, prop);
-};
-for (const [k, x, prop] of [
-  [0, 5, 'Z'], [0, 15, 'U'], [1, 7, 'L'], [1, 14, 'Z'], [2, 4, 'U'], [2, 13, 'Z'], [3, 6, 'Z'], [3, 15, 'L'],
-  [4, 5, 'U'], [4, 14, 'Z'], [5, 15, 'M'], [5, 6, 'Z'], [6, 12, 'U'], [7, 5, 'Z'], [8, 15, 'L'], [9, 12, 'Z'],
-] as [number, number, string][]) deco(x, lo(k) + 2, prop);
-
-// 床の見た目：古い石畳と新しいアスファルトがまだらに重なる（時代の重なり）。線路は石畳
-for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) F[y][x] = (Math.floor(x / 4) + Math.floor((YO - y) / 3) * 2) % 3 === 0 ? 's' : 'a';
-for (let p = 0; p <= PMAX; p++) F[YO - p][TRACK] = 's';
-
-// --- 得点マスの候補（文字ごとに4つの候補から2つ選ばれる） ---
-for (const [x, p] of [[1, lo(1)], [1, lo(3) + 1], [20, lo(2)], [1, lo(5)]]) o(x, p, 'a');
-for (const [x, p] of [[11, lo(0) + 3], [9, lo(2) + 3], [TRACK, lo(3)], [TRACK, lo(4)]]) o(x, p, 'b');
-for (const [x, p] of [[10, lo(5) + 3], [TRACK, lo(5)], [11, lo(4) + 1], [9, lo(6) + 1]]) o(x, p, 'c');
-for (const [x, p] of [[13, lo(7) + 3], [TRACK, lo(7) + 2], [11, lo(8) + 1], [8, lo(9) + 3]]) o(x, p, 'd');
-
-const terrain = T.map((r) => r.join(''));
-const objects = O.map((r) => r.join(''));
-const floors = F.map((r) => r.join(''));
-const scores = { a: { value: 150, decay: 1, pick: 2 }, b: { value: 300, decay: 2, pick: 2 }, c: { value: 500, decay: 3, pick: 2 }, d: { value: 800, decay: 5, pick: 2 } };
-const def: StageDef = { name: 'STAGE3', theme: 'street', bpm: BPM, bars: BARS, terrain, objects, floors, scores, hazards };
-const st = new Stage(def);
-const i = st.index(st.start.x, st.start.y);
-console.log(`safe ${distanceField(st, { safeOnly: true })[i] / 4} beats, fast ${distanceField(st)[i] / 4} beats, song ${def.bars * 4}`);
-if (process.env.SHOW) console.log(terrain.map((r, y) => `${String(y).padStart(2)} ${r}  ${objects[y]}`).join('\n'));
-
-const OUT = path.resolve(import.meta.dirname, '../../src/game/stages/stage3.ts');
-if (process.argv.includes('--write')) {
-  const h = (x: HazardDef) => '    ' + JSON.stringify(x).replace(/"(\w+)":/g, '$1: ').replace(/"/g, "'").replace(/,(?=\S)/g, ', ') + ',';
-  const src = `import type { StageDef } from '../stage.ts';
-
-/**
- * STAGE 3 ｜ 入口：居間の窓 ｜ 景色：時代の重なった通り（企画書 第4.4節。入口・景色・危険物の割り当ては仮）
- *
- * 居間の窓（画面の下）から通りへ降りると、横丁が折り返しながら斜め右上へ登っていく。登りきった先に扉が一枚だけ立っている（ゴール）。
- * 古い石畳と新しいアスファルトがまだらに重なり、シャッターの下りた商店、電柱、街灯が闇に浮かぶ。
- * - 横丁は11段。各段の下の行は安全な道で、危険物も欠けもない（慣れていなくても、ここを歩けば戻されない）。
- * - 上の行は速い道（中間は八分、ゴール周辺は十六分）。撤去された公園の遊具（箱ブランコ）が揺れ、欠けた所がある。
- * - 段の間には一方通行の近道がある。
- * - 通りの右端の外側を、もう走っていない路面電車の線路が縦に通っている。半透明の車両（2両分の長さ）が線路を往復している
- *   （第5.3節「路面電車」。全体で1箇所）。いくつかの段には踏切（小節ゲート。1小節に1回しか渡れない）があり、
- *   線路に入れば段をいくつも飛ばして登れるが、電車と鉢合わせると逃げ場がない。
- * - 危険物の割り当て（路面電車、箱ブランコ、踏切）は企画書の候補から選んだ仮のもの。「時代の境目」（提案・未評価）は使っていない。
- * - 得点マスは文字ごとに4つの候補から2つずつ、プレイのたびに選ばれる（第2.2節の丸暗記対策）。
- *
- * この地図は tools/stagegen/stage3.ts で組み立てて書き出したもの。調整はスクリプト側で行い --write で書き出し直すか、
- * ここを手で直す（その場合スクリプトとずれる）。npm test が整合性と通れるかを、npm run bots がバランスを確かめる。
- */
-// prettier-ignore
-export const stage3: StageDef = {
+const eraOf = (x: number, y: number) => era.get(`${x},${y}`) ?? 0;
+const def = build(L, {
   name: 'STAGE3',
   theme: 'street',
-  bpm: ${def.bpm},
-  bars: ${def.bars},
-  terrain: [
-${terrain.map((r) => `    '${r}',`).join('\n')}
-  ],
-  objects: [
-${objects.map((r) => `    '${r}',`).join('\n')}
-  ],
-  floors: [
-${floors.map((r) => `    '${r}',`).join('\n')}
-  ],
+  bpm: BPM,
+  bars: BARS,
   scores: {
-${Object.entries(scores).map(([k, v]) => `    ${k}: { value: ${v.value}, decay: ${v.decay}, pick: ${v.pick} },`).join('\n')}
+    old: { value: 200, decay: 1, pick: 2 },
+    mixed: { value: 300, decay: 2, pick: 3 },
+    new: { value: 550, decay: 3, pick: 3 },
   },
-  hazards: [
-${hazards.map(h).join('\n')}
-  ],
-};
-`;
-  writeFileSync(OUT, src);
-  console.log('wrote', path.relative(process.cwd(), OUT));
-}
+  floorOf: (x, y) => {
+    const e = eraOf(x, y);
+    if (e === 2) return (x * 7 + y * 3) % 5 === 0 ? 'd' : 's';
+    if (e === 1) return (x + y) % 3 === 0 ? 'a' : 's';
+    return 'a';
+  },
+  tintOf: (x, y) => ['N', 'M', 'O'][eraOf(x, y)],
+});
+report(def);
+write(
+  def,
+  'stage3',
+  'stage3',
+  `
+STAGE 3 ｜ 入口：居間の窓 ｜ 時代の重なった通り（企画書 第4.2節。暫定合意）
+
+古い街区から新しい街区へ進む。スタートがいちばん古い時代、ゴールへ進むほど新しくなる。境目では前後の時代の地面と小物が混ざる。
+- 新しい時代ほど移り変わりが速く、家が追いきれないので景色が薄い。伝聞でしか知らない路面電車の線路は、古い時代の中でも薄い（八分）。
+- 木、電柱、看板、空き地、玄関先の物（三輪車 → 自転車 → 何もない玄関先）が、時代が進むごとに変わる。
+- 踏切（小節ゲート）と歩道橋は、全員が通る時代の境目。新しい大通り（十六分）には信号の小節ゲートが2つある。
+- 危険物は路面電車（表通りを往復する。両端の安全な道で待てる）と、抜け道の踏切の遮断機。遮断機は企画書では未決で、実装のために仮に決めた。
+- 人影は2（最後の家族の女の子。街区2の奥で小さな姿、新しい街区で背の伸びた姿）。どちらも闇をはさんだ別の時代の地面の切れ端に立つ。
+- ゴールは現在のこの家の居間の窓。窓の下にそろえた小さな運動靴と門灯。
+`,
+);
