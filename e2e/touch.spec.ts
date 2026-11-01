@@ -31,6 +31,8 @@ test('タップで始め、ボタンでチュートリアルを飛ばし、指�
   const c = await client(page, 144, 144);
   await page.touchscreen.tap(c.x, c.y);
   await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('TUTORIAL');
+  // 曲を読み込んでいるあいだ（loading）のボタンは効かない
+  await expect.poll(async () => (await game(page)).scene, { timeout: 5000 }).toBe('play');
 
   // 右下の SKIP ボタン
   const skip = await client(page, 288 - 32, 288 - 12);

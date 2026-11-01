@@ -13,6 +13,8 @@ export interface Conductor {
    */
   start(opts: { bpm: number; bars: number; countInBars: number; track?: string; loop?: boolean }): Promise<void>;
   stop(): void;
+  /** 遊び終わったとき（クリア・時間切れ）。曲はそのまま最後まで鳴らし、メトロノームは止める。次の start()・stop() で止まる */
+  finish(): void;
   /**
    * 音を鳴らせるようにする。スマホ（特に iOS）では、タップやキーのイベントの処理の中で呼ばないと音が出ない。
    * 何度呼んでもよい
@@ -71,6 +73,10 @@ export class Metronome implements Conductor {
     this.timer = 0;
     this.master?.disconnect();
     this.master = null;
+  }
+
+  finish(): void {
+    this.stop();
   }
 
   songTime(): number {
@@ -168,6 +174,10 @@ export class Music implements Conductor {
       this.src.disconnect();
       this.src = null;
     }
+  }
+
+  finish(): void {
+    this.metronome.stop();
   }
 
   songTime(): number {

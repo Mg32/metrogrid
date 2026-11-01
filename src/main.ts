@@ -256,7 +256,8 @@ function toTitle(): void {
 }
 
 function finishPlay(s: Sim): void {
-  conductor.stop();
+  // 曲は止めずに最後まで鳴らす（結果画面から次へ進むと止まる）
+  conductor.finish();
   input.clearPressed();
   scene = 'result';
   newlyUnlocked = null;

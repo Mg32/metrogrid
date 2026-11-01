@@ -30,6 +30,8 @@ test('はじめてはチュートリアルから。S でスキップすると拠
   await frames(page);
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('TUTORIAL');
+  // 曲を読み込んでいるあいだ（loading）のキーは効かない
+  await expect.poll(async () => (await game(page)).scene, { timeout: 5000 }).toBe('play');
 
   await page.keyboard.press('KeyS');
   await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
