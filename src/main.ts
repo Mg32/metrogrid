@@ -11,7 +11,7 @@ import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
 import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
 import { ENDING } from './render/ending.ts';
-import { APPEAR_BARS, CLEAR, LEAVE, Renderer, revealEnd } from './render/renderer.ts';
+import { APPEAR_BARS, BACK, CLEAR, LEAVE, Renderer, revealEnd } from './render/renderer.ts';
 import { Stick } from './touch.ts';
 
 /**
@@ -82,7 +82,7 @@ let revealUntil = 0;
 
 const stageLabel = (name: string) => name.replace(/(\d+)$/, ' $1');
 
-type Scene = 'title' | 'loading' | 'play' | 'leaving' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
+type Scene = 'title' | 'loading' | 'play' | 'leaving' | 'backing' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
 
 /** 歩く向きを決めている指 */
 let steer: Stick | null = null;
@@ -177,6 +177,26 @@ let endingAt = 0;
 let leaveAt = 0;
 let leaveTarget: StageDef | null = null;
 const leaveSec = () => performance.now() / 1000 - leaveAt;
+/**
+ * Esc（HOME・SKIP・TITLE のボタン）で戻り始めた時刻（performance.now() の秒）と、戻る前の場面、戻り先へ移る処理。
+ * 曲が消えていき道が沈んで消える演出（BACK）のあと、backTo を呼ぶ
+ */
+let backAt = 0;
+let backFrom: Scene = 'play';
+let backTo: () => void = () => {};
+const backSec = () => performance.now() / 1000 - backAt;
+
+/** 曲を消していき、道が沈んで消える演出のあと to へ */
+function goBack(to: () => void): void {
+  backFrom = scene;
+  scene = 'backing';
+  backAt = performance.now() / 1000;
+  backTo = to;
+  conductor.fadeOut(BACK.end);
+  sfx.stop();
+  steer = null;
+  input.clearPressed();
+}
 let fixedEndingSec: number | null = null;
 /** ?title=SEC：タイトルを止めて表示する秒 */
 const fixedTitleSec = params.has('title') ? Number(params.get('title')) : null;
@@ -258,10 +278,12 @@ function startGame(): void {
   else goHub();
 }
 
+/** チュートリアルを済ませたことにして拠点へ。遊んでいる途中からなら、戻る演出（BACK）のあと */
 function skipTutorial(): void {
   cleared.add(tutorial.name);
   save();
-  goHub();
+  if (scene === 'play') goBack(() => goHub());
+  else goHub();
 }
 
 function toTitle(): void {
@@ -302,7 +324,7 @@ function finishPlay(s: Sim): void {
 
 /** 結果画面で Enter：クリアしたら拠点へ（チュートリアルも）、時間切れならもう一度 */
 function resultContinue(s: Sim): void {
-  if (s.stage.kind === 'tutorial' && s.status === 'cleared') goHub();
+  if (s.stage.kind === 'tutorial' && s.status === 'cleared') goBack(() => goHub());
   else if (s.status === 'cleared') resultBack(s);
   else void play(s.stage.def);
 }
@@ -312,8 +334,8 @@ function resultContinue(s: Sim): void {
  * （拠点の、そのステージの入口の前に立つ）。?stage で直接遊んでいたチュートリアルなどはタイトルへ
  */
 function resultBack(s: Sim): void {
-  if (s.stage.kind !== 'stage' && devDef()) toTitle();
-  else goHub(s.stage.def.name);
+  if (s.stage.kind !== 'stage' && devDef()) goBack(toTitle);
+  else goBack(() => goHub(s.stage.def.name));
 }
 
 // 音はキーやタップのイベントの処理の中で鳴らせるようにしておく（スマホでは、そうしないと音が出ない）
@@ -397,6 +419,9 @@ function update(): void {
   } else if (scene === 'leaving') {
     // 入口の光に包まれて闇に沈むあいだは操作できない（拠点の曲は鳴ったまま）
     if (leaveSec() >= LEAVE.end) void play(leaveTarget!);
+  } else if (scene === 'backing') {
+    // 戻る演出のあいだは操作できない
+    if (backSec() >= BACK.end) backTo();
   } else if (scene === 'ending') {
     // エンディングは飛ばせない。終わると、ガレキだけが残った画面へ
     if (fixedEndingSec === null && endingSec() > ENDING.end + 2) {
@@ -407,9 +432,9 @@ function update(): void {
     const kind = sim.stage.kind;
     if (esc) {
       // ステージからは拠点へ（?stage で直接遊んでいたときも）。チュートリアルは飛ばして拠点へ。拠点からはタイトルへ
-      if (kind === 'stage') goHub(sim.stage.def.name);
+      if (kind === 'stage') goBack(() => goHub(sim!.stage.def.name));
       else if (kind === 'tutorial') skipTutorial();
-      else toTitle();
+      else goBack(toTitle);
       return;
     }
     if (retry && kind !== 'hub') {
@@ -439,6 +464,8 @@ function update(): void {
         scene = 'leaving';
         leaveAt = performance.now() / 1000;
         leaveTarget = target;
+        // 拠点の曲は、闇に沈むまでのあいだに消えていく
+        conductor.fadeOut(LEAVE.end);
         steer = null;
         input.clearPressed();
       }
@@ -463,7 +490,7 @@ function draw(): void {
   renderer.begin();
   // 結果画面では止まった時点の様子を表示する
   const songTime =
-    scene === 'play' || scene === 'leaving'
+    scene === 'play' || scene === 'leaving' || (scene === 'backing' && backFrom === 'play')
       ? conductor.songTime()
       : scene === 'view'
         ? viewTick * tickSec
@@ -478,9 +505,9 @@ function draw(): void {
   } else if (scene === 'ruins') {
     renderer.title(performance.now() / 1000, { cleared: 0, collapsed: true, prompt: null, beatSec: 0.6 });
   } else if (sim && scene !== 'title') {
-    renderer.world(sim, songTime, tickSec, clearSec(), scene === 'leaving' ? leaveSec() : null);
-    // クリア演出と、拠点の入口に入る演出のあいだは HUD を消す（得点は結果の欄で数え上げる）
-    if (scene !== 'loading' && scene !== 'leaving' && clearSec() === null) renderer.hud(sim, songTime, tickSec);
+    renderer.world(sim, songTime, tickSec, clearSec(), scene === 'leaving' ? leaveSec() : null, scene === 'backing' ? backSec() : null);
+    // クリア演出と、拠点の入口に入る演出・戻る演出のあいだは HUD を消す（得点は結果の欄で数え上げる）
+    if (scene !== 'loading' && scene !== 'leaving' && scene !== 'backing' && clearSec() === null) renderer.hud(sim, songTime, tickSec);
   }
 
   if (scene === 'confirm' && confirmKind === 'upstairs') {

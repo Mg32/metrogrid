@@ -16,6 +16,8 @@ export interface Conductor {
   stop(): void;
   /** 遊び終わったとき（クリア・時間切れ）。曲はそのまま最後まで鳴らし、メトロノームは止める。次の start()・stop() で止まる */
   finish(): void;
+  /** sec 秒かけて音を消していく（拠点から入口でステージへ移るとき）。次の start()・stop() で止まる */
+  fadeOut(sec: number): void;
   /**
    * 音を鳴らせるようにする。スマホ（特に iOS）では、タップやキーのイベントの処理の中で呼ばないと音が出ない。
    * 何度呼んでもよい
@@ -36,6 +38,14 @@ export const MUSIC_OFFSET: Record<string, number> = {};
 function heardTime(ctx: AudioContext): number {
   const latency = ctx.outputLatency || ctx.baseLatency || 0;
   return ctx.currentTime - latency;
+}
+
+/** 音量をいまの値から sec 秒かけて 0 へ下げる */
+function fade(gain: GainNode, ctx: AudioContext, sec: number): void {
+  const now = ctx.currentTime;
+  gain.gain.cancelScheduledValues(now);
+  gain.gain.setValueAtTime(gain.gain.value, now);
+  gain.gain.linearRampToValueAtTime(0, now + sec);
 }
 
 /** 4/4拍子のメトロノーム。1拍目にアクセント、カウントは音を変える */
@@ -82,6 +92,10 @@ export class Metronome implements Conductor {
     this.stop();
   }
 
+  fadeOut(sec: number): void {
+    if (this.ctx && this.master) fade(this.master, this.ctx, sec);
+  }
+
   songTime(): number {
     if (!this.ctx) return -Infinity;
     return heardTime(this.ctx) - this.startAt;
@@ -124,6 +138,7 @@ export class Music implements Conductor {
   private metronome = new Metronome();
   private useMetronome = false;
   private src: AudioBufferSourceNode | null = null;
+  private gain: GainNode | null = null;
   private zeroAt = 0;
   /** start() を呼ぶたびに増える。読み込みを待つあいだに次の start()・stop() が来たら、古いほうは鳴らさない */
   private generation = 0;
@@ -158,11 +173,14 @@ export class Music implements Conductor {
     src.buffer = buf;
     // 拠点の曲は繰り返す（拍がずれないよう、曲の長さはちょうど小節の倍数にしておく）
     src.loop = opts.loop ?? false;
-    src.connect(ctx.destination);
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    src.connect(gain);
     // 無音の小節のぶん、曲のファイルの頭を遅らせる
     const at = ctx.currentTime + 0.1 + (opts.waitBars ?? 0) * barSec;
     src.start(at);
     this.src = src;
+    this.gain = gain;
     this.zeroAt = at + offset;
   }
 
@@ -178,10 +196,17 @@ export class Music implements Conductor {
       this.src.disconnect();
       this.src = null;
     }
+    this.gain?.disconnect();
+    this.gain = null;
   }
 
   finish(): void {
     this.metronome.stop();
+  }
+
+  fadeOut(sec: number): void {
+    if (this.useMetronome) this.metronome.fadeOut(sec);
+    else if (this.gain) fade(this.gain, audioContext(), sec);
   }
 
   songTime(): number {

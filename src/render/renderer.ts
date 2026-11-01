@@ -339,6 +339,13 @@ const PORTAL_LIGHT: Record<string, string> = {
 export const LEAVE = { fade: 1.0, end: 1.5 };
 const ARRIVE_BEATS = 2;
 
+/**
+ * Esc（HOME・SKIP・TITLE のボタン）で画面を戻る演出（秒）。曲が消えていくのに合わせて、道のタイルが少女から遠い順に
+ * 沈んで消えていき（reach マスより遠いマスはいっせいに。1マス近づくごとに step 遅れ、1枚が消えきるまで fall）、
+ * 最後に少女の立つマスと少女が消える。fade〜end で画面が闇に沈み、end で戻り先へ
+ */
+export const BACK = { reach: 10, step: 0.06, fall: 0.4, fade: 0.9, end: 1.3 };
+
 export const CLEAR = {
   /** 少女が光に包まれ始める／消えきる */
   glow: 0.35,
@@ -777,11 +784,19 @@ export class Renderer {
 
   /**
    * songTime はカウント中なら負（足元のハイライトはカウント中も拍に合わせる）。
-   * clearSec はゴールしてからの経過秒（クリア演出）。leaveSec は拠点で入口に入ってからの経過秒（LEAVE）。プレイ中は null。
+   * clearSec はゴールしてからの経過秒（クリア演出）。leaveSec は拠点で入口に入ってからの経過秒（LEAVE）。
+   * backSec は Esc で戻り始めてからの経過秒（BACK）。プレイ中は null。
    * ステージ（stage）の曲の頭まで（songTime < 0）は、少女が現れる演出をする。songTime が -Infinity（曲を読み込んでいる
    * あいだ）なら、まだいない
    */
-  world(sim: Sim, songTime: number, tickSec: number, clearSec: number | null = null, leaveSec: number | null = null): void {
+  world(
+    sim: Sim,
+    songTime: number,
+    tickSec: number,
+    clearSec: number | null = null,
+    leaveSec: number | null = null,
+    backSec: number | null = null,
+  ): void {
     const ctx = this.lctx;
     const stage = sim.stage;
     const tickF = Math.max(0, songTime / tickSec);
@@ -840,7 +855,21 @@ export class Renderer {
       const k = reveal?.get(stage.index(x, y));
       return k === undefined ? null : REVEAL.delay + k * REVEAL.step + REVEAL.rise;
     };
+    // Esc で戻る演出：少女から遠いマスほど先に沈んで消える（null は消えたあと）
+    const sink = (x: number, y: number): { dy: number; alpha: number } | null => {
+      if (backSec === null) return { dy: 0, alpha: 1 };
+      const d = Math.min(Math.abs(x - sim.x) + Math.abs(y - sim.y), BACK.reach);
+      const u = (backSec - (BACK.reach - d) * BACK.step) / BACK.fall;
+      if (u <= 0) return { dy: 0, alpha: 1 };
+      if (u >= 1) return null;
+      return { dy: Math.round(u * u * 12), alpha: Math.ceil((1 - u) * 4) / 4 };
+    };
     const crumble = (x: number, y: number): { dy: number; alpha: number } | null => {
+      const f = fall(x, y);
+      const b = sink(x, y);
+      return f && b ? { dy: f.dy + b.dy, alpha: f.alpha * b.alpha } : null;
+    };
+    const fall = (x: number, y: number): { dy: number; alpha: number } | null => {
       const land = landAt(x, y);
       if (land !== null && songTime < land) {
         const u = 1 - (land - songTime) / REVEAL.rise;
@@ -1023,7 +1052,10 @@ export class Renderer {
     }
 
     // 遊具はゴールした瞬間に消える
+    // Esc で戻るときは、通り道のマスのうち少女にいちばん近いマスと一緒に薄れて消える（marks：危険物ごとの最初の立体物）
+    const marks: { from: number; h: (typeof sim.hazards)[number] }[] = [];
     for (const [hazardIndex, h] of (clearSec === null ? sim.hazards : []).entries()) {
+      marks.push({ from: sprites.length, h });
       if (h instanceof PatrolHazard) {
         const step = Math.floor(tickF / h.interval);
         const a = h.posAtStep(step - 1);
@@ -1076,9 +1108,9 @@ export class Renderer {
             sprites.push({
               depth: Math.max(head.x + head.y, tail.x + tail.y) + 0.5,
               draw: () => {
-                ctx.globalAlpha = alpha;
+                this.lctx.globalAlpha = alpha;
                 this.tram(head, tail);
-                ctx.globalAlpha = 1;
+                this.lctx.globalAlpha = 1;
               },
             });
           }
@@ -1092,14 +1124,26 @@ export class Renderer {
           sprites.push({ depth: Math.max(seat.x + seat.y, tail.x + tail.y) + 0.5, draw: () => this.koinobori(seat, tail, tickF, n) });
           continue;
         }
+        // 影：座席（錘・扇風機の頭）の真下に薄く。当たり判定のあるマスには濃く（座席が途中にあっても、どのマスが危険か分かるように）
+        const hit = h.cellsAt(now)[0] ?? null;
         if (h.look === 'fan' && h.pivot) {
           const pv = h.pivot;
-          sprites.push({ depth: Math.max(seat.x + seat.y, pv.x + pv.y) + 0.45, draw: () => this.fan(pv, seat, tickF) });
+          sprites.push({
+            depth: Math.max(seat.x + seat.y, pv.x + pv.y) + 0.45,
+            draw: () => {
+              this.swingShadow(seat, hit);
+              this.fan(pv, seat, tickF);
+            },
+          });
           continue;
         }
         sprites.push({
           depth: seat.x + seat.y + 0.45,
-          draw: () => (h.look === 'pendulum' ? this.pendulum(ends, seat, h.reach) : this.swing(ends, seat, h.reach)),
+          draw: () => {
+            this.swingShadow(seat, hit);
+            if (h.look === 'pendulum') this.pendulum(ends, seat, h.reach);
+            else this.swing(ends, seat, h.reach);
+          },
         });
       } else if (h instanceof PeriodicHazard) {
         const active = h.isActive(now);
@@ -1161,8 +1205,25 @@ export class Renderer {
       }
     }
 
+    // Esc で戻るとき、少女は立っているマスと一緒に消える
+    const own = backSec === null ? null : sink(sim.x, sim.y);
+    const gone = backSec === null ? 1 : own ? own.alpha : 0;
+    if (backSec !== null) {
+      marks.forEach(({ from, h }, i) => {
+        const cells = h instanceof PatrolHazard ? h.route : h instanceof SwingHazard || h instanceof PeriodicHazard || h instanceof FlowHazard ? h.cells : [];
+        const alpha = Math.max(0, ...cells.map((c) => sink(c.x, c.y)?.alpha ?? 0));
+        for (let j = from; j < (marks[i + 1]?.from ?? sprites.length); j++) {
+          const draw = sprites[j].draw;
+          sprites[j].draw = () => this.faded(alpha, draw);
+        }
+      });
+    }
+
     if (exitSec !== null) {
       sprites.push({ depth: px + py + 0.5, draw: () => this.playerEntering(p.sx, p.sy + TH / 2, sim.facing, exitSec) });
+    } else if (gone < 1) {
+      const dy = own?.dy ?? 0;
+      if (gone > 0) sprites.push({ depth: px + py + 0.5, draw: () => this.playerAppearing(p.sx, p.sy + TH / 2 + dy, sim.facing, gone) });
     } else if (climb && climb.appear < 1) {
       sprites.push({ depth: px + py + 0.5, draw: () => this.playerAppearing(p.sx, p.sy + TH / 2, sim.facing, climb.appear) });
     } else if (arrive < 1) {
@@ -1184,7 +1245,9 @@ export class Renderer {
         const c = { x: stage.start.x + stairs.back.x * j, y: stage.start.y + stairs.back.y * j };
         const { sx, sy } = iso(c.x, c.y);
         const top = sy + j * STAIR_H;
-        const alpha = j <= stairs.n ? 1 - (j - 1) * 0.1 : (1 - (j - stairs.n) / (STAIRS_FADE + 1)) * 0.6;
+        const b = sink(c.x, c.y);
+        if (!b) continue;
+        const alpha = (j <= stairs.n ? 1 - (j - 1) * 0.1 : (1 - (j - stairs.n) / (STAIRS_FADE + 1)) * 0.6) * b.alpha;
         sprites.push({
           depth: c.x + c.y,
           draw: () => {
@@ -1209,7 +1272,7 @@ export class Renderer {
       }
     }
     // 階段を昇ってくるあいだと、現れるあいだは、足元の枠を出さない
-    if (sim.status === 'playing' && !climb && arrive >= 1) {
+    if (sim.status === 'playing' && !climb && arrive >= 1 && backSec === null) {
       const d = sim.x + sim.y;
       sprites.push({ depth: d + 0.05, draw: () => this.beatTile(sim, songTime / tickSec, false) });
       sprites.push({ depth: d + 0.501, draw: () => this.beatTile(sim, songTime / tickSec, true) });
@@ -1262,7 +1325,9 @@ export class Renderer {
     const dark =
       leaveSec !== null
         ? clamp01((leaveSec - LEAVE.fade) / (LEAVE.end - LEAVE.fade))
-        : stage.kind === 'stage' && songTime < 0 && atStart
+        : backSec !== null
+          ? Math.max(clamp01((backSec - BACK.fade) / (BACK.end - BACK.fade)), stage.kind === 'stage' && songTime < 0 && atStart ? 1 - clamp01(beatU + 4) : 0)
+          : stage.kind === 'stage' && songTime < 0 && atStart
           ? 1 - clamp01(beatU + 4)
           : 0;
     if (dark > 0) {
@@ -1272,6 +1337,39 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
   }
+
+  /**
+   * draw を alpha の濃さで描く（中で globalAlpha を使う絵もまとめて薄めるよう、いったん別のバッファに描いてから重ねる）。
+   * 道の位置合わせの平行移動（translate）はそのまま引き継ぐ
+   */
+  private faded(alpha: number, draw: () => void): void {
+    if (alpha >= 1) return draw();
+    if (alpha <= 0) return;
+    const main = this.lctx;
+    if (!this.fadeCtx) {
+      const c = document.createElement('canvas');
+      c.width = LW;
+      c.height = LH;
+      this.fadeCtx = c.getContext('2d')!;
+    }
+    const buf = this.fadeCtx;
+    const m = main.getTransform();
+    buf.setTransform(1, 0, 0, 1, 0, 0);
+    buf.clearRect(0, 0, LW, LH);
+    buf.setTransform(m);
+    this.lctx = buf;
+    try {
+      draw();
+    } finally {
+      this.lctx = main;
+    }
+    main.save();
+    main.setTransform(1, 0, 0, 1, 0, 0);
+    main.globalAlpha = alpha;
+    main.drawImage(buf.canvas, 0, 0);
+    main.restore();
+  }
+  private fadeCtx: CanvasRenderingContext2D | null = null;
 
   private ring(cx: number, cy: number, rx: number, ry: number, color: string): void {
     const ctx = this.lctx;
@@ -1888,9 +1986,6 @@ export class Renderer {
     // 首の付け根（モーターの箱）
     ctx.fillStyle = COLORS.fanBody;
     ctx.fillRect(pv.sx - 3, ground - STAND - 4, 7, 5);
-    ctx.globalAlpha = 0.35;
-    fillEllipse(ctx, hd.sx, hg, 5, 2, '#000');
-    ctx.globalAlpha = 1;
     // 首：付け根から、道の上へ突き出した頭まで
     const c = { x: hd.sx, y: hg - LIFT };
     plotLine(ctx, pv.sx, ground - STAND - 2, c.x, c.y, COLORS.fanDark);
@@ -1944,11 +2039,7 @@ export class Renderer {
     ctx.fillRect(top.x - 4, top.y - 8, 8, 9);
     // 錘：支点を中心に円を描く（振り切るほど持ち上がる）
     const u = seat.x - mid.x + (seat.y - mid.y);
-    const s = at(seat.x, seat.y);
     const bob = at(seat.x, seat.y, Math.round(pendulumHeight(u, length, HANG - 7)));
-    ctx.globalAlpha = 0.45;
-    fillEllipse(ctx, s.x, s.y, 5, 1, '#000');
-    ctx.globalAlpha = 1;
     plotLine(ctx, top.x, top.y - 7, bob.x, bob.y, COLORS.brassDark);
     plotLine(ctx, top.x + 1, top.y - 7, bob.x + 1, bob.y, COLORS.brass);
     fillEllipse(ctx, bob.x, bob.y, 4, 4, COLORS.brassDark);
@@ -2182,6 +2273,23 @@ export class Renderer {
   }
 
   /**
+   * 箱ブランコ（振り子・扇風機も）の影。seat は座席の真下の位置（グリッド、小数）、hit は当たり判定のあるマス。
+   * 座席の真下には薄い影がついていき、判定のあるマスには濃い影を落とす（振り切って判定がないときは薄い影だけ）
+   */
+  private swingShadow(seat: { x: number; y: number }, hit: Vec | null): void {
+    const ctx = this.lctx;
+    const s = iso(seat.x, seat.y);
+    ctx.globalAlpha = 0.25;
+    fillEllipse(ctx, s.sx, s.sy + TH / 2, 5, 1, '#000');
+    if (hit) {
+      const c = iso(hit.x, hit.y);
+      ctx.globalAlpha = 0.6;
+      fillEllipse(ctx, c.sx, c.sy + TH / 2, 7, 2, '#000');
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /**
    * 箱ブランコ。枠の梁は揺れる向きと直角に渡してあり、座席が振り子のように揺れる。
    * ends は振れ幅の両端（グリッド座標）、seat は座席の真下の位置、reach は振れ幅（マス）。
    * 座席は梁を中心に、決まった長さの吊り棒で円を描いて揺れる。枠の高さは、振れ幅を吊り棒で振り切れる高さにする
@@ -2216,11 +2324,7 @@ export class Renderer {
     }
     const beam = [-0.7, 0.7].map((k) => at(mid.x + perp.x * k, mid.y + perp.y * k, frameH));
     plotLine(ctx, beam[0].x, beam[0].y, beam[1].x, beam[1].y, COLORS.rustLight);
-    // 座席の影、吊り棒、座席（梁と平行な板）
-    const s = at(seat.x, seat.y);
-    ctx.globalAlpha = 0.45;
-    fillEllipse(ctx, s.x, s.y, 5, 1, '#000');
-    ctx.globalAlpha = 1;
+    // 吊り棒、座席（梁と平行な板）
     for (const k of [-0.3, 0.3]) {
       const hook = at(mid.x + perp.x * k, mid.y + perp.y * k, frameH);
       const hang = at(seat.x + perp.x * k, seat.y + perp.y * k, lift);

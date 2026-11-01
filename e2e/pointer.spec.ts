@@ -62,17 +62,17 @@ for (const p of POINTERS) {
       await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 
       await tap(page, LEFT_BTN);
-      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
+      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
       await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 
       // 画面の下のほうに指を置いて左下へずらすと、下（画面の左下）へ歩いて玄関の戸（STAGE 1 の入口）に入る
       await slide(page, 150, 230, 138, 237);
-      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 12000 }).toBe('STAGE1');
+      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('STAGE1');
       await release(page);
       await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 
       await tap(page, LEFT_BTN);
-      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
+      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
       const g = await game(page);
       expect([g.sim!.x, g.sim!.y]).toEqual([6, 13]);
       expect(errors).toEqual([]);
@@ -83,7 +83,7 @@ for (const p of POINTERS) {
       await page.goto('/?seed=1');
       await frames(page);
       await tap(page, [288 - 40, 288 - 15]);
-      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
+      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
       expect(await page.evaluate(() => localStorage.getItem('metrogrid.cleared'))).toContain('TUTORIAL');
       expect(errors).toEqual([]);
     });
@@ -114,7 +114,7 @@ for (const p of POINTERS) {
     test('ステージ中の RETRY で、はじめからやり直す', async ({ page }) => {
       const errors = collectErrors(page);
       await page.goto('/?seed=1&stage=STAGE1&autostart');
-      await expect.poll(async () => (await game(page)).sim?.tick ?? -1, { timeout: 10000 }).toBeGreaterThan(8);
+      await expect.poll(async () => (await game(page)).sim?.tick ?? -1, { timeout: LOAD_MS }).toBeGreaterThan(8);
       await tap(page, RIGHT_BTN);
       await expect.poll(async () => (await game(page)).sim?.tick ?? 99, { timeout: LOAD_MS }).toBeLessThan(8);
       expect((await game(page)).sim?.stage).toBe('STAGE1');

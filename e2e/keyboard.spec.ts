@@ -24,7 +24,7 @@ test('タイトルから始めて歩ける', async ({ page }) => {
 
   // チュートリアルの途中の Esc は、飛ばして拠点へ
   await page.keyboard.press('Escape');
-  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
   expect(errors).toEqual([]);
 });
 
@@ -38,19 +38,19 @@ test('はじめてはチュートリアルから。Esc でスキップすると�
   await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 
   await page.keyboard.press('Escape');
-  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
   await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 
   // 拠点のスタートから下（画面の左手前）へ歩くと、玄関の戸（STAGE 1 の入口）に入る
   await page.keyboard.down('ArrowDown');
-  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 12000 }).toBe('STAGE1');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('STAGE1');
   await page.keyboard.up('ArrowDown');
 
   // スキップした記録が残り、次からはタイトルからまっすぐ拠点へ
   await page.goto('/?seed=1');
   await frames(page);
   await page.keyboard.press('Enter');
-  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
   expect(errors).toEqual([]);
 });
 
@@ -117,6 +117,6 @@ test('クリアしたあとはホームへ戻るだけ（R でやり直さない
   await frames(page);
   expect((await game(page)).scene).toBe('result');
   await page.keyboard.press('Enter');
-  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('HUB');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
   expect(errors).toEqual([]);
 });
