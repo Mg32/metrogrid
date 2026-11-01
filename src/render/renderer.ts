@@ -1,4 +1,4 @@
-import { FlowHazard, PatrolHazard, PeriodicHazard, SwingHazard } from '../game/hazard.ts';
+import { FLOW_JUMP, FlowHazard, PatrolHazard, PeriodicHazard, SwingHazard } from '../game/hazard.ts';
 import { GOAL_BONUS_PER_BEAT, type Sim } from '../game/sim.ts';
 import type { Cell, FloorStyle, PropKind, Stage } from '../game/stage.ts';
 import { DIR_VEC, mod, TICKS_PER_BEAT, ZONE_INTERVAL, type Dir, type Vec, type Zone } from '../game/types.ts';
@@ -10,6 +10,7 @@ import {
   fillPrismSides,
   fillQuad,
   iso as isoFlat,
+  diamondRowWidth,
   makeSprite,
   plotLine,
   strokeDiamond,
@@ -134,6 +135,10 @@ const ROAD_LIGHT = FLOOR_LIGHT.alley;
 const FLOOR_STYLES = Object.keys(FLOOR_LIGHT) as FloorStyle[];
 /** 遊具の柱、ブランコの枠などの高さ */
 const POLE_H = 26;
+/** 流されていく物が湧き口から跳び出す高さ（ドット） */
+const FLOW_HOP = 9;
+/** ステージのゴールの光の柱の高さ */
+const BEACON_H = 72;
 const FRAME_H = 22;
 /** 振り子を描くときの、グリッドの1マスの長さ（高さのドットと同じ単位にそろえる。クォータービューでの1マスの見た目の長さ） */
 const CELL_LEN = 14;
@@ -331,6 +336,24 @@ export const CLEAR = {
   /** すべて数え終わる（ゴールしてからの秒） */
   end: 4.7,
 };
+
+/**
+ * 拠点に新しい入口が現れる演出の進行（拠点に戻ってからの秒）。
+ * 新しいマスが、もとの床の側から入口へ向かって順に闇の下からせり上がり、最後に入口が光を放つ。演出のあいだは歩けない（main.ts）
+ */
+export const REVEAL = {
+  /** せり上がり始める。順番が1つ進むごとの遅れ。1マスがせり上がりきるまで */
+  delay: 0.6,
+  step: 0.14,
+  rise: 0.5,
+  /** 入口がせり上がりきってから、光が消えるまで */
+  flash: 1.6,
+};
+
+/** 演出が終わる秒（order は hubReveal の結果） */
+export function revealEnd(order: ReadonlyMap<number, number>): number {
+  return REVEAL.delay + Math.max(0, ...order.values()) * REVEAL.step + REVEAL.rise + REVEAL.flash;
+}
 
 const ZONE_LABEL: Record<Zone, string> = { 0: 'SAFE 1/4', 1: 'RISK 1/8', 2: 'HIGH 1/16' };
 
@@ -564,6 +587,8 @@ export class Renderer {
   private girlGlow: HTMLCanvasElement;
   /** エンディングで手を挙げる少女 */
   private girlRaise: HTMLCanvasElement;
+  /** 拠点に新しい入口が現れる演出（def の拠点を描くときだけ。order は stages/hub.ts の hubReveal）。main.ts が設定する */
+  hubReveal: { def: Stage['def']; order: ReadonlyMap<number, number> } | null = null;
   /** ハブの入口の下に出す一言（クリア済みなど）。main.ts が設定する */
   portalNote: (stage: string) => string | null = () => null;
   private lot: HTMLCanvasElement;
@@ -762,7 +787,19 @@ export class Renderer {
 
     // クリア演出：扉から遠いマスほど遅れて、道が崩れて闇へ落ちていく。扉のマスだけが残る。null は崩れ落ちたあと
     const goal = stage.goal;
+    // 拠点に新しい入口が現れる演出：まだ現れていないマスは null、せり上がっている途中は下にずらして薄く
+    const reveal = this.hubReveal?.def === stage.def ? this.hubReveal.order : null;
+    const landAt = (x: number, y: number) => {
+      const k = reveal?.get(stage.index(x, y));
+      return k === undefined ? null : REVEAL.delay + k * REVEAL.step + REVEAL.rise;
+    };
     const crumble = (x: number, y: number): { dy: number; alpha: number } | null => {
+      const land = landAt(x, y);
+      if (land !== null && songTime < land) {
+        const u = 1 - (land - songTime) / REVEAL.rise;
+        if (u <= 0) return null;
+        return { dy: Math.round((1 - u) * (1 - u) * 24), alpha: Math.ceil(u * 4) / 4 };
+      }
       if (clearSec === null || (x === goal.x && y === goal.y)) return { dy: 0, alpha: 1 };
       const dist = Math.abs(x - goal.x) + Math.abs(y - goal.y);
       const u = (clearSec - CLEAR.crumble - dist * CLEAR.crumbleStep) / CLEAR.fall;
@@ -771,10 +808,12 @@ export class Renderer {
       return { dy: Math.round(u * u * 18), alpha: Math.ceil((1 - u) * 4) / 4 };
     };
 
-    // 道（奥から手前へ）
+    // 道（奥から手前へ）。斜めの1列ずつ、立体物と交互に描く（下の「奥行き順に描く」）
     const light = this.lightMap(stage);
     const things = this.thingMap(stage);
-    for (let d = 0; d < stage.width + stage.height - 1; d++) {
+    // 流されていく物の湧き口（水の中の穴）
+    const springs = new Set(sim.hazards.flatMap((h) => (h instanceof FlowHazard ? [stage.index(h.cells[0].x, h.cells[0].y)] : [])));
+    const floorDiag = (d: number): void => {
       for (let x = 0; x <= d; x++) {
         const y = d - x;
         const cell = stage.cell(x, y);
@@ -809,6 +848,7 @@ export class Renderer {
         // 水のさざ波は半拍ごとに動く
         if (cell.water) ctx.drawImage(this.water[mod(Math.floor(tickF / (TICKS_PER_BEAT / 2)), 2)][cell.zone], sx - TW / 2, sy);
         else ctx.drawImage(this.road(cell, light[stage.index(x, y)]), sx - TW / 2, sy);
+        if (springs.has(stage.index(x, y))) this.spring(sx, sy + TH / 2);
         if (cell.climb) this.climbMark(sx, sy, cell.climb, stage, x, y);
 
         const obj = cell.obj;
@@ -824,10 +864,8 @@ export class Renderer {
           this.arrow(sx, sy + TH / 2, DIR_VEC[obj.dir].x, DIR_VEC[obj.dir].y);
         }
       }
-    }
-    ctx.globalAlpha = 1;
-
-    if (sim.status === 'playing') this.beatTile(sim, songTime / tickSec);
+      ctx.globalAlpha = 1;
+    };
 
     // 立体物は奥行き順に描く
     const sprites: { depth: number; draw: () => void }[] = [];
@@ -902,16 +940,24 @@ export class Renderer {
           });
         } else if (cell.obj?.type === 'goal') {
           const pulse = clearSec !== null ? 1 : 1 - (tickF % TICKS_PER_BEAT) / TICKS_PER_BEAT;
-          sprites.push({ depth: x + y + 0.3, draw: () => this.goalDoor(sx, sy, pulse) });
+          sprites.push({ depth: x + y + 0.3, draw: () => this.goalDoor(sx, sy, pulse, COLORS.goal, true) });
         } else if (cell.obj?.type === 'portal') {
           // ハブの入口：その先の景色の色で光る戸口。近づくと行き先が出る
           const target = cell.obj.stage;
           const pulse = 1 - (tickF % TICKS_PER_BEAT) / TICKS_PER_BEAT;
+          const land = landAt(x, y);
+          const flash = land === null ? null : (songTime - land) / REVEAL.flash;
           sprites.push({
             depth: x + y + 0.3,
-            draw: () => (target === 'UPSTAIRS' ? this.stairs(sx, sy) : this.goalDoor(sx, sy, pulse, PORTAL_LIGHT[target])),
+            draw: () => {
+              ctx.globalAlpha = f.alpha;
+              if (target === 'UPSTAIRS') this.stairs(sx, sy);
+              else this.goalDoor(sx, sy, pulse, PORTAL_LIGHT[target]);
+              ctx.globalAlpha = 1;
+              if (flash !== null && flash >= 0 && flash < 1) this.revealFlash(sx, sy, flash, PORTAL_LIGHT[target] ?? COLORS.goal);
+            },
           });
-          if (Math.max(Math.abs(x - px), Math.abs(y - py)) <= 3) {
+          if (Math.max(Math.abs(x - px), Math.abs(y - py)) <= 3 && (flash === null || flash >= 0)) {
             labels.push({ x: sx, y: sy - 30, text: target.replace(/(\d+)$/, ' $1'), color: target === 'UPSTAIRS' ? COLORS.textDim : COLORS.text });
             const note = this.portalNote(target);
             if (note) labels.push({ x: sx, y: sy - 22, text: note, color: COLORS.gem });
@@ -1042,6 +1088,18 @@ export class Renderer {
         }
       } else if (h instanceof FlowHazard) {
         for (const it of h.itemsAt(tickF)) {
+          if (it.age < 0) {
+            // 湧き口の中に薄く見えている → その場で軽く跳び出す（跳んでいるあいだ湧き口のマスが危険）
+            const c = h.cells[0];
+            const { sx, sy } = iso(c.x, c.y);
+            const u = (it.age + FLOW_JUMP) / FLOW_JUMP;
+            const draw =
+              u < 0
+                ? () => this.flotsam(sx, sy + TH / 2, it.n, tickF, { alpha: 0.15 + 0.35 * (1 + it.age / (FLOW_JUMP + h.peek)), sunk: true })
+                : () => this.flotsam(sx, sy + TH / 2, it.n, tickF, { lift: Math.round(Math.sin(Math.PI * u) * FLOW_HOP) });
+            sprites.push({ depth: c.x + c.y + 0.45, draw });
+            continue;
+          }
           // マスの間をなめらかに流れる。最後のマスの先へは半マス流れて消える
           const i = Math.floor(it.pos);
           const a = h.cells[i];
@@ -1065,8 +1123,26 @@ export class Renderer {
       });
     }
 
+    // 足元のハイライトは、立っているマスの道の直後に。ただし枠の下半分は手前の列の道と重なって隠れるので、
+    // 手前の列の道を描いたあとに描く（プレイヤーより後になるが、下半分は足より下なので重ならない。手前が段差で高いときを除く）
+    if (sim.status === 'playing') {
+      const d = sim.x + sim.y;
+      sprites.push({ depth: d + 0.05, draw: () => this.beatTile(sim, songTime / tickSec, false) });
+      sprites.push({ depth: d + 0.501, draw: () => this.beatTile(sim, songTime / tickSec, true) });
+    }
+
+    // 奥行き順に描く：斜めの1列の道を描いたら、その列に立つ物を描き、次の列の道へ。
+    // 闇の小物や家具の下の部分は、手前の列の道に隠れる（道より後にまとめて描くと、道の上にはみ出して見える）。
+    // 動いている物（depth の小数部が 0.5 を超える）は、移る先の列の道の後に描く
     sprites.sort((a, b) => a.depth - b.depth);
-    for (const s of sprites) s.draw();
+    const diagOf = (depth: number) => Math.ceil(depth - 0.5 - 1e-6);
+    const diags = stage.width + stage.height - 1;
+    let next = 0;
+    for (let d = 0; d < diags; d++) {
+      floorDiag(d);
+      while (next < sprites.length && diagOf(sprites[next].depth) <= d) sprites[next++].draw();
+    }
+    while (next < sprites.length) sprites[next++].draw();
 
     if (clearSec !== null) {
       const g = iso(goal.x, goal.y);
@@ -1209,14 +1285,27 @@ export class Renderer {
     ctx.fillRect(axle.x - 1, axle.y - 1, 2, 2);
   }
 
-  /** 流されていく物：家から失われた物（人形、表札、子どもの靴）が、水面で揺れながら流れる */
-  private flotsam(cx: number, cy: number, n: number, tickF: number): void {
+  /** 流されていく物の湧き口：水の中にあいた暗い穴。物はここに薄く見えてから跳び出す */
+  private spring(cx: number, cy: number): void {
     const ctx = this.lctx;
-    const bob = Math.round(Math.sin(tickF * 0.9 + n) * 0.8);
-    const y = cy - 2 + bob;
-    ctx.globalAlpha = 0.5;
-    fillEllipse(ctx, cx, cy, 5, 1, COLORS.waterDeep);
-    ctx.globalAlpha = 1;
+    // 明るい縁と、奥の暗い穴
+    fillEllipse(ctx, cx, cy, 8, 3, COLORS.waterLight);
+    fillEllipse(ctx, cx, cy, 7, 2, COLORS.waterDeep);
+    fillEllipse(ctx, cx, cy + 1, 5, 1, COLORS.bg);
+  }
+
+  /** 流されていく物：家から失われた物（人形、表札、子どもの靴）が、水面で揺れながら流れる */
+  private flotsam(cx: number, cy: number, n: number, tickF: number, opts: { lift?: number; alpha?: number; sunk?: boolean } = {}): void {
+    const ctx = this.lctx;
+    const bob = opts.lift || opts.sunk ? 0 : Math.round(Math.sin(tickF * 0.9 + n) * 0.8);
+    // 湧き口の中では、穴の底に沈んで見える
+    const y = cy - 2 + bob - (opts.lift ?? 0) + (opts.sunk ? 3 : 0);
+    const alpha = opts.alpha ?? 1;
+    if (!opts.sunk) {
+      ctx.globalAlpha = 0.5;
+      fillEllipse(ctx, cx, cy, 5, 1, COLORS.waterDeep);
+    }
+    ctx.globalAlpha = alpha;
     switch (mod(n, 3)) {
       case 0: // 人形（着物の胴と白い顔、黒髪）
         ctx.fillStyle = COLORS.doll;
@@ -1242,6 +1331,7 @@ export class Renderer {
         ctx.fillRect(cx - 3, y - 5, 3, 2);
         break;
     }
+    ctx.globalAlpha = 1;
   }
 
   /** ステージの床の高さ（ドット）を返す関数 */
@@ -1908,9 +1998,21 @@ export class Renderer {
   }
 
   /** ゴール：欠けに囲まれて一枚だけ立つ扉。開いた戸口から光が漏れる。ハブの入口も同じ形で、光の色が行き先の景色の色 */
-  private goalDoor(sx: number, sy: number, pulse: number, light: string = COLORS.goal): void {
+  private goalDoor(sx: number, sy: number, pulse: number, light: string = COLORS.goal, beacon = false): void {
     const ctx = this.lctx;
     const g = sy + TH / 2;
+    if (beacon) {
+      // ステージのゴール：戸口から闇の上へ光の柱が立ち、拍に合わせて明滅する（離れた所からも、行き止まりの奥でも見つけられるように）
+      const top = g - 22;
+      for (let r = 0; r < BEACON_H; r += 2) {
+        const fade = 1 - r / BEACON_H;
+        ctx.fillStyle = light;
+        ctx.globalAlpha = (0.18 + pulse * 0.14) * fade;
+        ctx.fillRect(sx - 4, top - r - 2, 8, 2);
+        ctx.globalAlpha = (0.5 + pulse * 0.4) * fade;
+        ctx.fillRect(sx - 1, top - r - 2, 2, 2);
+      }
+    }
     ctx.globalAlpha = 0.25 + pulse * 0.2;
     fillDiamond(ctx, sx, sy + 2, TW - 8, TH - 4, light);
     for (let r = 0; r < 18; r += 2) {
@@ -1924,6 +2026,26 @@ export class Renderer {
     ctx.fillRect(sx + 3, g - 20, 2, 20);
     ctx.fillStyle = COLORS.wood;
     ctx.fillRect(sx - 6, g - 22, 12, 2);
+  }
+
+  /** 拠点に現れた入口が放つ光：光の柱と、足もとから広がる輪。k は 0〜1（1 で消える） */
+  private revealFlash(sx: number, sy: number, k: number, light: string): void {
+    const ctx = this.lctx;
+    const g = sy + TH / 2;
+    const fade = 1 - k;
+    ctx.fillStyle = light;
+    for (let r = 0; r < BEACON_H; r += 2) {
+      const a = fade * (1 - r / BEACON_H);
+      ctx.globalAlpha = 0.3 * a;
+      ctx.fillRect(sx - 6, g - 22 - r - 2, 12, 2);
+      ctx.globalAlpha = 0.9 * a;
+      ctx.fillRect(sx - 2, g - 22 - r - 2, 4, 2);
+    }
+    // 足もとから広がる輪
+    const w = 2 * Math.round(TW / 2 + k * TW);
+    ctx.globalAlpha = 0.8 * fade;
+    strokeDiamond(ctx, sx, g - w / 4, w, w / 2, light);
+    ctx.globalAlpha = 1;
   }
 
   /** 回旋塔の柱 */
@@ -2049,7 +2171,8 @@ export class Renderer {
    * 八分・十六分のゾーンでは、動ける各カウントにも弱く光り、細かく刻んでいることを足元で見せる。
    * tick はカウント中なら負
    */
-  private beatTile(sim: Sim, tick: number): void {
+  /** 足元のハイライト。front でないときは塗りと枠の上半分（と段差に隠れる下の辺）、front のときは枠の下半分（手前の列の道の上に描く） */
+  private beatTile(sim: Sim, tick: number, front: boolean): void {
     const ctx = this.lctx;
     const interval = ZONE_INTERVAL[sim.stage.cell(sim.x, sim.y)!.zone];
     const beatPulse = 1 - mod(tick, TICKS_PER_BEAT) / TICKS_PER_BEAT;
@@ -2059,10 +2182,25 @@ export class Renderer {
     const downbeat = mod(Math.floor(tick / TICKS_PER_BEAT), 4) === 0;
     const color = downbeat ? COLORS.gem : COLORS.text;
     const { sx, sy } = iso(sim.x, sim.y);
-    ctx.globalAlpha = 0.1 + level * 0.3;
-    fillDiamond(ctx, sx, sy + 1, TW - 4, TH - 2, color);
+    if (!front) {
+      ctx.globalAlpha = 0.1 + level * 0.3;
+      fillDiamond(ctx, sx, sy + 1, TW - 4, TH - 2, color);
+    }
     ctx.globalAlpha = 0.25 + level * 0.75;
-    strokeDiamond(ctx, sx, sy, TW, TH, color);
+    if (!front) strokeDiamond(ctx, sx, sy, TW, TH, color, 0, TH / 2);
+    // 枠の下半分の左右の辺：手前のマスが高い（段差が手前にある）ときは、その段に隠れるようプレイヤーと一緒に描く。
+    // 同じ高さか低いときは、手前の道に隠れないよう、手前の列の道の後に描く
+    const stage = sim.stage;
+    const h = stage.cell(sim.x, sim.y)!.height;
+    const higher = (x: number, y: number) => (stage.cell(x, y)?.height ?? -Infinity) > h;
+    ctx.fillStyle = color;
+    for (const [side, nx, ny] of [[-1, sim.x, sim.y + 1], [1, sim.x + 1, sim.y]] as const) {
+      if (higher(nx, ny) === front) continue;
+      for (let r = TH / 2; r < TH; r++) {
+        const rw = diamondRowWidth(r, TW, TH);
+        ctx.fillRect(side < 0 ? sx - rw / 2 : sx + rw / 2 - 2, sy + r, 2, 1);
+      }
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -2157,7 +2295,6 @@ export class Renderer {
       this.text('HOME', 6, 7, 1, COLORS.textDim);
       // これまでに溜めた得点の総計（エンディングで使われる値）
       this.text(`TOTAL ${String(this.totalScore).padStart(7, '0')}`, 6, 15, 1, COLORS.gem);
-      this.text('WALK INTO A GLOWING DOOR', LW / 2, LH - 14, 1, COLORS.textDim, 'center');
       if (!this.touchUI) this.text('ESC: TITLE', LW - 6, 7, 1, COLORS.textDim, 'right');
       return;
     }

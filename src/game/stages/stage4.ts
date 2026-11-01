@@ -882,7 +882,7 @@ export const stage4: StageDef = {
     f: {value: 700, decay: 4, pick: 2},
   },
   hazards: [
-    {type: 'swing', look: 'koinobori', axis: 'x', period: 30, cells: [[14, 91], [15, 91], [16, 91], [17, 91], [18, 91], [19, 91]]},
+    {type: 'swing', look: 'koinobori', axis: 'x', reach: 4.5, period: 60, cells: [[14, 91], [15, 91], [16, 91], [17, 91], [18, 91], [19, 91]]},
     {type: 'periodic', look: 'kaki', cells: [[29, 57]], pivot: [30, 55], period: 26, from: 18, to: 24},
     {type: 'periodic', look: 'kaki', cells: [[32, 54]], pivot: [30, 55], period: 26, from: 4, to: 10},
     {type: 'periodic', look: 'kaki', cells: [[25, 53]], pivot: [30, 55], period: 30, from: 4, to: 10},

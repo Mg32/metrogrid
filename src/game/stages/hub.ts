@@ -114,3 +114,48 @@ export function hubReturnCell(def: StageDef, stageName: string): Vec | null {
   }
   return null;
 }
+
+/**
+ * ステージ name を初めてクリアして拠点に戻ったときに、新しく現れるマスと、現れる順番（0 から）。
+ * クリアする前の拠点と比べて、床・小物・入口が変わったマス。もとからある床の側から、新しい通路をたどって
+ * 入口（ゲート）へ向かって順に現れる。キーは y × 幅 + x
+ */
+export function hubReveal(cleared: ReadonlySet<string>, name: string): Map<number, number> {
+  const before = buildHub(new Set([...cleared].filter((n) => n !== name)));
+  const after = buildHub(cleared);
+  const W = after.terrain[0].length;
+  const H = after.terrain.length;
+  const at = (d: StageDef, x: number, y: number) => `${d.terrain[y][x]}${d.objects[y][x]}${d.floors![y][x]}`;
+  const changed = (x: number, y: number) => at(before, x, y) !== at(after, x, y);
+  const oldFloor = (x: number, y: number) => before.terrain[y]?.[x] === '.';
+  const order = new Map<number, number>();
+  const near = (x: number, y: number) => [[x, y - 1], [x - 1, y], [x + 1, y], [x, y + 1]].filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx < W && ny < H);
+
+  // 新しい床：もとの床の隣から順に
+  let wave: [number, number][] = [];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (changed(x, y) && after.terrain[y][x] === '.' && near(x, y).some(([nx, ny]) => oldFloor(nx, ny))) wave.push([x, y]);
+    }
+  }
+  for (let k = 0; wave.length > 0; k++) {
+    for (const [x, y] of wave) order.set(y * W + x, k);
+    const next: [number, number][] = [];
+    for (const [x, y] of wave) {
+      for (const [nx, ny] of near(x, y)) {
+        if (order.has(ny * W + nx) || next.some(([ax, ay]) => ax === nx && ay === ny)) continue;
+        if (changed(nx, ny) && after.terrain[ny][nx] === '.') next.push([nx, ny]);
+      }
+    }
+    wave = next;
+  }
+  // 床でない新しいマス（障子、流し台など）：隣の新しい床と一緒に
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!changed(x, y) || order.has(y * W + x)) continue;
+      const ks = near(x, y).map(([nx, ny]) => order.get(ny * W + nx)).filter((k) => k !== undefined);
+      order.set(y * W + x, ks.length ? Math.min(...ks) : 0);
+    }
+  }
+  return order;
+}

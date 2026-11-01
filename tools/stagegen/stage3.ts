@@ -73,9 +73,10 @@ for (let i = 0; i + 1 < TRAM.length; i++) {
   for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++) for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++) if (!L.obj.has(`${x},${y}`)) L.put('=', [x, y]);
 }
 // 路面電車（揺れ型）：もう走っていない路線の車両が、半透明で表通りを行き来する。振り切ると線路の端から闇へ走り去り、
-// しばらく表通りが空く。線路の上ではプレイヤー（八分）より速いので、走り去ったすぐ後ろについて行けば追いつかれない。
+// しばらく表通りが空く。電車はプレイヤー（八分）より遅い（周期 > 4π × 振れ幅）ので、手前の端から闇へ走り去ったのを
+// 見送ってから歩き出せば、戻ってくる電車に後ろから追いつかれない。
 // 往復する巡回型にすると、1本道で正面から鉢合わせて抜けられなくなる（企画書 第2.2節）
-L.hazard({ type: 'swing', look: 'tram', axis: 'x', period: 56, reach: 6, cells: Array.from({ length: 9 }, (_, i) => [14 + i, 53] as P) });
+L.hazard({ type: 'swing', look: 'tram', axis: 'x', period: 86, reach: 6, cells: Array.from({ length: 9 }, (_, i) => [14 + i, 53] as P) });
 // 街区の抜け道の危険物：踏切の遮断機（定位置型）。企画書では未決（第4.2節 STAGE 3「街区の抜け道に置く危険物」）。
 // 実装のために仮に決めた（検討ログで、STAGE 3 の定位置型の候補として了承されていた物）。遮断機の柱は道の脇の闇に立つ
 const rand = createRandom(31);

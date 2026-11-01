@@ -17,9 +17,10 @@ export function fillDiamond(ctx: CanvasRenderingContext2D, cx: number, top: numb
   }
 }
 
-export function strokeDiamond(ctx: CanvasRenderingContext2D, cx: number, top: number, w: number, h: number, color: string): void {
+/** 菱形の輪郭。from〜to で描く行を絞れる（下半分だけ、など） */
+export function strokeDiamond(ctx: CanvasRenderingContext2D, cx: number, top: number, w: number, h: number, color: string, from = 0, to = h): void {
   ctx.fillStyle = color;
-  for (let r = 0; r < h; r++) {
+  for (let r = from; r < to; r++) {
     const rw = diamondRowWidth(r, w, h);
     ctx.fillRect(cx - rw / 2, top + r, 2, 1);
     ctx.fillRect(cx + rw / 2 - 2, top + r, 2, 1);

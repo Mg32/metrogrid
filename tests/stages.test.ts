@@ -3,7 +3,7 @@ import { describe, test } from 'node:test';
 import { createHazards, FlowHazard, PatrolHazard, PeriodicHazard, SwingHazard } from '../src/game/hazard.ts';
 import { Stage } from '../src/game/stage.ts';
 import { STAGES } from '../src/game/stages/index.ts';
-import { TICKS_PER_BAR, ZONE_INTERVAL } from '../src/game/types.ts';
+import { DIR_VEC, TICKS_PER_BAR, ZONE_INTERVAL } from '../src/game/types.ts';
 
 for (const def of Object.values(STAGES)) {
   describe(`ステージ ${def.name}`, () => {
@@ -42,6 +42,11 @@ for (const def of Object.values(STAGES)) {
               : [];
         for (const c of cells) assert.equal(stage.cell(c.x, c.y)?.terrain, 'floor', `(${c.x},${c.y})`);
       }
+    });
+
+    test('スタートでは、進める道の向きを向いている', () => {
+      const v = DIR_VEC[stage.startFacing()];
+      assert.equal(stage.cell(stage.start.x + v.x, stage.start.y + v.y)?.terrain, 'floor');
     });
 
     test('流れは縦横に連続した水の中を流れる', () => {

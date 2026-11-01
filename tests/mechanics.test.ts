@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { FlowHazard } from '../src/game/hazard.ts';
+import { FLOW_JUMP, FlowHazard } from '../src/game/hazard.ts';
 import { Sim } from '../src/game/sim.ts';
 import { Stage, type StageDef } from '../src/game/stage.ts';
 import type { Dir } from '../src/game/types.ts';
@@ -166,6 +166,16 @@ describe('流されていく物', () => {
     assert.deepEqual(at(4), [1]);
     assert.deepEqual(at(6), []);
     assert.deepEqual(at(10), [3]);
+  });
+
+  test('湧き口の中に見えているあいだは危険でなく、跳び出したら湧き口のマスが危険', () => {
+    // 物 1 は tick 10 に水に落ちる。その FLOW_JUMP tick 前から跳んでいて、さらに前は穴の中に見えている
+    const at = (t: number) => flow.cellsAt(t).map((c) => c.x);
+    const peeking = (t: number) => flow.itemsAt(t).some((it) => it.n === 1 && it.age < -FLOW_JUMP);
+    assert.ok(peeking(10 - FLOW_JUMP - 1));
+    assert.deepEqual(at(10 - FLOW_JUMP - 1), []);
+    assert.deepEqual(at(10 - FLOW_JUMP), [3]);
+    assert.deepEqual(at(9), [3]);
   });
 
   test('流れの間隔が流れきる時間より短ければ、同時に複数流れている', () => {

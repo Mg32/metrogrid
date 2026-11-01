@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { Sim } from '../src/game/sim.ts';
 import { Stage } from '../src/game/stage.ts';
-import { buildHub, hubReturnCell, UPSTAIRS } from '../src/game/stages/hub.ts';
+import { buildHub, hubReturnCell, hubReveal, UPSTAIRS } from '../src/game/stages/hub.ts';
 import { STAGE_ORDER, STAGES } from '../src/game/stages/index.ts';
 import { DIR_VEC, type Dir } from '../src/game/types.ts';
 
@@ -82,4 +82,22 @@ describe('拠点', () => {
     assert.equal(sim.status, 'portal');
     assert.equal(sim.portal, 'STAGE1');
   });
+});
+
+describe('拠点に新しい入口が現れる演出', () => {
+  const names = ['TUTORIAL', ...STAGE_ORDER.map((d) => d.name)];
+  for (let i = 1; i < names.length; i++) {
+    const name = names[i];
+    test(`${name} を初めてクリアすると、新しい入口は通路のあとに現れる`, () => {
+      const cleared = new Set(names.slice(0, i + 1));
+      const def = buildHub(cleared);
+      const order = hubReveal(cleared, name);
+      const W = def.terrain[0].length;
+      const key = Object.entries(def.portals!).find(([, n]) => n === (STAGE_ORDER[i]?.name ?? UPSTAIRS))![0];
+      const y = def.objects.findIndex((r) => r.includes(key));
+      const k = order.get(y * W + def.objects[y].indexOf(key));
+      assert.ok(k !== undefined, '入口が演出に入っていない');
+      assert.equal(k, Math.max(...order.values()));
+    });
+  }
 });

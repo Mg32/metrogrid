@@ -48,7 +48,7 @@ test('はじめてはチュートリアルから。S でスキップすると拠
   expect(errors).toEqual([]);
 });
 
-test('タイトルの RESET：確認で NO ならそのまま、YES なら記録を消してチュートリアルから', async ({ page }) => {
+test('タイトルの RESET：確認で NO ならそのまま、YES なら記録を消してタイトルへ戻り、次はチュートリアルから', async ({ page }) => {
   const errors = collectErrors(page);
   await page.goto('/?seed=1');
   await page.evaluate(() => {
@@ -67,8 +67,10 @@ test('タイトルの RESET：確認で NO ならそのまま、YES なら記録
   await expect.poll(async () => (await game(page)).scene).toBe('confirm');
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('Enter');
-  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('TUTORIAL');
+  await expect.poll(async () => (await game(page)).scene).toBe('title');
   expect(await page.evaluate(() => [localStorage.getItem('metrogrid.cleared'), localStorage.getItem('metrogrid.total')])).toEqual([null, null]);
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('TUTORIAL');
   expect(errors).toEqual([]);
 });
 

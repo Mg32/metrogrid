@@ -72,6 +72,8 @@ export class Sim {
     this.x = this.fromX = start.x;
     this.y = this.fromY = start.y;
     this.zoneEntry = { ...start };
+    // スタートでは進む向きを向いている（出てきた入口の前に戻るときは、いままでどおり）
+    if (start === stage.start) this.facing = stage.startFacing();
     this.scores = [];
     const candidates = new Map<string, { x: number; y: number }[]>();
     for (let y = 0; y < stage.height; y++) {

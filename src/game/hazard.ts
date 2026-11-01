@@ -140,10 +140,16 @@ export class SwingHazard implements Hazard {
   }
 }
 
+/** 流されていく物が、湧き口から跳び出して水に落ちるまでの tick（このあいだ湧き口のマスが危険） */
+export const FLOW_JUMP = 2;
+/** 跳び出す前に、湧き口の中に物が薄く見えている tick（前の物と重ならないよう、間隔が短いときは縮める） */
+export const FLOW_PEEK = 8;
+
 /**
  * 流されていく物（巡回型）。cells（上流 → 下流）を、every tick ごとに1つずつ物が流れてくる。
- * 物は interval tick ごとに1マス下流へ進み、最後のマスの先で（橋の下や闇へ）見えなくなる。
- * 物 n が cells[0] に入る tick は n × every − phase。
+ * cells[0] は湧き口（水の中の穴）。物は穴の中に薄く見えたあと、その場で軽く跳び出し（FLOW_JUMP tick）、
+ * 落ちたところから interval tick ごとに1マス下流へ進み、最後のマスの先で（橋の下や闇へ）見えなくなる。
+ * 跳んでいるあいだは湧き口のマスが危険。物 n が水に落ちる（cells[0] を流れ始める）tick は n × every − phase。
  */
 export class FlowHazard implements Hazard {
   readonly kind = 'flow';
@@ -151,28 +157,37 @@ export class FlowHazard implements Hazard {
   readonly interval: number;
   readonly every: number;
   readonly phase: number;
+  /** 湧き口の中に見えている tick */
+  readonly peek: number;
 
   constructor(def: Extract<HazardDef, { type: 'flow' }>, phase: number) {
     this.cells = def.cells.map(([x, y]) => ({ x, y }));
     this.interval = def.interval;
     this.every = def.every;
     this.phase = mod(phase, def.every);
+    this.peek = Math.max(0, Math.min(FLOW_PEEK, def.every - FLOW_JUMP - def.interval));
   }
 
-  /** tick t（小数でもよい）に流れている物。pos は cells 上の位置（小数。描画用） */
-  itemsAt(t: number): { n: number; pos: number }[] {
+  /**
+   * tick t（小数でもよい）に出ている物。age は水に落ちてからの tick（負なら跳んでいる途中か、穴の中に見えている）。
+   * pos は cells 上の位置（小数。描画用。跳んでいるあいだと穴の中では 0）
+   */
+  itemsAt(t: number): { n: number; age: number; pos: number }[] {
     if (t < 0) return [];
     const span = this.cells.length * this.interval;
-    const items: { n: number; pos: number }[] = [];
-    const last = Math.floor((t + this.phase) / this.every);
+    const items: { n: number; age: number; pos: number }[] = [];
+    const last = Math.floor((t + this.phase + FLOW_JUMP + this.peek) / this.every);
     for (let n = last; n * this.every - this.phase > t - span; n--) {
-      items.push({ n, pos: (t - (n * this.every - this.phase)) / this.interval });
+      const age = t - (n * this.every - this.phase);
+      items.push({ n, age, pos: Math.max(0, age / this.interval) });
     }
     return items;
   }
 
   cellsAt(t: number): Vec[] {
-    return this.itemsAt(t).map((it) => this.cells[Math.floor(it.pos)]);
+    return this.itemsAt(t)
+      .filter((it) => it.age >= -FLOW_JUMP)
+      .map((it) => this.cells[Math.floor(it.pos)]);
   }
 }
 

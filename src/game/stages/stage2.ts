@@ -329,9 +329,9 @@ export const stage2: StageDef = {
   },
   hazards: [
     {type: 'periodic', look: 'shishiodoshi', cells: [[57, 12]], pivot: [56, 12], period: 30, from: 0, to: 4},
-    {type: 'flow', cells: [[26, 18], [27, 18], [28, 18], [29, 18], [30, 18], [31, 18]], interval: 2, every: 26},
+    {type: 'flow', cells: [[26, 18], [27, 18], [28, 18], [29, 18], [30, 18], [31, 18]], interval: 2, every: 30},
     {type: 'flow', cells: [[36, 19], [37, 19], [38, 19], [39, 19]], interval: 2, every: 19},
-    {type: 'flow', cells: [[45, 18], [46, 18], [47, 18], [48, 18]], interval: 2, every: 18},
+    {type: 'flow', cells: [[45, 18], [46, 18], [47, 18], [48, 18]], interval: 2, every: 20},
     {type: 'flow', cells: [[22, 18], [23, 18], [24, 18]], interval: 2, every: 14},
     {type: 'flow', cells: [[8, 17], [9, 17], [10, 17], [11, 17], [12, 17], [13, 17], [14, 17], [15, 17], [16, 17], [17, 17]], interval: 1, every: 9},
     {type: 'flow', cells: [[8, 21], [9, 21], [10, 21], [11, 21], [12, 21], [13, 21], [14, 21], [15, 21], [16, 21], [17, 21]], interval: 1, every: 11},

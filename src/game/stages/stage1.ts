@@ -384,10 +384,10 @@ export const stage1: StageDef = {
     e: {value: 250, decay: 2, pick: 6},
   },
   hazards: [
-    {type: 'swing', cells: [[10, 38], [11, 38], [12, 38], [13, 38]], axis: 'x', period: 30},
-    {type: 'swing', cells: [[10, 34], [10, 35], [10, 36]], axis: 'y', period: 26},
-    {type: 'swing', cells: [[14, 30], [14, 31], [14, 32]], axis: 'y', period: 34},
-    {type: 'swing', cells: [[11, 29], [12, 29], [13, 29]], axis: 'x', period: 22},
+    {type: 'swing', cells: [[10, 38], [11, 38], [12, 38], [13, 38]], axis: 'x', reach: 3, period: 42},
+    {type: 'swing', cells: [[10, 34], [10, 35], [10, 36]], axis: 'y', reach: 2.5, period: 38},
+    {type: 'swing', cells: [[14, 30], [14, 31], [14, 32]], axis: 'y', reach: 2.5, period: 34},
+    {type: 'swing', cells: [[11, 29], [12, 29], [13, 29]], axis: 'x', reach: 2.5, period: 36},
     {type: 'patrol', look: 'kaisento', pivot: [20, 19], waypoints: [[18, 18], [22, 18], [22, 20], [18, 20]], loop: true, interval: 3},
   ],
 };

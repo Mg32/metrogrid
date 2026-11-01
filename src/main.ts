@@ -5,13 +5,13 @@ import { InputRecorder, makePlayLog } from './game/playlog.ts';
 import { createRandom, randomSeed } from './game/random.ts';
 import { Sim } from './game/sim.ts';
 import { Stage, type StageDef } from './game/stage.ts';
-import { buildHub, hubReturnCell, UPSTAIRS } from './game/stages/hub.ts';
+import { buildHub, hubReturnCell, hubReveal, UPSTAIRS } from './game/stages/hub.ts';
 import { STAGE_ORDER, STAGES, tutorial } from './game/stages/index.ts';
 import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
 import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
 import { ENDING } from './render/ending.ts';
-import { CLEAR, Renderer } from './render/renderer.ts';
+import { CLEAR, Renderer, revealEnd } from './render/renderer.ts';
 import { Stick } from './touch.ts';
 
 /**
@@ -73,6 +73,10 @@ let stage = new Stage(devDef() ?? STAGE_ORDER[0]);
 let tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
 /** このクリアで拠点に新しく現れた入口（結果の欄に出す） */
 let newlyUnlocked: string | null = null;
+/** 初めてクリアしたステージ。次に拠点に戻ったとき、新しい入口が現れる演出をする（?reveal=NAME で試せる） */
+let pendingReveal: string | null = params.get('reveal');
+/** 拠点の演出が終わる秒（それまでは歩けない） */
+let revealUntil = 0;
 
 const stageLabel = (name: string) => name.replace(/(\d+)$/, ' $1');
 
@@ -147,7 +151,7 @@ function openReset(): void {
 }
 
 /**
- * すべてをリセットして、最初のチュートリアルからやり直す。クリアの記録と得点の総計を消す。
+ * すべてをリセットして、タイトルに戻る（次に始めるとチュートリアルから）。クリアの記録と得点の総計を消す。
  * ?cleared・?total で差し替えているときは、保存された記録には触れない
  */
 function resetAll(): void {
@@ -155,7 +159,8 @@ function resetAll(): void {
   total = 0;
   renderer.totalScore = 0;
   if (devCleared === null && devTotal === null) resetProgress();
-  void play(tutorial);
+  input.clearPressed();
+  scene = 'title';
 }
 /** エンディングが始まった時刻（performance.now() の秒）。?ending では固定の経過秒 */
 let endingAt = 0;
@@ -199,6 +204,7 @@ async function play(def: StageDef, start?: Vec): Promise<void> {
   sfx.stop();
   input.clearPressed();
   setStage(def);
+  setReveal(def);
   sim = newSim(start);
   heardEvents = 0;
   steer = null;
@@ -207,6 +213,18 @@ async function play(def: StageDef, start?: Vec): Promise<void> {
   const hub = stage.kind === 'hub';
   await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: hub ? 0 : 1, track: stage.def.name, loop: hub });
   scene = 'play';
+}
+
+/** 拠点を遊び始めるとき、初めてクリアしたステージがあれば、新しい入口が現れる演出をする */
+function setReveal(def: StageDef): void {
+  renderer.hubReveal = null;
+  revealUntil = 0;
+  if (def.kind !== 'hub' || !pendingReveal || !cleared.has(pendingReveal)) return;
+  const order = hubReveal(cleared, pendingReveal);
+  pendingReveal = null;
+  if (order.size === 0) return;
+  renderer.hubReveal = { def, order };
+  revealUntil = revealEnd(order);
 }
 
 /** 拠点へ。from はいま出てきたステージ（その入口の前に立つ） */
@@ -253,6 +271,7 @@ function finishPlay(s: Sim): void {
     if (!cleared.has(name)) {
       cleared.add(name);
       save();
+      if (s.stage.kind === 'stage') pendingReveal = name;
       const i = STAGE_ORDER.findIndex((d) => d.name === name);
       if (i >= 0 && i + 1 < STAGE_ORDER.length) newlyUnlocked = STAGE_ORDER[i + 1].name;
     }
@@ -378,7 +397,8 @@ function update(): void {
     }
     const now = Math.floor(conductor.songTime() / tickSec);
     while (sim.tick < now && sim.status === 'playing') {
-      const held = steer?.dir ?? input.current();
+      // 拠点に新しい入口が現れているあいだは歩けない
+      const held = kind === 'hub' && conductor.songTime() < revealUntil ? null : (steer?.dir ?? input.current());
       recorder.record(sim.tick + 1, held);
       sim.step(sim.tick + 1, held);
     }
@@ -469,6 +489,7 @@ function frame(): void {
 
 if (params.has('view')) {
   const [x, y, t] = params.get('view')!.split(',').map(Number);
+  setReveal(stage.def);
   sim = newSim();
   for (let i = 0; i <= t; i++) sim.step(i, null);
   sim.debugPlace(x, y);

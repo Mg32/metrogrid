@@ -1,4 +1,4 @@
-import type { Dir, Vec, Zone } from './types.ts';
+import { DIR_VEC, type Dir, type Vec, type Zone } from './types.ts';
 
 /**
  * ステージ定義。terrain と objects（と floors）は同じ大きさの文字グリッド。
@@ -314,5 +314,42 @@ export class Stage {
     const rise = b.height - a.height;
     if (rise > 0) return (a.climb !== null || b.climb !== null) && rise <= MAX_CLIMB;
     return -rise <= MAX_DROP;
+  }
+
+  /**
+   * スタートで向いている向き：ゴールへの道（危険物・ゲートは見ない最短の道）の1歩目の向き。
+   * ハブにはゴールがないので右向き
+   */
+  startFacing(): Dir {
+    if (this.kind === 'hub') return 'right';
+    const dirs = Object.keys(DIR_VEC) as Dir[];
+    const walkable = (x: number, y: number) => this.cell(x, y)?.terrain === 'floor';
+    const dist = new Map<number, number>();
+    const queue: Vec[] = [this.goal];
+    dist.set(this.index(this.goal.x, this.goal.y), 0);
+    for (let i = 0; i < queue.length; i++) {
+      const c = queue[i];
+      const dc = dist.get(this.index(c.x, c.y))!;
+      for (const d of dirs) {
+        const nx = c.x + DIR_VEC[d].x;
+        const ny = c.y + DIR_VEC[d].y;
+        if (!walkable(nx, ny) || dist.has(this.index(nx, ny)) || !this.canStep(nx, ny, c.x, c.y)) continue;
+        dist.set(this.index(nx, ny), dc + 1);
+        queue.push({ x: nx, y: ny });
+      }
+    }
+    let best: Dir = 'right';
+    let bestDist = Infinity;
+    for (const d of dirs) {
+      const nx = this.start.x + DIR_VEC[d].x;
+      const ny = this.start.y + DIR_VEC[d].y;
+      if (!walkable(nx, ny) || !this.canStep(this.start.x, this.start.y, nx, ny)) continue;
+      const nd = dist.get(this.index(nx, ny)) ?? Infinity;
+      if (nd < bestDist) {
+        best = d;
+        bestDist = nd;
+      }
+    }
+    return best;
   }
 }

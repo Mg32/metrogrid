@@ -5,6 +5,7 @@
  *   npm run shot                                 既定の場面をすべて
  *   npm run shot -- --view 12,5,40 --name foo    任意の位置と tick（?view と同じ）。--stage STAGE2 でステージを選ぶ
  *   npm run shot -- --scale 1                    等倍で撮る
+ *   npm run shot -- --only hub                   名前がそれで始まる場面だけ
  */
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -19,6 +20,7 @@ const { values: args } = parseArgs({
     scale: { type: 'string', default: '2' },
     seed: { type: 'string', default: '1' },
     stage: { type: 'string' },
+    only: { type: 'string' },
   },
 });
 
@@ -51,6 +53,11 @@ const SCENES: [string, string][] = args.view
       ['tutorial-start', 'stage=TUTORIAL&view=3,30,0'],
       ['tutorial-fast', 'stage=TUTORIAL&view=16,19,20'],
       ['hub-first', 'stage=HUB&cleared=TUTORIAL&view=6,11,0'],
+      // 拠点に新しい入口が現れる演出（STAGE2 を初めてクリアして戻ったところ。116 BPM で 1tick ≒ 0.13 秒）
+      ['hub-reveal-1', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2&reveal=STAGE2&view=6,8,7'],
+      ['hub-reveal-2', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2&reveal=STAGE2&view=6,8,11'],
+      ['hub-reveal-3', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2&reveal=STAGE2&view=6,8,15'],
+      ['hub-reveal-stairs', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4,STAGE5&reveal=STAGE5&view=6,10,11'],
       ['hub-all', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4&total=48210&view=6,8,0'],
       // STAGE 3：時代の重なった通り
       ['s3-start', 'stage=STAGE3&view=9,65,0'],
@@ -93,7 +100,7 @@ const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'msed
 
 try {
   const page = await browser.newPage({ viewport: { width: 288 * scale, height: 288 * scale }, deviceScaleFactor: 1 });
-  for (const [name, query] of SCENES) {
+  for (const [name, query] of SCENES.filter(([n]) => !args.only || n.startsWith(args.only))) {
     await page.goto(`${base}?seed=${args.seed}&${query}`);
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
     const file = path.join(outDir, `${name}.png`);

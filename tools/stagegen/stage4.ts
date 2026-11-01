@@ -163,9 +163,10 @@ L.thing('porch_lamp', [1, 104]); // 勝手口の軒灯
 
 // ── 危険物
 // 春：色あせた鯉のぼりが、物干し台の下の斜面Aの上を行き来して泳ぐ（揺れる型）。斜面は戻れないので、正面から鉢合わせて
-// 逃げ場がなくならないよう、振り切ると斜面の外へ出る（企画書 第2.2節）
+// 逃げ場がなくならないよう、振り切ると斜面の外へ出る（企画書 第2.2節）。鯉のぼりはプレイヤー（八分）より遅い
+// （周期 > 4π × 振れ幅）ので、斜面の上の端から振り切ったのを見送ってから下り始めれば、後ろから追いつかれない
 const a = slideA.map(([x, y]) => [x, y >= 46 ? y + 24 + N : y >= 32 ? y + 16 + N : y] as P);
-L.hazard({ type: 'swing', look: 'koinobori', axis: 'x', period: 30, cells: a.filter(([, y]) => y === 90).sort((p, q) => p[0] - q[0]) });
+L.hazard({ type: 'swing', look: 'koinobori', axis: 'x', reach: 4.5, period: 60, cells: a.filter(([, y]) => y === 90).sort((p, q) => p[0] - q[0]) });
 // 秋：熟して落ちる柿の実（定位置型）。柿の木の枝から網目の道へ落ちる
 const rand = createRandom(4);
 const kaki = (cell: P, tree: P) => {

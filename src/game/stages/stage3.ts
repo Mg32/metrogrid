@@ -436,7 +436,7 @@ export const stage3: StageDef = {
     c: {value: 550, decay: 3, pick: 3},
   },
   hazards: [
-    {type: 'swing', look: 'tram', axis: 'x', period: 56, reach: 6, cells: [[15, 54], [16, 54], [17, 54], [18, 54], [19, 54], [20, 54], [21, 54], [22, 54], [23, 54]]},
+    {type: 'swing', look: 'tram', axis: 'x', period: 86, reach: 6, cells: [[15, 54], [16, 54], [17, 54], [18, 54], [19, 54], [20, 54], [21, 54], [22, 54], [23, 54]]},
     {type: 'periodic', look: 'barrier', cells: [[34, 58]], pivot: [33, 58], period: 36, from: 10, to: 24},
     {type: 'periodic', look: 'barrier', cells: [[11, 39]], pivot: [10, 39], period: 40, from: 13, to: 27},
     {type: 'periodic', look: 'barrier', cells: [[35, 31]], pivot: [34, 31], period: 44, from: 11, to: 25},
