@@ -15,6 +15,7 @@ import {
   plotLine,
   strokeDiamond,
   strokeIsoRing,
+  strokeRect,
   TH,
   TW,
 } from './pixel.ts';
@@ -651,8 +652,6 @@ export class Renderer {
   /** 拡大表示の配置（実画素）。自動テストでの検査用 */
   /** これまでに溜めた得点の総計（拠点の画面に出す）。main.ts が設定する */
   totalScore = 0;
-  /** タッチで遊んでいるか（ボタンを出し、キーの案内を出さない）。main.ts が設定する */
-  touchUI = false;
 
   /** ページ上の座標（clientX, clientY）→ 288x288 のバッファ上の座標 */
   toBuffer(clientX: number, clientY: number): { x: number; y: number } {
@@ -696,25 +695,38 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  /** タッチ用のボタン（バッファ上の矩形）。selected は選んでいる状態（確認の YES など） */
-  buttons(list: { label: string; x: number; y: number; w: number; h: number; selected?: boolean }[]): void {
+  /**
+   * タップできるボタン（バッファ上の矩形）。selected は選んでいる状態（確認の YES など）。
+   * keyLabel は同じことができるキーの名前で、四角で囲んでラベルの左に添える
+   */
+  buttons(list: { label: string; keyLabel: string; x: number; y: number; w: number; h: number; selected?: boolean }[]): void {
     const ctx = this.lctx;
     for (const b of list) {
-      // ラベルのないボタンは、もとからある文字を枠で囲むだけ（下地を塗らない）
+      const color = b.selected ? COLORS.gem : COLORS.text;
+      const capW = textWidth(b.keyLabel, 1) + 4;
+      // ラベルのないボタンは、もとからある文字を枠で囲むだけ（下地を塗らない）。キーの名前は枠の下に
       if (b.label) {
         ctx.globalAlpha = 0.7;
         ctx.fillStyle = COLORS.bg;
         ctx.fillRect(b.x, b.y, b.w, b.h);
         ctx.globalAlpha = 1;
       }
-      const edge = b.selected ? COLORS.gem : COLORS.dot;
-      ctx.fillStyle = edge;
-      ctx.fillRect(b.x, b.y, b.w, 1);
-      ctx.fillRect(b.x, b.y + b.h - 1, b.w, 1);
-      ctx.fillRect(b.x, b.y, 1, b.h);
-      ctx.fillRect(b.x + b.w - 1, b.y, 1, b.h);
-      this.text(b.label, b.x + b.w / 2, b.y + b.h / 2, 1, b.selected ? COLORS.gem : COLORS.text, 'center');
+      strokeRect(ctx, b.x, b.y, b.w, b.h, b.selected ? COLORS.gem : COLORS.dot);
+      if (b.label) {
+        const x0 = Math.round(b.x + (b.w - capW - 4 - textWidth(b.label, 1)) / 2);
+        this.keycap(b.keyLabel, x0, b.y + b.h / 2, color);
+        this.text(b.label, x0 + capW + 4, b.y + b.h / 2, 1, color);
+      } else {
+        this.keycap(b.keyLabel, Math.round(b.x + b.w / 2 - capW / 2), b.y + b.h + 7, color);
+      }
     }
+  }
+
+  /** 四角で囲んだキーの名前。left は枠の左端、cy は文字の縦中央 */
+  private keycap(key: string, left: number, cy: number, color: string): void {
+    const top = Math.round(cy) - 4;
+    strokeRect(this.lctx, left, top, textWidth(key, 1) + 4, 9, color);
+    this.text(key, left + 2, top + 4.5, 1, color);
   }
 
   get layout(): { scale: number; ox: number; oy: number; width: number; height: number } {
@@ -2295,16 +2307,14 @@ export class Renderer {
       this.text('HOME', 6, 7, 1, COLORS.textDim);
       // これまでに溜めた得点の総計（エンディングで使われる値）
       this.text(`TOTAL ${String(this.totalScore).padStart(7, '0')}`, 6, 15, 1, COLORS.gem);
-      if (!this.touchUI) this.text('ESC: TITLE', LW - 6, 7, 1, COLORS.textDim, 'right');
       return;
     }
     if (sim.stage.kind === 'tutorial') {
-      if (!this.touchUI) this.text('S: SKIP TUTORIAL', LW / 2, LH - 10, 1, COLORS.textDim, 'center');
       // 案内：いちばん近い1つを、近づいたときだけ画面の下に字幕で出す
       let best: { text: string; d: number } | null = null;
       for (const h of sim.stage.def.hints ?? []) {
         const d = Math.abs(h.x - sim.x) + Math.abs(h.y - sim.y);
-        if (d <= 3 && (!best || d < best.d)) best = { text: (this.touchUI && h.touch) || h.text, d };
+        if (d <= 3 && (!best || d < best.d)) best = { text: h.text, d };
       }
       if (best) {
         const ctx = this.lctx;

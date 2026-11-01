@@ -17,6 +17,15 @@ export function fillDiamond(ctx: CanvasRenderingContext2D, cx: number, top: numb
   }
 }
 
+/** 矩形の輪郭（太さ1） */
+export function strokeRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string): void {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, w, 1);
+  ctx.fillRect(x, y + h - 1, w, 1);
+  ctx.fillRect(x, y, 1, h);
+  ctx.fillRect(x + w - 1, y, 1, h);
+}
+
 /** 菱形の輪郭。from〜to で描く行を絞れる（下半分だけ、など） */
 export function strokeDiamond(ctx: CanvasRenderingContext2D, cx: number, top: number, w: number, h: number, color: string, from = 0, to = h): void {
   ctx.fillStyle = color;

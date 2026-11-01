@@ -12,11 +12,13 @@ const CASES = [
   { viewport: { width: 1300, height: 1250 }, dpr: 1, scale: 4 },
   { viewport: { width: 1280, height: 720 }, dpr: 1.25, scale: 3 },
   { viewport: { width: 800, height: 600 }, dpr: 2, scale: 4 },
+  // スマホ（縦長、タッチ）
+  { viewport: { width: 390, height: 844 }, dpr: 3, scale: 4, mobile: true },
 ];
 
 for (const c of CASES) {
   test.describe(`${c.viewport.width}x${c.viewport.height} @${c.dpr}x`, () => {
-    test.use({ viewport: c.viewport, deviceScaleFactor: c.dpr });
+    test.use({ viewport: c.viewport, deviceScaleFactor: c.dpr, ...(c.mobile ? { isMobile: true, hasTouch: true } : {}) });
 
     test(`x${c.scale}（実画素）でドットがくっきり表示される`, async ({ page }) => {
       await page.goto('/?seed=1&view=10,9,20');

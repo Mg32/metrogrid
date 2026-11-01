@@ -28,8 +28,8 @@ const { values: args } = parseArgs({
 const SCENES: [string, string][] = args.view
   ? [[args.name, `view=${args.view}${args.stage ? `&stage=${args.stage}` : ''}`]]
   : [
-      ['title', ''],
-      ['title-progress', 'cleared=TUTORIAL,STAGE1,STAGE2,STAGE3'],
+      ['title', 'title=0.5'],
+      ['title-progress', 'title=0.5&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3'],
       ['tutorial-stop', 'stage=TUTORIAL&view=11,13,60'],
       ['tutorial-stop-on', 'stage=TUTORIAL&view=11,11,60'],
       // STAGE 1：家の前の路地と公園（昼 → 午後 → 日没前）

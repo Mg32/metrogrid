@@ -15,7 +15,7 @@ import { CLEAR, Renderer, revealEnd } from './render/renderer.ts';
 import { Stick } from './touch.ts';
 
 /**
- * 遊ぶ流れ：タイトル →（はじめてならチュートリアル。S でスキップ）→ 拠点（家の中）→ 入口からステージへ → 結果 → 拠点へ戻る
+ * 遊ぶ流れ：タイトル →（はじめてならチュートリアル。Esc でスキップ）→ 拠点（家の中）→ 入口からステージへ → 結果 → 拠点へ戻る
  * ステージ5をクリアすると拠点に二階への階段が現れ、上り口で「本当に二階へ昇る？」と確かめてエンディングへ（企画書 第2.3節・第4.6節）。
  * エンディングのあとは、ガレキだけが残った画面のまま（崩壊後の画面。第2.4節で暫定合意：操作はできず、案内も出さない）。
  * クリアの記録は書き換えないので、ページを読み込み直すと階段が現れた時点（家がそろった状態）に戻る
@@ -28,6 +28,7 @@ import { Stick } from './touch.ts';
  *   ?view=X,Y,TICK    音を鳴らさず、TICK まで何もせず進めた状態でプレイヤーを (X,Y) に置いて静止表示する
  *   ?clear=SEC        音を鳴らさず、ゴールしてから SEC 秒後のクリア演出を静止表示する
  *   ?ending=SEC       音を鳴らさず、エンディングの SEC 秒目を静止表示する
+ *   ?title=SEC        タイトルの SEC 秒目を止めて表示する（星のまたたきや文字の点滅を止める。操作はできる）
  *   ?total=N          これまでに溜めた得点をこの値に差し替える（保存しない）
  *   ?bpm=N            ステージ（拠点以外）の BPM をこの値にする（曲を作る前に試す用。ステージの定義は変えない）
  *   ?bars=N           ステージ（拠点以外）の長さ（小節）をこの値にする
@@ -35,10 +36,11 @@ import { Stick } from './touch.ts';
  *                     ?cleared を付けなければクリアの記録を差し替えたことになり、保存しない）
  */
 /*
- * タッチ（スマホ）での操作
- *   歩く：画面のどこかに指を置き、そのまま指をずらした向きへ歩く（右上へずらすと上、右下は右、左下は下、左上は左。
+ * タッチ・マウスでの操作（デスクトップでもスマホでも、画面と操作は同じ。端末で分けない）
+ *   歩く：画面のどこかに指を置き（マウスなら押し）、そのままずらした向きへ歩く（右上へずらすと上、右下は右、左下は下、左上は左。
  *         クォータービューの画面の斜めにそのまま対応する）。指を離すか、置いたところへ戻すと止まる（src/touch.ts）
- *   キーの代わり：画面の下の隅のボタン（戻る、やり直す、チュートリアルを飛ばす）。それ以外の場面ではタップが Enter の代わり
+ *   キーの代わり：画面の下の隅のボタン（戻る、やり直す、チュートリアルを飛ばす。タイトルでは記録を消す、チュートリアルを飛ばす・遊ぶ）。
+ *         ボタンはいつでも出し、同じことができるキーを四角で囲んで添える。それ以外の場面ではタップ・クリックが Enter の代わり
  *   二階へ昇るかの確認は、YES を2回タップで決まる（取り返しがつかないので、うっかり1回では決まらないようにする）
  */
 const params = new URLSearchParams(location.search);
@@ -82,9 +84,6 @@ const stageLabel = (name: string) => name.replace(/(\d+)$/, ' $1');
 
 type Scene = 'title' | 'loading' | 'play' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
 
-/** タッチで遊んでいるか（はじめから指で操作する端末か、一度でも画面に触れたら） */
-let touchUI = matchMedia('(pointer: coarse)').matches;
-renderer.touchUI = touchUI;
 /** 歩く向きを決めている指 */
 let steer: Stick | null = null;
 
@@ -92,6 +91,8 @@ interface Button {
   label: string;
   /** 押したことにするキー */
   key: string;
+  /** ボタンに四角で囲んで添えるキーの名前（キーボードでも同じことができると分かるように） */
+  keyLabel: string;
   x: number;
   y: number;
   w: number;
@@ -102,25 +103,33 @@ interface Button {
 /** ボタンの大きさ（バッファのドット）。スマホで指で押しやすいように大きめ */
 const BTN_W = 60;
 const BTN_H = 22;
-const left = (label: string, key: string): Button => ({ label, key, x: 4, y: 288 - BTN_H - 4, w: BTN_W, h: BTN_H });
-const right = (label: string, key: string): Button => ({ label, key, x: 288 - BTN_W - 4, y: 288 - BTN_H - 4, w: BTN_W, h: BTN_H });
+/** ボタンに添えるキーの名前 */
+const KEY_LABEL: Record<string, string> = { Delete: 'DEL', Escape: 'ESC', KeyR: 'R', KeyT: 'T', KeyY: 'Y', KeyN: 'N' };
+const left = (label: string, key: string, w = BTN_W): Button => ({ label, key, keyLabel: KEY_LABEL[key], x: 4, y: 288 - BTN_H - 4, w, h: BTN_H });
+const right = (label: string, key: string, w = BTN_W): Button => ({ label, key, keyLabel: KEY_LABEL[key], x: 288 - w - 4, y: 288 - BTN_H - 4, w, h: BTN_H });
 
-/** いまの場面のボタン（タイトルの RESET と確認の YES・NO はいつでも、ほかはタッチで遊んでいるときだけ） */
-function touchButtons(): Button[] {
-  if (scene === 'title') return [{ ...left('RESET', 'Delete'), w: 40 }];
+/**
+ * いまの場面のボタン。タッチでもマウスでも押せるよう、いつでも出す（キーボードだけ・タップだけ・マウスだけで遊べるように）。
+ * どのボタンにも、同じことができるキーを四角で囲んで添える
+ */
+function screenButtons(): Button[] {
+  if (scene === 'title') {
+    // はじめてならチュートリアルを飛ばせる。チュートリアルを済ませていれば、もう一度遊べる
+    return [left('RESET', 'Delete'), cleared.has(tutorial.name) ? right('TUTORIAL', 'KeyT') : right('SKIP TUTORIAL', 'Escape', 76)];
+  }
   if (scene === 'confirm') {
-    // 確認の画面の YES・NO の文字を囲む。YES は選んでから、もう一度で決まる
+    // 確認の画面の YES・NO の文字を囲む（キーの名前は枠の下）。YES は選んでから、もう一度で決まる
     return [
-      { label: '', key: confirmYes ? 'Enter' : 'ArrowLeft', x: 288 / 2 - 62, y: 288 / 2 + 11, w: 64, h: 19, selected: confirmYes },
-      { label: '', key: 'Escape', x: 288 / 2 + 6, y: 288 / 2 + 11, w: 56, h: 19 },
+      { label: '', key: 'KeyY', keyLabel: 'Y', x: 288 / 2 - 62, y: 288 / 2 + 11, w: 64, h: 19, selected: confirmYes },
+      { label: '', key: 'KeyN', keyLabel: 'N', x: 288 / 2 + 6, y: 288 / 2 + 11, w: 56, h: 19 },
     ];
   }
-  if (!touchUI) return [];
   // クリアしたあとはホームへ戻るだけ（やり直しは拠点の入口から）。時間切れならやり直せる
   if (scene === 'result') return sim?.status === 'cleared' ? [left('HOME', 'Escape')] : [left('HOME', 'Escape'), right('RETRY', 'KeyR')];
-  if (scene === 'play' && sim) {
+  // 静止表示（?view）でも、遊んでいるときと同じボタンを出す
+  if ((scene === 'play' || scene === 'view') && sim) {
     if (sim.stage.kind === 'hub') return [left('TITLE', 'Escape')];
-    if (sim.stage.kind === 'tutorial') return [left('BACK', 'Escape'), right('SKIP', 'KeyS')];
+    if (sim.stage.kind === 'tutorial') return [left('SKIP', 'Escape'), right('RETRY', 'KeyR')];
     return [left('HOME', 'Escape'), right('RETRY', 'KeyR')];
   }
   return [];
@@ -165,6 +174,8 @@ function resetAll(): void {
 /** エンディングが始まった時刻（performance.now() の秒）。?ending では固定の経過秒 */
 let endingAt = 0;
 let fixedEndingSec: number | null = null;
+/** ?title=SEC：タイトルを止めて表示する秒 */
+const fixedTitleSec = params.has('title') ? Number(params.get('title')) : null;
 
 function endingSec(): number {
   return fixedEndingSec ?? performance.now() / 1000 - endingAt;
@@ -291,7 +302,7 @@ function resultContinue(s: Sim): void {
 }
 
 /**
- * 結果画面で Esc（スマホでは HOME）：拠点へ戻る。ステージからは、?stage で直接遊んでいたときも拠点へ
+ * 結果画面で Esc（HOME ボタン）：拠点へ戻る。ステージからは、?stage で直接遊んでいたときも拠点へ
  * （拠点の、そのステージの入口の前に立つ）。?stage で直接遊んでいたチュートリアルなどはタイトルへ
  */
 function resultBack(s: Sim): void {
@@ -308,13 +319,9 @@ window.addEventListener('keydown', unlockAudio);
 
 canvas.addEventListener('pointerdown', (e) => {
   unlockAudio();
-  if (e.pointerType !== 'mouse') {
-    touchUI = true;
-    renderer.touchUI = true;
-  }
   e.preventDefault();
   const b = renderer.toBuffer(e.clientX, e.clientY);
-  const hit = touchButtons().find((btn) => b.x >= btn.x && b.x < btn.x + btn.w && b.y >= btn.y && b.y < btn.y + btn.h);
+  const hit = screenButtons().find((btn) => b.x >= btn.x && b.x < btn.x + btn.w && b.y >= btn.y && b.y < btn.y + btn.h);
   if (hit) {
     input.press(hit.key);
     return;
@@ -348,13 +355,12 @@ function update(): void {
   const start = input.consumePressed('Enter') || input.consumePressed('Space');
   const esc = input.consumePressed('Escape');
   const retry = input.consumePressed('KeyR');
-  const skip = input.consumePressed('KeyS');
   const tut = input.consumePressed('KeyT');
 
   if (scene === 'title') {
     if (input.consumePressed('Delete') || input.consumePressed('Backspace')) openReset();
     else if (start) startGame();
-    else if (skip && !cleared.has(tutorial.name)) skipTutorial();
+    else if (esc && !cleared.has(tutorial.name)) skipTutorial();
     else if (tut && cleared.has(tutorial.name)) void play(tutorial);
   } else if (scene === 'result' && sim) {
     const e = clearSec();
@@ -366,11 +372,16 @@ function update(): void {
     else if (retry && sim.status !== 'cleared') void play(sim.stage.def);
     else if (esc) resultBack(sim);
   } else if (scene === 'confirm') {
-    // 左右で選び、Enter で決める。Esc は「いいえ」
+    // 左右で選び、Enter で決める。Esc・N は「いいえ」。Y は YES のボタンと同じ（選んでから、もう一度で決まる）
     if (input.consumePressed('ArrowLeft') || input.consumePressed('KeyA')) confirmYes = true;
     if (input.consumePressed('ArrowRight') || input.consumePressed('KeyD')) confirmYes = false;
-    const no = esc || (start && !confirmYes);
-    if (start && confirmYes) {
+    let yes = input.consumePressed('KeyY');
+    if (yes && !confirmYes) {
+      confirmYes = true;
+      yes = false;
+    }
+    const no = esc || input.consumePressed('KeyN') || (start && !confirmYes);
+    if ((start || yes) && confirmYes) {
       if (confirmKind === 'upstairs') startEnding();
       else resetAll();
     } else if (no) {
@@ -386,12 +397,12 @@ function update(): void {
   } else if (scene === 'play' && sim) {
     const kind = sim.stage.kind;
     if (esc) {
-      // ステージからは拠点へ（?stage で直接遊んでいたときも）。チュートリアルと拠点からはタイトルへ
+      // ステージからは拠点へ（?stage で直接遊んでいたときも）。チュートリアルは飛ばして拠点へ。拠点からはタイトルへ
       if (kind === 'stage') goHub(sim.stage.def.name);
+      else if (kind === 'tutorial') skipTutorial();
       else toTitle();
       return;
     }
-    if (kind === 'tutorial' && skip) return skipTutorial();
     if (retry && kind !== 'hub') {
       void play(sim.stage.def);
       return;
@@ -422,10 +433,10 @@ function update(): void {
 
 /** タイトル：闇に浮かぶ家と、その前に立つ少女。窓の明かりはクリアしたステージの数 */
 function drawTitle(): void {
-  // 遊び方は文字で書かず、チュートリアルで覚えてもらう（チュートリアルは途中でも S・SKIP で飛ばせる）
+  // 遊び方は文字で書かず、チュートリアルで覚えてもらう（チュートリアルは途中でも Esc・SKIP で飛ばせる）
   const dev = devDef();
-  const go = touchUI ? 'TAP TO START' : 'PRESS ENTER';
-  renderer.title(performance.now() / 1000, {
+  const go = 'PRESS ENTER OR TAP';
+  renderer.title(fixedTitleSec ?? performance.now() / 1000, {
     cleared: STAGE_ORDER.filter((d) => cleared.has(d.name)).length,
     collapsed: false,
     prompt: dev ? `${go} - DEV: ${stageLabel(dev.name)}` : go,
@@ -462,7 +473,7 @@ function draw(): void {
         sim,
         e,
         newlyUnlocked ? `A NEW DOOR AT HOME: ${stageLabel(newlyUnlocked)}` : null,
-        touchUI ? 'TAP: GO HOME' : 'ENTER: GO HOME',
+        'ENTER / TAP: GO HOME',
       );
     } else {
       renderer.overlay([
@@ -472,13 +483,13 @@ function draw(): void {
         { text: 'NO GOAL (SCORE KEPT)', color: '#8d857a' },
         { text: `MISS ${sim.misses}`, color: '#8d857a' },
         { text: '' },
-        { text: touchUI ? 'TAP: RETRY' : 'ENTER: RETRY   ESC: HOME', color: '#e3c56e' },
+        { text: 'ENTER / TAP: RETRY', color: '#e3c56e' },
       ]);
     }
   }
 
   if (scene === 'play' && steer) renderer.stick(steer);
-  renderer.buttons(touchButtons());
+  renderer.buttons(screenButtons());
   renderer.present();
 }
 
