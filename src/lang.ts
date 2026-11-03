@@ -2,7 +2,8 @@
  * 画面に出す文（日本語と英語）。タイトル画面で切り替え、このブラウザに残す（?lang=ja・?lang=en
  * で試せる。保存しない）。 日本語の文は「みにもっちり」、英語の文は 3x5
  * のドットフォントで描かれる（src/render/font.ts）。
- * はじめは、ブラウザの言語が日本語なら日本語、それ以外は英語
+ * はじめは、ブラウザの言語の設定で決まる（優先する順に見て、日本語と英語のうち先に出てくるほう。どちらもなければ英語）。
+ * 一度切り替えると、そのあとはこのブラウザに残した言語になる
  */
 export type Lang = 'ja'|'en';
 
@@ -109,8 +110,17 @@ function initial(): Lang {
   } catch {
     // localStorage が使えない環境では、ブラウザの言語から決める
   }
-  const langs = globalThis.navigator?.languages ?? [];
-  return langs.some((l) => l.toLowerCase().startsWith('ja')) ? 'ja' : 'en';
+  return fromBrowser(globalThis.navigator?.languages ?? [globalThis.navigator?.language ?? '']);
+}
+
+/** ブラウザの言語の設定（優先する順）から：日本語と英語のうち、先に出てくるほう。どちらもなければ英語 */
+export function fromBrowser(langs: readonly string[]): Lang {
+  for (const l of langs) {
+    const code = l.toLowerCase();
+    if (code.startsWith('ja')) return 'ja';
+    if (code.startsWith('en')) return 'en';
+  }
+  return 'en';
 }
 
 let current: Lang = initial();
