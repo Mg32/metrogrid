@@ -1120,6 +1120,8 @@ export class Renderer {
           const pulse = 1 - (tickF % TICKS_PER_BEAT) / TICKS_PER_BEAT;
           const land = landAt(x, y);
           const flash = land === null ? null : (songTime - land) / REVEAL.flash;
+          const flashing = flash !== null && flash >= 0 && flash < 1;
+          const flashColor = PORTAL_LIGHT[target] ?? COLORS.goal;
           sprites.push({
             depth: x + y + 0.3,
             draw: () => {
@@ -1127,10 +1129,25 @@ export class Renderer {
               if (target === 'UPSTAIRS') this.stairs(sx, sy);
               else this.goalDoor(sx, sy, pulse, PORTAL_LIGHT[target]);
               ctx.globalAlpha = 1;
-              // 二階への階段は光の柱を立てない（足もとの輪だけ）
-              if (flash !== null && flash >= 0 && flash < 1) this.revealFlash(sx, sy, flash, PORTAL_LIGHT[target] ?? COLORS.goal, target !== 'UPSTAIRS');
             },
           });
+          if (flashing) {
+            // 現れた入口の光。足もとから広がる輪は、入口のまわりのいくつものマスの床にかかるので、輪のドットを乗っているマスの列に
+            // 分け、それぞれの列の道のすぐあと（その列に立つ物より前）に描く。入口のマスの順番でまとめて描くと、手前の列の道に隠れる
+            for (const [d, dots] of this.revealRing(x, y, sx, sy, flash)) {
+              sprites.push({
+                depth: d + 0.05,
+                draw: () => {
+                  ctx.globalAlpha = 0.8 * (1 - flash);
+                  ctx.fillStyle = flashColor;
+                  for (const [dx, dy] of dots) ctx.fillRect(dx, dy, 2, 1);
+                  ctx.globalAlpha = 1;
+                },
+              });
+            }
+            // 光の柱は戸口から上へ立つので、戸口のすぐあとに。二階への階段は光の柱を立てない（足もとの輪だけ）
+            if (target !== 'UPSTAIRS') sprites.push({ depth: x + y + 0.35, draw: () => this.revealPillar(sx, sy, flash, flashColor) });
+          }
           if (Math.max(Math.abs(x - px), Math.abs(y - py)) <= 3 && (flash === null || flash >= 0)) {
             labels.push({ x: sx, y: sy - 30, text: msg().stage(target), color: target === 'UPSTAIRS' ? COLORS.textDim : COLORS.text });
             const note = this.portalNote(target);
@@ -2343,24 +2360,46 @@ export class Renderer {
     return gate;
   }
 
-  /** 拠点に現れた入口が放つ光：光の柱（pillar のとき）と、足もとから広がる輪。k は 0〜1（1 で消える） */
-  private revealFlash(sx: number, sy: number, k: number, light: string, pillar: boolean): void {
+  /** 拠点に現れた入口が放つ光の柱。k は 0〜1（1 で消える） */
+  private revealPillar(sx: number, sy: number, k: number, light: string): void {
     const ctx = this.lctx;
     const g = sy + TH / 2;
     const fade = 1 - k;
     ctx.fillStyle = light;
-    for (let r = 0; pillar && r < BEACON_H; r += 2) {
+    for (let r = 0; r < BEACON_H; r += 2) {
       const a = fade * (1 - r / BEACON_H);
       ctx.globalAlpha = 0.3 * a;
       ctx.fillRect(sx - 6, g - 22 - r - 2, 12, 2);
       ctx.globalAlpha = 0.9 * a;
       ctx.fillRect(sx - 2, g - 22 - r - 2, 4, 2);
     }
-    // 足もとから広がる輪
-    const w = 2 * Math.round(TW / 2 + k * TW);
-    ctx.globalAlpha = 0.8 * fade;
-    strokeDiamond(ctx, sx, g - w / 4, w, w / 2, light);
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * 拠点に現れた入口 (x, y) の足もとから広がる輪（菱形の線。k は 0〜1 で、入口のマスの大きさから 3 マス幅まで広がる）のドットを、
+   * 乗っているマスの斜めの列（x + y）ごとに分けて返す。sx, sy は入口のマスの上の頂点。ドットは幅 2・高さ 1
+   */
+  private revealRing(x: number, y: number, sx: number, sy: number, k: number): Map<number, [number, number][]> {
+    const w = 2 * Math.round(TW / 2 + k * TW);
+    const h = w / 2;
+    const cy = sy + TH / 2;
+    const top = cy - w / 4;
+    const byDiag = new Map<number, [number, number][]>();
+    for (let r = 0; r < h; r++) {
+      const rw = diamondRowWidth(r, w, h);
+      for (const left of [sx - rw / 2, sx + rw / 2 - 2]) {
+        const dotY = top + r;
+        // ドットの中心が、入口のマスの中心から何マスずれているか（iso の逆）
+        const u = (left + 1 - sx) / (TW / 2);
+        const v = (dotY + 0.5 - cy) / (TH / 2);
+        const d = x + y + Math.floor((u + v) / 2 + 0.5) + Math.floor((v - u) / 2 + 0.5);
+        let dots = byDiag.get(d);
+        if (!dots) byDiag.set(d, (dots = []));
+        dots.push([left, dotY]);
+      }
+    }
+    return byDiag;
   }
 
   /** 回旋塔の柱 */
