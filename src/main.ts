@@ -344,6 +344,9 @@ const unlockAudio = () => {
   sfx.unlock();
 };
 window.addEventListener('keydown', unlockAudio);
+// iOS の Safari は、指を置いたとき（pointerdown）ではなく離したときにしか音を鳴らせるようにしない
+window.addEventListener('pointerup', unlockAudio);
+window.addEventListener('touchend', unlockAudio);
 
 canvas.addEventListener('pointerdown', (e) => {
   unlockAudio();
