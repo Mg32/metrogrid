@@ -27,6 +27,15 @@ const MAX_MULTIPLIER = 4;
 export const GOAL_BONUS_PER_BEAT = 2;
 
 /**
+ * ゴールしたときのボーナス。remainingTicks は曲の終わりまでの tick。
+ * 終わりの1小節前から数えた残りの拍（切り捨て）× GOAL_BONUS_PER_BEAT。最後の小節でゴールしたら 0
+ * （得点マスを取らずに、曲の最後まで使ってクリアすれば 0 点になる）
+ */
+export function goalBonusAt(remainingTicks: number): number {
+  return Math.max(0, Math.floor((remainingTicks - TICKS_PER_BAR) / TICKS_PER_BEAT)) * GOAL_BONUS_PER_BEAT;
+}
+
+/**
  * ゲームロジック本体。描画や音に依存せず、同じステージ・乱数のシード・入力列なら必ず同じ結果になる。
  * random は危険物の開始位置のずらしにだけ使う（createRandom(seed) を渡す）。
  */
@@ -58,6 +67,8 @@ export class Sim {
   streak = 0;
   misses = 0;
   goalBonus = 0;
+  /** ゴールしたときの曲の残りの拍（切り捨て） */
+  goalBeatsLeft = 0;
   /** ハブで入った入口の行き先のステージ名 */
   portal: string | null = null;
   events: SimEvent[] = [];
@@ -229,8 +240,8 @@ export class Sim {
         this.status = 'portal';
         break;
       case 'goal': {
-        const remainingBeats = Math.floor((this.totalTicks - t) / TICKS_PER_BEAT);
-        this.goalBonus = remainingBeats * GOAL_BONUS_PER_BEAT;
+        this.goalBeatsLeft = Math.floor((this.totalTicks - t) / TICKS_PER_BEAT);
+        this.goalBonus = goalBonusAt(this.totalTicks - t);
         this.score += this.goalBonus;
         this.status = 'cleared';
         break;

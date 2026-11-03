@@ -3,7 +3,7 @@ import { describe, test } from 'node:test';
 import { FLOW_JUMP, FlowHazard } from '../src/game/hazard.ts';
 import { Sim } from '../src/game/sim.ts';
 import { Stage, type StageDef } from '../src/game/stage.ts';
-import type { Dir } from '../src/game/types.ts';
+import { TICKS_PER_BAR, type Dir } from '../src/game/types.ts';
 
 /** 1行のテスト用ステージ。危険物の開始位置のずらしは 0 */
 function mk(terrain: string, objects: string, hazards: StageDef['hazards'] = []): Sim {
@@ -141,11 +141,24 @@ describe('得点と終了', () => {
     assert.equal(s.multiplier, 3);
   });
 
-  test('ゴールでクリアし、残り拍数のボーナスが入る', () => {
+  test('ゴールでクリアし、終わりの1小節前から数えた残り拍数のボーナスが入る', () => {
     const s = mk('#...#', ' S G');
     run(s, 0, 9, 'right');
     assert.equal(s.status, 'cleared');
-    assert.equal(s.goalBonus, 31 * 2);
+    // 8小節（32拍）のうち t4 でゴール：残り 31 拍、1小節前からは 27 拍
+    assert.equal(s.goalBeatsLeft, 31);
+    assert.equal(s.goalBonus, 27 * 2);
+  });
+
+  test('最後の小節でゴールすると、ゴールボーナスは 0', () => {
+    const s = mk('#...#', ' S G');
+    // 曲の終わりの1小節前まで待ってから歩き出す（2歩目でゴール。曲の残りは 3 拍）
+    const last = s.totalTicks - TICKS_PER_BAR;
+    run(s, 0, last, null);
+    run(s, last, last + 9, 'right');
+    assert.equal(s.status, 'cleared');
+    assert.equal(s.goalBonus, 0);
+    assert.equal(s.goalBeatsLeft, 3);
   });
 
   test('曲が終わると時間切れ', () => {

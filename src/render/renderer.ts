@@ -1,5 +1,5 @@
 import { FLOW_JUMP, FlowHazard, PatrolHazard, PeriodicHazard, SwingHazard } from '../game/hazard.ts';
-import { GOAL_BONUS_PER_BEAT, type Sim } from '../game/sim.ts';
+import type { Sim } from '../game/sim.ts';
 import type { Cell, FloorStyle, PropKind, Stage } from '../game/stage.ts';
 import { DIR_VEC, mod, TICKS_PER_BEAT, ZONE_INTERVAL, type Dir, type Vec, type Zone } from '../game/types.ts';
 import { drawText, GLYPH_H, textWidth } from './font.ts';
@@ -2737,7 +2737,7 @@ export class Renderer {
     this.text([...title].slice(0, Math.floor(t / 0.08)).join(''), LW / 2 - textWidth(title, 3) / 2, 74, 3, COLORS.goal);
     if (t > 0.3) this.text(m.stage(sim.stage.def.name), LW / 2, 94, 1, COLORS.textDim, 'center');
 
-    const remainBeats = sim.goalBonus / GOAL_BONUS_PER_BEAT;
+    const remainBeats = sim.goalBeatsLeft;
     const rows = [
       { label: m.rowScore, value: sim.score - sim.goalBonus, y: 120, prefix: '' },
       { label: m.rowBonus, value: sim.goalBonus, y: 140, prefix: '+', note: m.beatsLeft(remainBeats) },

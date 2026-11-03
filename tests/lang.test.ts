@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { tutorial } from '../src/game/stages/index.ts';
-import { MESSAGES } from '../src/lang.ts';
+import { fromBrowser, MESSAGES } from '../src/lang.ts';
 import { isMottiri, missingGlyphs, textWidth } from '../src/render/font.ts';
 
 /** 文の一覧から、画面に出るすべての文を取り出す（引数のある文は、いちばん長くなりそうな値で） */
@@ -34,4 +34,12 @@ test('文は画面（288 ドット）の幅に収まる', () => {
     for (const s of [MESSAGES[lang].upstairs, MESSAGES[lang].erase]) assert.ok(textWidth(s, 2) <= 280, `${lang}: ${s}`);
     for (const h of tutorial.hints ?? []) assert.ok(textWidth(h.text[lang], 1) <= 280, `${lang}: ${h.text[lang]}`);
   }
+});
+
+test('はじめの言語は、ブラウザの言語の設定で優先する順に、日本語と英語のうち先に出てくるほう', () => {
+  assert.equal(fromBrowser(['ja-JP', 'en-US']), 'ja');
+  assert.equal(fromBrowser(['en-US', 'ja']), 'en');
+  assert.equal(fromBrowser(['fr-FR', 'ja', 'en']), 'ja');
+  assert.equal(fromBrowser(['fr-FR', 'de']), 'en');
+  assert.equal(fromBrowser([]), 'en');
 });

@@ -1,7 +1,7 @@
 import { createRandom } from '../../src/game/random.ts';
-import { GOAL_BONUS_PER_BEAT, Sim } from '../../src/game/sim.ts';
+import { goalBonusAt, Sim } from '../../src/game/sim.ts';
 import type { Stage } from '../../src/game/stage.ts';
-import { TICKS_PER_BEAT, type Dir } from '../../src/game/types.ts';
+import type { Dir } from '../../src/game/types.ts';
 import { DIRS, distanceField } from './nav.ts';
 
 interface Node {
@@ -38,7 +38,7 @@ export function planBeam(stage: Stage, seed: number, width: number): (Dir | null
   // 評価：いまの得点 ＋ いまからゴールへ直行したときのゴールボーナスの見込み
   const evaluate = (s: Sim, t: number): number => {
     const slack = s.totalTicks - t - field[stage.index(s.x, s.y)];
-    return s.score + (slack >= 0 ? Math.floor(slack / TICKS_PER_BEAT) * GOAL_BONUS_PER_BEAT : -1000 + slack);
+    return s.score + (slack >= 0 ? goalBonusAt(slack) : -1000 + slack);
   };
 
   const root: Node = { parent: null, held: null };
