@@ -36,6 +36,7 @@ import { Stick } from './touch.ts';
  *   ?total=N          これまでに溜めた得点をこの値に差し替える（保存しない）
  *   ?bpm=N            ステージ（拠点以外）の BPM をこの値にする（曲を作る前に試す用。ステージの定義は変えない）
  *   ?bars=N           ステージ（拠点以外）の長さ（小節）をこの値にする
+ *   ?loadwait=SEC     曲などの読み込みを SEC 秒遅らせる（暗転したまま読み込み中のときの「LOADING...」の確認用）
  *   ?lang=ja|en       画面の言語をこの言語にする（保存しない。ふだんはタイトルの言語のボタンか L キーで切り替え、このブラウザに残る）
  *   ?upstairs         すべてクリアした拠点の、二階への階段の前から始める（階段 → 確認 → エンディングの確認用。
  *                     ?cleared を付けなければクリアの記録を差し替えたことになり、保存しない）
@@ -52,6 +53,8 @@ const params = new URLSearchParams(location.search);
 const fixedSeed = params.has('seed') ? Number(params.get('seed')) : null;
 const devBpm = params.has('bpm') ? Number(params.get('bpm')) : null;
 const devBars = params.has('bars') ? Number(params.get('bars')) : null;
+/** ?loadwait=SEC：曲などの読み込みを SEC 秒遅らせる（読み込み中の「LOADING...」を確かめる用） */
+const devLoadWait = params.has('loadwait') ? Number(params.get('loadwait')) : 0;
 
 const canvas = document.createElement('canvas');
 document.querySelector<HTMLDivElement>('#app')!.append(canvas);
@@ -233,6 +236,8 @@ let homePart = '';
 let homeTo: () => void = () => {};
 const homeSec = () => fixedTitleSec ?? performance.now() / 1000 - homeAt;
 
+/** 曲などを読み込み始めた時刻（performance.now() の秒）。暗転したまま読み込み、時間がかかれば「LOADING...」を出す */
+let loadingAt = 0;
 /** 遊び始めた時刻（performance.now() の秒）。拠点とチュートリアルは、ここから FADE_IN 秒で闇から明るくなる */
 let playAt = 0;
 
@@ -326,6 +331,7 @@ function newSim(start?: Vec): Sim {
 async function play(def: StageDef, start?: Vec): Promise<void> {
   if (scene === 'loading') return;
   scene = 'loading';
+  loadingAt = performance.now() / 1000;
   conductor.stop();
   sfx.stop();
   input.clearPressed();
@@ -339,6 +345,7 @@ async function play(def: StageDef, start?: Vec): Promise<void> {
   const hub = stage.kind === 'hub';
   // 階段のあるステージ（チュートリアル）は、曲の前に少女が現れる小節を置く（曲もカウントも鳴らさない）
   const waitBars = stage.def.stairs ? APPEAR_BARS : 0;
+  if (devLoadWait > 0) await new Promise((r) => setTimeout(r, devLoadWait * 1000));
   await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: hub ? 0 : 1, waitBars, track: stage.def.name, loop: hub });
   if (renderer.hubReveal?.def === stage.def) {
     const { rise, land } = revealRise(renderer.hubReveal.order);
@@ -662,6 +669,7 @@ function draw(): void {
       if (scene === 'loading') renderer.darken(1);
       else if (scene === 'play') renderer.darken(1 - (performance.now() / 1000 - playAt) / FADE_IN);
     }
+    if (scene === 'loading') renderer.loading(performance.now() / 1000 - loadingAt);
   }
 
   if (scene === 'confirm' && confirmKind === 'upstairs') {

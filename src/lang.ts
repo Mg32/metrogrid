@@ -46,6 +46,8 @@ const EN = {
   wait: 'WAIT',
   stop: 'STOP!',
   cleared: 'CLEARED',
+  // 曲などを読み込むのに時間がかかっているとき、暗転した画面の左下に出す
+  loading: 'LOADING...',
   // エンディングのあと、ガレキの画面の下に出る結びの文（2行）
   epilogue: ['FROM THEN ON, THE TSUKUMOGAMI OF THE HOUSE', 'NEVER APPEARED ANYWHERE AGAIN.'],
   // 得点の総計が 0 のままエンディングに来たときの結びの文（2行）
@@ -91,6 +93,7 @@ const JA: typeof EN = {
   wait: 'WAIT',
   stop: 'STOP!',
   cleared: 'CLEARED',
+  loading: 'LOADING...',
   epilogue: ['それから いえの つくもがみは', 'もう どこにも すがたを みせません。'],
   calmEpilogue: ['いえの つくもがみは そらを ながめました。', 'それから ゆっくりと いきを すいこんだのでした。'],
   stage: (name: string) => name === 'UPSTAIRS' ? '2かい' :

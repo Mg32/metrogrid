@@ -63,3 +63,14 @@ test('静止表示（?view）でエラーが出ない', async ({ page }) => {
   expect([g.sim!.x, g.sim!.y]).toEqual([12, 24]);
   expect(errors).toEqual([]);
 });
+
+test('読み込みに時間がかかっても（?loadwait）、暗転したまま待ってからステージが始まり、エラーが出ない', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto('/?seed=1&stage=STAGE1&autostart&loadwait=1.5');
+  // 「LOADING...」が出るあいだ（暗転して 0.4 秒より後）も、まだ読み込み中
+  await page.waitForTimeout(900);
+  expect((await game(page)).scene).toBe('loading');
+  await frames(page);
+  await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
+  expect(errors).toEqual([]);
+});

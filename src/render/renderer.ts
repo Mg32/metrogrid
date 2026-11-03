@@ -345,6 +345,12 @@ const PORTAL_LIGHT: Record<string, string> = {
  */
 export const LEAVE = { fade: 1.0, end: 1.5 };
 const ARRIVE_BEATS = 2;
+/**
+ * 曲などの読み込みに時間がかかっているときの「LOADING...」（暗転してから delay 秒たっても読み込み中なら出す）。
+ * period 秒ごとに、左から1文字ずつ stagger 秒遅れで、lift 秒かけて hop ドット跳ねる
+ */
+export const LOADING = { delay: 0.4, period: 1.6, stagger: 0.07, lift: 0.28, hop: 3 };
+
 /** 拠点とチュートリアルが闇から明るくなる秒（タイトルや、Esc で戻る演出の闇から続けて始まるとき） */
 export const FADE_IN = 0.5;
 
@@ -2788,6 +2794,20 @@ export class Renderer {
       front: this.girl[GIRL_DIR.down],
       back: this.girl[GIRL_DIR.up],
       raise: this.girlRaise,
+    });
+  }
+
+  /** 読み込み中の「LOADING...」（画面の左下）。sec は暗転してからの秒。文字が左から順に跳ねる波を、LOADING.period ごとにくり返す */
+  loading(sec: number): void {
+    if (sec < LOADING.delay) return;
+    const text = msg().loading;
+    const t = (sec - LOADING.delay) % LOADING.period;
+    [...text].forEach((ch, i) => {
+      // 文字の左端：前の文字までの幅（字間を含む）
+      const x = 6 + (i === 0 ? 0 : textWidth(text.slice(0, i), 1) + 1);
+      const u = (t - i * LOADING.stagger) / LOADING.lift;
+      const dy = u > 0 && u < 1 ? -Math.round(Math.sin(u * Math.PI) * LOADING.hop) : 0;
+      this.text(ch, x, LH - 12 + dy, 1, COLORS.textDim);
     });
   }
 
