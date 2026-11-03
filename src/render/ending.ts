@@ -50,6 +50,28 @@ export const ENDING = {
 };
 
 /**
+ * 得点の総計が 0 のままエンディングに来たときの、別の演出（秒）。家は崩れない。
+ * 少女がベランダに出てきて（ここまでは ENDING と同じ）、しばらくベランダの手すりの前に立っている。
+ * 視点がそのまま上空へ昇っていき、家が画面の外へ出て星だけになったあと、ゆっくりと文が浮かび上がる。
+ * 得点の総計の表示は、はじめは拠点と同じ位置に出ていて、少女が立っているあいだに消える
+ */
+export const ENDING_CALM = {
+  /** 得点の総計の表示が消えていく */
+  totalOut: [4.6, 5.6],
+  /** 視点が上空へ昇っていく（昇りはじめ、止まる）。PAN_H ドットぶん */
+  pan: [7.5, 14.5],
+  /** 文が浮かび上がる（出はじめ、出きる） */
+  text: [15.5, 19.5],
+  /** ここから先は静止画 */
+  end: 19.5,
+};
+/** 視点が昇る高さ（ドット）。家のいちばん上が画面の下の外へ出るまで */
+const PAN_H = 300;
+
+/** エンディングの長さ（秒）。得点の総計が 0 なら別の演出 */
+export const endingEnd = (total: number): number => (total === 0 ? ENDING_CALM.end : ENDING.end);
+
+/**
  * タイトルから始めるときの演出（押してからの秒）。少女が振り返り（turn）、玄関の引き戸に明かりがともって（door）、
  * 少女が戸口へ歩いて家の中へ消える（walk）。ロゴと案内の文は薄れて消え（logo）、画面が闇に沈む（fade）。end で拠点などへ。
  * 拠点（家の中）は闇から明るくなって始まる（renderer の FADE_IN）
@@ -90,10 +112,13 @@ export const HOUSE_PARTS = ['STAGE1', 'STAGE2', 'STAGE3', 'STAGE4', 'STAGE5'];
 interface HouseLook {
   restored: (part: string) => number;
   lit: boolean;
+  /** 得点の総計が 0 のときのエンディング（ENDING_CALM）：少女はベランダに出たまま戻らず、ガラス戸も開いたまま */
+  calm?: boolean;
 }
 
 /** エンディング：すべての部分が戻っていて、明かりはついていない */
 const ENDING_LOOK: HouseLook = { restored: () => 1, lit: false };
+const CALM_LOOK: HouseLook = { ...ENDING_LOOK, calm: true };
 
 export interface TitleOpts {
   /** 家の部分ごとの戻り具合（0〜1。HOUSE_PARTS） */
@@ -240,6 +265,68 @@ function lightAt(t: number): number {
 function usedAt(t: number): number {
   const u = clamp01((t - ENDING.light[0]) / (ENDING.light[1] - ENDING.light[0]));
   return u * u * (3 - 2 * u) * 0.35 + u ** 3 * 0.65;
+}
+
+/**
+ * 得点の総計が 0 のときのエンディング（ENDING_CALM）。家は崩れず、少女はベランダに立ったまま、視点が上空へ昇っていく。
+ * 空には星がまばらにあり、家より遠いのでゆっくり流れる（昇っていくのが分かるように）
+ */
+function drawCalmEnding(ctx: CanvasRenderingContext2D, t: number, sprites: EndingSprites, texts: EndingTexts): void {
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, W, H);
+  const [p0, p1] = ENDING_CALM.pan;
+  const u = clamp01((t - p0) / (p1 - p0));
+  const pan = Math.round(PAN_H * u * u * (3 - 2 * u));
+
+  // 星：家の上の空に。視点が昇ると、上から降りてくるように見える（家の 0.35 倍の速さ）
+  const starShift = Math.round(pan * 0.35);
+  for (let i = 0; i < 70; i++) {
+    const x = Math.floor(hash(i + 700) * W);
+    const y = Math.floor(-PAN_H * 0.35 + hash(i + 800) * (H + PAN_H * 0.35)) + starShift;
+    if (y < 0 || y >= H) continue;
+    // ゆっくりまたたく（いくつかは時々消える）
+    if (hash(i + 900 + Math.floor(t * 1.5)) < 0.12) continue;
+    ctx.fillStyle = hash(i + 1000) < 0.25 ? C.text : C.textDim;
+    ctx.fillRect(x, y, 1, 1);
+  }
+
+  ctx.save();
+  ctx.translate(0, pan);
+  const P = (gx: number, gy: number, h: number): P => ({ x: Math.round(OX + (gx - gy) * 12), y: Math.round(OY + (gx + gy) * 6 - h) });
+  const quad = (pts: [number, number, number][], color: string) => fillQuad(ctx, pts.map(([x, y, h]) => P(x, y, h)), color);
+  if (pan < H + 120) {
+    lot(ctx);
+    house(ctx, t, 0, quad, P, sprites, CALM_LOOK);
+  }
+  ctx.restore();
+
+  // 結びの文：何も映らなくなった空の真ん中に、ゆっくりと
+  const [e0, e1] = ENDING_CALM.text;
+  if (t > e0) {
+    ctx.globalAlpha = Math.ceil(clamp01((t - e0) / (e1 - e0)) * 16) / 16;
+    const lines = texts.calmEpilogue;
+    lines.forEach((line, i) => drawText(ctx, line, Math.round(W / 2 - textWidth(line, 1) / 2), Math.round(H / 2 - (lines.length * 12) / 2) + i * 12, 1, C.text));
+    ctx.globalAlpha = 1;
+  }
+
+  // 闇から見えてくる（ENDING と同じ）
+  if (t < ENDING.fadeIn) {
+    ctx.globalAlpha = Math.ceil((1 - t / ENDING.fadeIn) * 16) / 16;
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
+  // 得点の総計：拠点と同じ位置に出ていて（0 のまま）、少女が立っているあいだに消える
+  const [o0, o1] = ENDING_CALM.totalOut;
+  const a = 1 - Math.ceil(clamp01((t - o0) / (o1 - o0)) * 4) / 4;
+  if (a > 0) {
+    const label = texts.total('0'.padStart(7, '0'));
+    ctx.globalAlpha = a;
+    drawText(ctx, label, TOTAL_AT.x + 1, TOTAL_AT.y + 1, 1, C.bg);
+    drawText(ctx, label, TOTAL_AT.x, TOTAL_AT.y, 1, C.gem);
+    ctx.globalAlpha = 1;
+  }
 }
 
 /** 発動の音が鳴ると、家全体が青白く光り、音が鳴りやむまでに少しずつ弱まっていく（0〜1。滑らかに見えるよう16段階） */
@@ -391,13 +478,15 @@ const RUBBLE: Piece[] = (() => {
  * エンディングを描く。t は始まってからの秒、total は使われる得点（これまでに溜めた得点）。
  * 少女の姿は、戸を閉めたあとは描かない
  */
-/** エンディングに出す文（いまの言語の）。total は拠点と同じ得点の総計の表示 */
+/** エンディングに出す文（いまの言語の）。total は拠点と同じ得点の総計の表示。calmEpilogue は得点の総計が 0 のときの結びの文 */
 export interface EndingTexts {
   total: (n: string) => string;
   epilogue: readonly string[];
+  calmEpilogue: readonly string[];
 }
 
 export function drawEnding(ctx: CanvasRenderingContext2D, t: number, total: number, sprites: EndingSprites, texts: EndingTexts): void {
+  if (total === 0) return drawCalmEnding(ctx, t, sprites, texts);
   ctx.fillStyle = C.bg;
   ctx.fillRect(0, 0, W, H);
 
@@ -814,7 +903,7 @@ function house(
       ? 0
       : t < ENDING.doorOpen[1]
         ? (t - ENDING.doorOpen[0]) / (ENDING.doorOpen[1] - ENDING.doorOpen[0])
-        : t < ENDING.doorClose[0]
+        : t < ENDING.doorClose[0] || look.calm
           ? 1
           : 1 - clamp01((t - ENDING.doorClose[0]) / (ENDING.doorClose[1] - ENDING.doorClose[0]));
   const d = BALCONY_DOOR;
@@ -880,7 +969,7 @@ function house(
 
   // 少女（ベランダ）。床の上、手すりより奥に描く。屋根のあとに描くのは、少女が軒より背が高く、軒の下で頭が欠けないように
   // （戸口より奥にいるあいだは見えないので、二階の壁や軒の前に出ることはない）
-  const pose = girlPose(t, sprites);
+  const pose = girlPose(t, sprites, !!look.calm);
   if (pose) drawGirl(ctx, pose, P);
 
   // ベランダの手すり
@@ -904,9 +993,10 @@ function house(
 }
 
 /** ベランダの少女：戸口から出てきて、手を挙げ、手を下ろして、家の中へ戻る。いないときは null */
-function girlPose(t: number, sprites: EndingSprites): { gy: number; img: HTMLCanvasElement; alpha: number } | null {
+function girlPose(t: number, sprites: EndingSprites, stay = false): { gy: number; img: HTMLCanvasElement; alpha: number } | null {
   const [o0, o1] = ENDING.walkOut;
-  const [i0, i1] = ENDING.walkIn;
+  // stay なら（ENDING_CALM）、出てきたあとは手を挙げず、戻らずにずっと立っている
+  const [i0, i1] = stay ? [Infinity, Infinity] : ENDING.walkIn;
   if (t < o0 || t >= i1) return null;
   let gy: number;
   let img: HTMLCanvasElement;
@@ -918,7 +1008,7 @@ function girlPose(t: number, sprites: EndingSprites): { gy: number; img: HTMLCan
     img = walkFrame(sprites.front);
   } else if (t < i0) {
     gy = GIRL_OUT;
-    img = t >= ENDING.raise && t < ENDING.lower ? sprites.raise : sprites.front[0];
+    img = !stay && t >= ENDING.raise && t < ENDING.lower ? sprites.raise : sprites.front[0];
   } else {
     // 振り返って、ふだんどおりの足どりで戸口へ
     const u = (t - i0) / (i1 - i0);

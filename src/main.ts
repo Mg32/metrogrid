@@ -12,7 +12,7 @@ import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
 import { lang, msg, toggleLang } from './lang.ts';
 import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
-import { ENDING, HOMECOMING, TITLE_OUT } from './render/ending.ts';
+import { ENDING, endingEnd, HOMECOMING, TITLE_OUT } from './render/ending.ts';
 import { textWidth } from './render/font.ts';
 import { APPEAR_BARS, BACK, CLEAR, FADE_IN, LEAVE, Renderer, revealEnd } from './render/renderer.ts';
 import { Stick } from './touch.ts';
@@ -288,12 +288,16 @@ function goUpstairs(): void {
   goUpAt = performance.now() / 1000;
 }
 
-/** エンディングへ。音を鳴らし、時刻を数えはじめる */
+/**
+ * エンディングへ。音を鳴らし、時刻を数えはじめる。
+ * 得点の総計が 0 なら別の演出（ending.ts の ENDING_CALM：家は崩れず、視点が上空へ昇っていく）で、音は鳴らさない
+ */
 function startEnding(): void {
   conductor.stop();
   input.clearPressed();
   scene = 'ending';
   endingAt = performance.now() / 1000;
+  if (total === 0) return;
   sfx.ending({ light: ENDING.light, climax: ENDING.climax, trigger: ENDING.trigger, rumble: ENDING.rumble, jerks: ENDING.jerks, settle: ENDING.settle });
 }
 
@@ -534,7 +538,7 @@ function update(): void {
     if (goUpSec() >= UP_FADE) startEnding();
   } else if (scene === 'ending') {
     // エンディングは飛ばせない。終わると、ガレキだけが残った画面へ
-    if (fixedEndingSec === null && endingSec() > ENDING.end + 2) {
+    if (fixedEndingSec === null && endingSec() > endingEnd(total) + 2) {
       scene = 'ruins';
       sfx.stop();
     }

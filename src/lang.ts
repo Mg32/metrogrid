@@ -48,6 +48,8 @@ const EN = {
   cleared: 'CLEARED',
   // エンディングのあと、ガレキの画面の下に出る結びの文（2行）
   epilogue: ['FROM THEN ON, THE TSUKUMOGAMI OF THE HOUSE', 'NEVER APPEARED ANYWHERE AGAIN.'],
+  // 得点の総計が 0 のままエンディングに来たときの結びの文（2行）
+  calmEpilogue: ['THE TSUKUMOGAMI OF THE HOUSE GAZED AT THE SKY,', 'AND THEN, SLOWLY, TOOK A DEEP BREATH.'],
   stage: (name: string) =>
       (name === 'UPSTAIRS' ? 'UPSTAIRS' : name.replace(/(\d+)$/, ' $1')),
 };
@@ -90,6 +92,7 @@ const JA: typeof EN = {
   stop: 'STOP!',
   cleared: 'CLEARED',
   epilogue: ['それから いえの つくもがみは', 'もう どこにも すがたを みせません。'],
+  calmEpilogue: ['いえの つくもがみは そらを ながめました。', 'それから ゆっくりと いきを すいこんだのでした。'],
   stage: (name: string) => name === 'UPSTAIRS' ? '2かい' :
       name === 'TUTORIAL'                      ? 'チュートリアル' :
                             name.replace(/^STAGE(\d+)$/, 'STAGE $1'),
