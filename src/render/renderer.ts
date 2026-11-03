@@ -19,7 +19,7 @@ import {
   TH,
   TW,
 } from './pixel.ts';
-import { drawEnding, drawTitle } from './ending.ts';
+import { drawEnding, drawTitle, type TitleOpts } from './ending.ts';
 import { THINGS } from './things.ts';
 import { STICK_RADIUS } from '../touch.ts';
 import { GIRL_FOOT_X, GIRL_FOOT_Y, GIRL_FRAMES, GIRL_H, GIRL_RAISE, GIRL_W, GIRL_WAIST_Y, paintGirl } from './girl.ts';
@@ -2703,9 +2703,10 @@ export class Renderer {
 
   /**
    * タイトル（ending.ts の drawTitle）：闇に浮かぶ家と、その前に立つ少女。t は秒。
-   * cleared はクリアしたステージの数（その数だけ窓に明かりがともる）。collapsed はエンディングのあと（ガレキだけが残る）
+   * 家はクリアしたステージに当たる部分が戻っている。collapsed はエンディングのあと（ガレキだけが残る）。
+   * home は家に帰ってくる演出（ending.ts の HOMECOMING）
    */
-  title(t: number, opts: { cleared: number; collapsed: boolean; prompt: string | null; beatSec: number; exit?: number | null }): void {
+  title(t: number, opts: TitleOpts): void {
     drawTitle(this.lctx, t, opts, {
       front: this.girl[GIRL_DIR.down],
       back: this.girl[GIRL_DIR.up],

@@ -10,7 +10,7 @@ import { STAGE_ORDER, STAGES, tutorial } from './game/stages/index.ts';
 import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
 import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
-import { ENDING, TITLE_OUT } from './render/ending.ts';
+import { ENDING, HOMECOMING, TITLE_OUT } from './render/ending.ts';
 import { APPEAR_BARS, BACK, CLEAR, FADE_IN, LEAVE, Renderer, revealEnd } from './render/renderer.ts';
 import { Stick } from './touch.ts';
 
@@ -29,6 +29,7 @@ import { Stick } from './touch.ts';
  *   ?clear=SEC        音を鳴らさず、ゴールしてから SEC 秒後のクリア演出を静止表示する
  *   ?ending=SEC       音を鳴らさず、エンディングの SEC 秒目を静止表示する
  *   ?title=SEC        タイトルの SEC 秒目を止めて表示する（星のまたたきや文字の点滅を止める。操作はできる）
+ *   ?home=NAME        NAME を初めてクリアして家に帰ってくる演出（外から見た家のその部分が戻る）から始め、拠点へ。?title=SEC と一緒なら SEC 秒目で止める
  *   ?total=N          これまでに溜めた得点をこの値に差し替える（保存しない）
  *   ?bpm=N            ステージ（拠点以外）の BPM をこの値にする（曲を作る前に試す用。ステージの定義は変えない）
  *   ?bars=N           ステージ（拠点以外）の長さ（小節）をこの値にする
@@ -82,7 +83,7 @@ let revealUntil = 0;
 
 const stageLabel = (name: string) => name.replace(/(\d+)$/, ' $1');
 
-type Scene = 'title' | 'titleOut' | 'loading' | 'play' | 'leaving' | 'backing' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
+type Scene = 'title' | 'titleOut' | 'homecoming' | 'loading' | 'play' | 'leaving' | 'backing' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
 
 /** 歩く向きを決めている指 */
 let steer: Stick | null = null;
@@ -190,6 +191,15 @@ const backSec = () => performance.now() / 1000 - backAt;
 let titleOutAt = 0;
 let titleOutTo: () => void = () => {};
 const titleOutSec = () => performance.now() / 1000 - titleOutAt;
+/**
+ * 家に帰ってくる演出（HOMECOMING）を始めた時刻（performance.now() の秒）、戻っていく家の部分（ステージ名）、演出のあとに移る処理。
+ * ステージを初めてクリアして結果の画面から拠点へ戻るときに、外から見た家のその部分が戻っていく（?home=NAME で試せる。?title=SEC で止める）
+ */
+let homeAt = 0;
+let homePart = '';
+let homeTo: () => void = () => {};
+const homeSec = () => fixedTitleSec ?? performance.now() / 1000 - homeAt;
+
 /** 遊び始めた時刻（performance.now() の秒）。拠点とチュートリアルは、ここから FADE_IN 秒で闇から明るくなる */
 let playAt = 0;
 
@@ -199,6 +209,17 @@ function leaveTitle(to: () => void): void {
   titleOutAt = performance.now() / 1000;
   titleOutTo = to;
   input.clearPressed();
+}
+
+/** 家に帰ってくる演出のあと to へ（拠点の曲はまだ鳴らさない） */
+function homecoming(part: string, to: () => void): void {
+  conductor.stop();
+  sfx.stop();
+  input.clearPressed();
+  scene = 'homecoming';
+  homeAt = performance.now() / 1000;
+  homePart = part;
+  homeTo = to;
 }
 
 /** 曲を消していき、道が沈んで消える演出のあと to へ */
@@ -350,8 +371,11 @@ function resultContinue(s: Sim): void {
  * （拠点の、そのステージの入口の前に立つ）。?stage で直接遊んでいたチュートリアルなどはタイトルへ
  */
 function resultBack(s: Sim): void {
+  const name = s.stage.def.name;
   if (s.stage.kind !== 'stage' && devDef()) goBack(toTitle);
-  else goBack(() => goHub(s.stage.def.name));
+  // 初めてクリアしたなら、家に帰ってくる演出（家のその部分が戻る）を挟む
+  else if (s.status === 'cleared' && pendingReveal === name) goBack(() => homecoming(name, () => goHub(name)));
+  else goBack(() => goHub(name));
 }
 
 // 音はキーやタップのイベントの処理の中で鳴らせるようにしておく（スマホでは、そうしないと音が出ない）
@@ -412,6 +436,9 @@ function update(): void {
   } else if (scene === 'titleOut') {
     // 少女が家の中へ入っていくあいだは操作できない
     if (titleOutSec() >= TITLE_OUT.end) titleOutTo();
+  } else if (scene === 'homecoming') {
+    // 家に帰ってくる演出のあいだも操作できない（?title で止めているときは進まない）
+    if (fixedTitleSec === null && homeSec() >= HOMECOMING.end) homeTo();
   } else if (scene === 'result' && sim) {
     const e = clearSec();
     if (e !== null && e < CLEAR.end && (start || retry)) {
@@ -495,17 +522,18 @@ function update(): void {
   }
 }
 
-/** タイトル：闇に浮かぶ家と、その前に立つ少女。窓の明かりはクリアしたステージの数 */
+/** タイトル：闇に浮かぶ家と、その前に立つ少女。家は、クリアしたステージに当たる部分が戻っている */
 function drawTitle(): void {
   // 遊び方は文字で書かず、チュートリアルで覚えてもらう（チュートリアルは途中でも Esc・SKIP で飛ばせる）
   const dev = devDef();
   const go = 'PRESS ENTER OR TAP';
-  renderer.title(fixedTitleSec ?? performance.now() / 1000, {
-    cleared: STAGE_ORDER.filter((d) => cleared.has(d.name)).length,
+  renderer.title(scene === 'homecoming' ? performance.now() / 1000 : (fixedTitleSec ?? performance.now() / 1000), {
+    restored: (part) => (cleared.has(part) ? 1 : 0),
     collapsed: false,
     prompt: dev ? `${go} - DEV: ${stageLabel(dev.name)}` : go,
     beatSec: 60 / 100,
     exit: scene === 'titleOut' ? titleOutSec() : null,
+    home: scene === 'homecoming' ? { part: homePart, sec: homeSec() } : null,
   });
 }
 
@@ -526,8 +554,8 @@ function draw(): void {
   if (scene === 'ending') {
     renderer.ending(endingSec(), total);
   } else if (scene === 'ruins') {
-    renderer.title(performance.now() / 1000, { cleared: 0, collapsed: true, prompt: null, beatSec: 0.6 });
-  } else if (sim && scene !== 'title' && scene !== 'titleOut') {
+    renderer.title(performance.now() / 1000, { restored: () => 1, collapsed: true, prompt: null, beatSec: 0.6 });
+  } else if (sim && scene !== 'title' && scene !== 'titleOut' && scene !== 'homecoming') {
     renderer.world(sim, songTime, tickSec, clearSec(), scene === 'leaving' ? leaveSec() : null, scene === 'backing' ? backSec() : null);
     // クリア演出と、拠点の入口に入る演出・戻る演出のあいだは HUD を消す（得点は結果の欄で数え上げる）
     if (scene !== 'loading' && scene !== 'leaving' && scene !== 'backing' && clearSec() === null) renderer.hud(sim, songTime, tickSec);
@@ -543,7 +571,7 @@ function draw(): void {
   } else if (scene === 'confirm') {
     drawTitle();
     renderer.confirm('ERASE ALL PROGRESS?', 'CLEARED STAGES AND TOTAL SCORE WILL BE LOST.', confirmYes);
-  } else if (scene === 'title' || scene === 'titleOut') {
+  } else if (scene === 'title' || scene === 'titleOut' || scene === 'homecoming') {
     drawTitle();
   } else if (sim && scene === 'result') {
     const e = clearSec();
@@ -602,6 +630,11 @@ if (params.has('view')) {
 } else if (params.has('ending')) {
   fixedEndingSec = Number(params.get('ending'));
   scene = 'ending';
+} else if (params.has('home')) {
+  const name = params.get('home')!;
+  cleared.add(name);
+  pendingReveal = name;
+  homecoming(name, () => goHub(name));
 } else if (params.has('upstairs')) {
   goHub(UPSTAIRS);
 } else if (params.has('autostart')) {

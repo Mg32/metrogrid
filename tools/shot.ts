@@ -30,6 +30,11 @@ const SCENES: [string, string][] = args.view
   : [
       ['title', 'title=0.5'],
       ['title-progress', 'title=0.5&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3'],
+      ['title-all', 'title=0.5&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4,STAGE5'],
+      // 家に帰ってくる演出（STAGE5 を初めてクリアしたところ。二階が戻っていく。秒は HOMECOMING）
+      ['home-1', 'home=STAGE5&title=1.2&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4'],
+      ['home-2', 'home=STAGE5&title=2.2&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4'],
+      ['home-3', 'home=STAGE5&title=3.5&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4'],
       ['tutorial-stop', 'stage=TUTORIAL&view=11,13,60'],
       ['tutorial-stop-on', 'stage=TUTORIAL&view=11,11,60'],
       // STAGE 1：家の前の路地と公園（昼 → 午後 → 日没前）
