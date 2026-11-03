@@ -95,7 +95,9 @@ test('タイトルの RESET：確認で NO ならそのまま、YES なら記録
   await page.keyboard.press('Delete');
   await expect.poll(async () => (await game(page)).scene).toBe('confirm');
   await page.keyboard.press('KeyY');
-  await expect.poll(async () => (await game(page)).scene).toBe('confirm');
+  // 1回目の Y を処理してから2回目を押す（同じフレームに2回押すと、1回の押下にまとまる）
+  await frames(page);
+  expect((await game(page)).scene).toBe('confirm');
   await page.keyboard.press('KeyY');
   await expect.poll(async () => (await game(page)).scene).toBe('title');
   expect(await page.evaluate(() => [localStorage.getItem('metrogrid.cleared'), localStorage.getItem('metrogrid.total')])).toEqual([null, null]);

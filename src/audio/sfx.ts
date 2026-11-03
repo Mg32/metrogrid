@@ -267,8 +267,8 @@ export class Sfx {
     else synth(ctx, this.master!, now);
   }
 
-  /** 白いノイズ（len 秒）を、filter を通して out へ。env で音量を変える（はじめは 0） */
-  private noise(at: number, len: number, filter: { type: BiquadFilterType; from: number; to?: number }, env: (g: AudioParam) => void, out: AudioNode): void {
+  /** 白いノイズ（len 秒）を、filter を通して out へ。env で音量を変える（はじめは 0）。q はフィルタの鋭さ */
+  private noise(at: number, len: number, filter: { type: BiquadFilterType; from: number; to?: number; q?: number }, env: (g: AudioParam) => void, out: AudioNode): void {
     const ctx = this.ctx!;
     const buf = ctx.createBuffer(1, Math.max(1, Math.round(ctx.sampleRate * len)), ctx.sampleRate);
     const d = buf.getChannelData(0);
@@ -277,6 +277,7 @@ export class Sfx {
     src.buffer = buf;
     const f = ctx.createBiquadFilter();
     f.type = filter.type;
+    if (filter.q) f.Q.value = filter.q;
     f.frequency.setValueAtTime(filter.from, at);
     if (filter.to) f.frequency.exponentialRampToValueAtTime(filter.to, at + len);
     const g = ctx.createGain();
@@ -337,31 +338,65 @@ export class Sfx {
 
   // ---- 場面 ----
 
-  /** 時間切れ（結果の画面が出るとき）：下がっていく3音 */
+  /**
+   * 時間切れ（結果の画面が出るとき）：トロンボーンのような、半音ずつ下がる「ワッ ワッ ワッ ワァ〜ン」（カートゥーンの残念な音）。
+   * 最後の音はゆれながら少し下がって伸びる
+   */
   timeUp(): void {
-    this.sceneSound('sfx/timeup', 0.25, (_ctx, out, now) => {
-      this.note(now, 392, 0.3, 'triangle', 0.6, out);
-      this.note(now + 0.22, 311.13, 0.3, 'triangle', 0.6, out);
-      this.note(now + 0.44, 261.63, 1.0, 'triangle', 0.6, out);
+    this.sceneSound('sfx/timeup', 0.2, (ctx, out, now) => {
+      const notes = [233.08, 220, 207.65, 196];
+      notes.forEach((f, i) => {
+        const at = now + i * 0.32;
+        const last = i === notes.length - 1;
+        const len = last ? 1.3 : 0.26;
+        const osc = ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(f * 1.02, at);
+        osc.frequency.linearRampToValueAtTime(f, at + 0.05);
+        if (last) {
+          osc.frequency.setValueAtTime(f, at + 0.3);
+          osc.frequency.linearRampToValueAtTime(f * 0.94, at + len);
+          // ゆれ（ビブラート）
+          const lfo = ctx.createOscillator();
+          const depth = ctx.createGain();
+          lfo.frequency.value = 6;
+          depth.gain.setValueAtTime(0, at);
+          depth.gain.linearRampToValueAtTime(f * 0.03, at + 0.4);
+          lfo.connect(depth).connect(osc.frequency);
+          lfo.start(at);
+          lfo.stop(at + len + 0.05);
+        }
+        // こもった管楽器らしく、高い音を削り、吹き始めに少し開く
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(500, at);
+        lp.frequency.linearRampToValueAtTime(1400, at + 0.06);
+        lp.frequency.linearRampToValueAtTime(900, at + len);
+        const env = ctx.createGain();
+        env.gain.setValueAtTime(0, at);
+        env.gain.linearRampToValueAtTime(0.8, at + 0.03);
+        env.gain.setValueAtTime(0.8, at + len - 0.08);
+        env.gain.linearRampToValueAtTime(0, at + len);
+        osc.connect(lp).connect(env).connect(out);
+        osc.start(at);
+        osc.stop(at + len + 0.05);
+      });
     });
   }
 
-  /** タイトルから始める：玄関の引き戸がすべる音と、明かりがともる澄んだ2音（ending.ts の TITLE_OUT） */
+  /** タイトルから始める：玄関の引き戸がすべる音（ノイズだけ。ending.ts の TITLE_OUT） */
   start(): void {
-    this.sceneSound('sfx/start', 0.22, (_ctx, out, now) => {
-      this.noise(now, 0.3, { type: 'bandpass', from: 1200, to: 700 }, (g) => {
-        g.linearRampToValueAtTime(0.35, now + 0.08);
-        g.linearRampToValueAtTime(0, now + 0.3);
+    this.sceneSound('sfx/start', 0.3, (_ctx, out, now) => {
+      this.noise(now, 0.35, { type: 'bandpass', from: 1200, to: 700 }, (g) => {
+        g.linearRampToValueAtTime(0.4, now + 0.08);
+        g.linearRampToValueAtTime(0, now + 0.35);
       }, out);
-      this.note(now + 0.12, 659.25, 0.9, 'sine', 0.6, out);
-      this.note(now + 0.22, 987.77, 1.1, 'sine', 0.45, out);
     });
   }
 
-  /** 拠点の入口へ入る：光の柱に包まれて昇っていく分散和音と、明るいノイズのふくらみ（renderer の LEAVE） */
+  /** 拠点の入口へ入る：光の柱に包まれていく、明るいノイズのふくらみ（ノイズだけ。renderer の LEAVE） */
   portal(): void {
-    this.sceneSound('sfx/portal', 0.2, (_ctx, out, now) => {
-      [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98].forEach((f, i) => this.note(now + i * 0.1, f, 0.7, 'sine', 0.5, out));
+    this.sceneSound('sfx/portal', 0.3, (_ctx, out, now) => {
       this.noise(now, 1.2, { type: 'highpass', from: 2000, to: 6000 }, (g) => {
         g.linearRampToValueAtTime(0.25, now + 0.8);
         g.linearRampToValueAtTime(0, now + 1.2);
@@ -369,54 +404,83 @@ export class Sfx {
     });
   }
 
-  /** Esc で戻る：道が沈んで消えていく、下がっていく音（renderer の BACK） */
+  /** Esc で戻る：短く少しだけ下がる「プゥ」（renderer の BACK） */
   back(): void {
-    this.sceneSound('sfx/back', 0.22, (_ctx, out, now) => {
-      this.glide(now, 520, 130, 1.1, 'sine', 0.45, out);
-      this.noise(now, 1.2, { type: 'lowpass', from: 2000, to: 200 }, (g) => {
-        g.linearRampToValueAtTime(0.3, now + 0.1);
-        g.linearRampToValueAtTime(0, now + 1.2);
-      }, out);
+    this.sceneSound('sfx/back', 0.45, (_ctx, out, now) => {
+      this.glide(now, 440, 330, 0.18, 'triangle', 0.7, out);
     });
   }
 
   /**
-   * 拠点に新しい入口が現れる：道がせり上がるあいだの低いふくらみと、せり上がりきったところの澄んだ和音（renderer の REVEAL）。
-   * rise はせり上がり始める秒、land はせり上がりきる秒（いまから）
+   * 拠点に新しい入口が現れる・チュートリアルで少女が現れる：神聖な響き。道がせり上がるあいだ、聖歌隊のような和音（少しずつずらした音を重ねる）がふくらみ、
+   * せり上がりきったところで高い和音が開いて、鐘のような響きとともにゆっくり消える（renderer の REVEAL）。
+   * 音は E♭・B♭・F だけで組む（E♭ と B♭ の空虚5度に F を足す）。拠点の曲（HUB.wav、変ホ短調）と、チュートリアルの曲の頭
+   * （TUTORIAL.wav、変ロ長調）のどちらにも含まれる音なので、重なっても濁らない。曲の調を変えたら、ここも合わせる
+   * rise はせり上がり始める秒、land はせり上がりきる秒（いまから）。少女が現れるときは、光が降りてき始める秒と、少女の姿になる秒
    */
   reveal(rise: number, land: number): void {
-    this.sceneSound('sfx/reveal', 0.25, (ctx, out, now) => {
-      const osc = ctx.createOscillator();
-      const env = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(98, now + rise);
-      osc.frequency.linearRampToValueAtTime(131, now + land);
-      env.gain.setValueAtTime(0, now + rise);
-      env.gain.linearRampToValueAtTime(0.5, now + land);
-      env.gain.linearRampToValueAtTime(0, now + land + 0.4);
-      osc.connect(env).connect(out);
-      osc.start(now + rise);
-      osc.stop(now + land + 0.5);
-      this.noise(now + rise, land - rise, { type: 'lowpass', from: 250, to: 600 }, (g) => {
-        g.linearRampToValueAtTime(0.4, now + land);
-      }, out);
-      for (const [f, lv] of [[783.99, 0.5], [1174.66, 0.4], [1567.98, 0.3]] as const) this.note(now + land, f, 1.6, 'sine', lv, out);
+    this.sceneSound('sfx/reveal', 0.2, (ctx, out, now) => {
+      /** 柔らかく立ち上がって、伸びて、消える音。detune はセント（同じ高さを少しずらして重ね、ゆらぐ厚みを出す） */
+      const pad = (f: number, at: number, peak: number, end: number, level: number) => {
+        for (const detune of [-7, 7]) {
+          const osc = ctx.createOscillator();
+          const env = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = f;
+          osc.detune.value = detune;
+          env.gain.setValueAtTime(0, at);
+          env.gain.linearRampToValueAtTime(level, peak);
+          env.gain.linearRampToValueAtTime(0, end);
+          osc.connect(env).connect(out);
+          osc.start(at);
+          osc.stop(end + 0.05);
+        }
+      };
+      const r = now + rise;
+      const l = now + land;
+      // せり上がるあいだ：低い和音（E♭3 B♭3 F4）がふくらむ
+      for (const [f, lv] of [[155.56, 0.24], [233.08, 0.2], [349.23, 0.12]] as const) pad(f, r, l, l + 0.7, lv);
+      // せり上がりきったところ：高い和音（E♭5 F5 B♭5 E♭6）が開き、長く残る
+      for (const [f, lv] of [[622.25, 0.2], [698.46, 0.12], [932.33, 0.16], [1244.51, 0.1]] as const) pad(f, l, l + 0.35, l + 2.7, lv);
+      // 鐘のような澄んだ響き（B♭6 F7）
+      for (const [f, lv, len] of [[1864.66, 0.18, 1.9], [2793.83, 0.08, 1.1]] as const) this.note(l, f, len, 'sine', lv, out);
     });
   }
 
   /**
-   * 家に帰ってくる：家の部分が戻っていくあいだ、舞い上がる埃のきらめき。戻りきると、明かりがともる暖かい和音
-   * （ending.ts の HOMECOMING。restore は戻り始める秒と戻りきる秒）
+   * 家に帰ってくる（ending.ts の HOMECOMING。restore は戻り始める秒と戻りきる秒）。
+   * 家の部分が戻っていくあいだは、ウィンドチャイムのような金属の響きが不規則に鳴る。
+   * 戻りきって明かりがともるところは、ノイズをフィルタに通しただけの、ふわりと開いて閉じる音
    */
   homecoming(restore: readonly number[]): void {
     const [r0, r1] = restore;
     this.sceneSound('sfx/homecoming', 0.18, (_ctx, out, now) => {
-      const n = Math.floor((r1 - r0) / 0.18);
-      for (let i = 0; i < n; i++) {
-        const f = [1567.98, 1760, 2093, 2349.32, 2637.02][(i * 3) % 5];
-        this.note(now + r0 + i * 0.18, f, 0.4, 'sine', 0.12 + 0.2 * (i / n), out);
+      // ウィンドチャイム：高い五音音階の棒を、間隔をゆらしながら打つ。棒ごとに少しずれた倍音（2.76 倍）を重ねて金属らしく
+      const bars = [2093, 2349.32, 2637.02, 3135.96, 3520];
+      let at = now + r0;
+      for (let i = 0; at < now + r1 - 0.2; i++) {
+        const f = bars[(i * 7 + 3) % bars.length];
+        const lv = 0.25 + 0.15 * ((i * 5) % 3) / 2;
+        this.note(at, f, 1.4, 'sine', lv, out);
+        this.note(at, f * 2.76, 0.5, 'sine', lv * 0.3, out);
+        at += 0.09 + 0.16 * (((i * 11) % 7) / 6);
       }
-      for (const f of [523.25, 659.25, 783.99]) this.note(now + r1, f, 1.8, 'triangle', 0.4, out);
+      // 明かりがともる：ノイズを、こもった所から明るい所へ開いて、また閉じるフィルタに通す
+      const open = 0.5;
+      const len = 1.6;
+      this.noise(now + r1, len, { type: 'lowpass', from: 300, q: 2 }, (g) => {
+        g.linearRampToValueAtTime(0.5, now + r1 + open);
+        g.linearRampToValueAtTime(0, now + r1 + len);
+      }, out);
+      // フィルタの開け閉めは noise の to では1方向にしか動かせないので、帯域をずらした2本を重ねる
+      this.noise(now + r1, open + 0.2, { type: 'bandpass', from: 600, to: 3000, q: 1.5 }, (g) => {
+        g.linearRampToValueAtTime(0.35, now + r1 + open);
+        g.linearRampToValueAtTime(0, now + r1 + open + 0.2);
+      }, out);
+      this.noise(now + r1 + open, len - open, { type: 'bandpass', from: 3000, to: 500, q: 1.5 }, (g) => {
+        g.linearRampToValueAtTime(0.35, now + r1 + open + 0.05);
+        g.linearRampToValueAtTime(0, now + r1 + len);
+      }, out);
     });
   }
 
@@ -438,11 +502,18 @@ export class Sfx {
 
   // ---- ボタン ----
 
-  /** 選ぶ・切り替える（確認の はい・いいえ を選ぶ、言語・音の切り替え、記録を消す確認を開く）：短い音。low は「いいえ」で閉じるとき */
+  /**
+   * 選ぶ・切り替える（確認の はい・いいえ を選ぶ、言語・音の切り替え、記録を消す確認を開く）：「カチッ」。
+   * ノイズを鋭いバンドパスに通し、すぐ立ち上げて短く響かせる。low は「いいえ」で閉じるとき（少し低い）
+   */
   select(low = false): void {
-    this.oneShot('sfx/select', 0.1, (_ctx, out, now) => {
-      this.note(now, low ? 880 : 1318.51, 0.05, 'square', 0.5, out);
-      return 0.1;
+    this.oneShot('sfx/select', 0.6, (_ctx, out, now) => {
+      const len = 0.035;
+      this.noise(now, len, { type: 'bandpass', from: low ? 2400 : 3400, q: 6 }, (g) => {
+        g.linearRampToValueAtTime(1, now + 0.001);
+        g.exponentialRampToValueAtTime(0.001, now + len);
+      }, out);
+      return 0.08;
     });
   }
 

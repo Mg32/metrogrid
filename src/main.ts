@@ -351,6 +351,14 @@ async function play(def: StageDef, start?: Vec): Promise<void> {
     const { rise, land } = revealRise(renderer.hubReveal.order);
     sfx.reveal(rise, land);
   }
+  // チュートリアル：少女が現れる1小節で、拠点に新しい入口が現れるときと同じ神聖な響きを鳴らす。
+  // 光が降りてき始めてから、小節のちょうど半分で少女の姿になる（renderer の climbAt・playerAppearing）
+  if (stage.def.stairs) {
+    const beatSec = 60 / stage.def.bpm;
+    const appearAt = -(stage.def.stairs + APPEAR_BARS * 4) * beatSec;
+    const now = conductor.songTime();
+    sfx.reveal(Math.max(0, appearAt - now), Math.max(0, appearAt + APPEAR_BARS * 2 * beatSec - now));
+  }
   scene = 'play';
   playAt = performance.now() / 1000;
 }
