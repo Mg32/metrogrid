@@ -19,6 +19,23 @@ test('タイトルの L で日本語と英語が切り替わり、読み込み�
   expect(errors).toEqual([]);
 });
 
+test('タイトルの M で音のオン・オフが切り替わり、読み込み直しても残る', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto('/?seed=1');
+  await frames(page);
+  expect((await game(page)).sound).toBe(true);
+  await page.keyboard.press('KeyM');
+  await frames(page);
+  expect((await game(page)).sound).toBe(false);
+  await page.reload();
+  await frames(page);
+  expect((await game(page)).sound).toBe(false);
+  await page.keyboard.press('KeyM');
+  await frames(page);
+  expect((await game(page)).sound).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test('はじめてはチュートリアルから。歩けて、Esc でスキップすると拠点へ、拠点の入口から STAGE 1 へ', async ({ page }) => {
   const errors = collectErrors(page);
   await page.goto('/?seed=1');

@@ -7,8 +7,11 @@ import { fillDiamond, fillEllipse, fillPrismSides, fillQuad, plotLine } from './
  * 少女が二階のベランダに出てきて手を挙げると、青い光をともないはじめ、画面が揺れる。これまでに溜めた得点がみるみる減っていき、
  * その光の粒が少女の手へ流れ込む（得点は「減っている」ではなく、少女の行為に「使われている」ように見せる。光の強さ・揺れの大きさ・
  * 家の窓という窓から漏れる同じ青い光（第4.5節）は、使われた割合に連動する）。
- * 轟音が聞こえはじめると、少女は手を下ろし、何気なく家の中へ戻って戸を閉める（悲壮な決意には見せない。第4.7節）。
- * 家は少しずつひしゃげ、いろいろな場所から砂埃を上げて潰れていく。轟音と揺れが収まる頃には、ガレキだけが残る。
+ * 得点を使い切っても響きはさらに高くまで上がっていき、ふっと止む。少女は手を下ろし、何気なく家の中へ戻って戸を閉める
+ * （悲壮な決意には見せない。第4.7節）。そのあと何かが発動する音がして家全体が青白く光り、音が鳴りやむと光も家の中の明かりも消える。
+ * 2 秒ほど静まったあとで轟音が聞こえはじめ、家は少しずつひしゃげ、
+ * いろいろな場所から砂埃を上げて潰れていく。轟音と揺れが収まる頃には、ガレキだけが残る。
+ * 得点の総計は、はじめは拠点と同じ位置・大きさで出しておき（何の数字か分かるように）、画面の上の真ん中へ動いて大きくなってから減っていく。
  * 少女が潰れる瞬間は映さない（戸を閉めたあとは、少女の姿はどこにも出ない）。
  *
  * 時刻はエンディングが始まってからの秒。
@@ -21,22 +24,29 @@ export const ENDING = {
   walkOut: [2.1, 3.1],
   /** 手を挙げる */
   raise: 3.8,
-  /** 得点が使われていく（光が強まる） */
+  /** 得点が使われていく（光が強まり、響きが上がっていく） */
   light: [4.2, 10.2],
-  /** 轟音が聞こえはじめる（得点を使い切ったところ） */
-  rumble: 10.2,
-  /** 手を下ろす／家の中へ戻る／戸を閉める */
-  lower: 10.7,
-  walkIn: [11.1, 12.1],
-  doorClose: [12.1, 12.6],
-  /** 家が崩れていく */
-  collapse: [12.8, 19.5],
+  /** 得点を使い切ったあとも響きはさらに高くまで上がり、ここで止む（揺れも止む） */
+  climax: 13.2,
+  /** 手を下ろす／家の中へ戻る／戸を閉める（光は少女と一緒に引いていく） */
+  lower: 13.7,
+  walkIn: [14.1, 15.1],
+  doorClose: [15.1, 15.6],
+  /** 少女が家に入ったあと、何かが発動する音（エコーが尾を引く） */
+  trigger: 16.2,
+  /** 発動の音が鳴りやむと、家の中の明かり（窓から漏れる青い光）がふっと消える（消えはじめ、消えきる） */
+  lightsOut: [18.9, 19.1],
+  /** 青白い光と明かりが消えて 2 秒ほど静まったあと、轟音が聞こえはじめ（揺れも始まる）、家が崩れていく */
+  rumble: 21.1,
+  collapse: [21.3, 28.0],
   /** 崩れ方が急に進む時刻（二階が潰れる、全体が潰れる、最後のひと崩れ）。砂埃と崩れる音が出る */
-  jerks: [14.0, 16.0, 17.6],
+  jerks: [22.5, 24.5, 26.1],
   /** 揺れと砂埃が収まる */
-  settle: 23,
-  /** ここから先はガレキだけが残った静止画（キーで次へ進める） */
-  end: 26,
+  settle: 31.5,
+  /** ここから先はガレキだけが残った静止画 */
+  end: 34.5,
+  /** ガレキの画面の下に、結びの文が浮かび上がる（出はじめ、出きる） */
+  epilogue: [35.5, 37.5],
 };
 
 /**
@@ -88,7 +98,6 @@ const ENDING_LOOK: HouseLook = { restored: () => 1, lit: false };
 export interface TitleOpts {
   /** 家の部分ごとの戻り具合（0〜1。HOUSE_PARTS） */
   restored: (part: string) => number;
-  collapsed: boolean;
   prompt: string | null;
   beatSec: number;
   /** 始めるキーを押してからの秒（TITLE_OUT。押す前は null） */
@@ -134,6 +143,8 @@ const C = {
   rail: '#5b544c',
   light: '#9cc6ff',
   lightCore: '#e6f2ff',
+  /** 得点の総計（拠点の表示と同じ色：renderer の COLORS.gem） */
+  gem: '#e3c56e',
   lightDeep: '#4f7fd0',
   warm: '#c9a467',
   warmDim: '#8a6c45',
@@ -166,7 +177,8 @@ const BALCONY_H = 30;
 const F2_FRONT = 3.6;
 /** ベランダの床（手前の端）と、少女の立つ位置 */
 const BALCONY_FRONT = 4.9;
-const GIRL_X = 3;
+// x は、ベランダのガラス戸の開く側（右の戸。BALCONY_DOOR の右半分）の中ほど。そこから出てきて、そこへ戻る
+const GIRL_X = 3.35;
 const GIRL_IN = 3.3;
 const GIRL_OUT = 4.4;
 
@@ -215,12 +227,13 @@ function hash(i: number): number {
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
-/** 光の強さ（得点の使われた割合と同じ）。使い切ってからは戸を閉める頃に引いていく */
+/** 光の強さ（得点の使われた割合と同じ）。使い切ってからは、少女が家に入ったあとも家の中に灯っていて、発動の音が鳴りやむと消える */
 function lightAt(t: number): number {
   const [a, b] = ENDING.light;
   if (t < a) return 0;
   if (t < b) return usedAt(t);
-  return 1 - clamp01((t - ENDING.doorClose[1]) / 1.5);
+  const [o0, o1] = ENDING.lightsOut;
+  return 1 - clamp01((t - o0) / (o1 - o0));
 }
 
 /** 得点の使われた割合：はじめはゆっくり、みるみる加速して、最後は一気に */
@@ -229,9 +242,58 @@ function usedAt(t: number): number {
   return u * u * (3 - 2 * u) * 0.35 + u ** 3 * 0.65;
 }
 
+/** 発動の音が鳴ると、家全体が青白く光り、音が鳴りやむまでに少しずつ弱まっていく（0〜1。滑らかに見えるよう16段階） */
+function triggerGlow(t: number): number {
+  const t0 = ENDING.trigger;
+  const t1 = ENDING.lightsOut[1];
+  if (t < t0 || t >= t1) return 0;
+  const u = (t - t0) / (t1 - t0);
+  return Math.ceil((1 - u) ** 2 * 16) / 16;
+}
+
+/** 光る家を描くための、家だけを描いておくバッファ（家の形・家の形のぬりつぶし） */
+let houseLayer: HTMLCanvasElement | null = null;
+let shapeLayer: HTMLCanvasElement | null = null;
+
+/** 家を青白く光らせて描く（glow は 0〜1）。家の形に光を重ね、まわりに 1 ドット、淡い光をにじませる */
+function glowingHouse(ctx: CanvasRenderingContext2D, glow: number, draw: (g: CanvasRenderingContext2D) => void): void {
+  const layer = (c: HTMLCanvasElement | null) => {
+    c ??= document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    return c;
+  };
+  houseLayer = layer(houseLayer);
+  shapeLayer = layer(shapeLayer);
+  const g = houseLayer.getContext('2d')!;
+  g.clearRect(0, 0, W, H);
+  draw(g);
+  // 家の形のぬりつぶし
+  const s = shapeLayer.getContext('2d')!;
+  s.clearRect(0, 0, W, H);
+  s.drawImage(houseLayer, 0, 0);
+  s.globalCompositeOperation = 'source-in';
+  s.fillStyle = C.light;
+  s.fillRect(0, 0, W, H);
+  s.globalCompositeOperation = 'source-over';
+  // まわりのにじみ
+  ctx.globalAlpha = 0.5 * glow;
+  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) ctx.drawImage(shapeLayer, dx, dy);
+  // 家に光を重ねてから描く
+  g.globalCompositeOperation = 'source-atop';
+  g.globalAlpha = 0.65 * glow;
+  g.fillStyle = C.lightCore;
+  g.fillRect(0, 0, W, H);
+  g.globalAlpha = 1;
+  g.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.drawImage(houseLayer, 0, 0);
+}
+
 /** 画面の揺れの大きさ（ドット） */
 function shakeAt(t: number): number {
-  let a = lightAt(t) * 2;
+  // 光の揺れは響きが止むと止み、轟音が聞こえはじめると轟音の揺れ
+  let a = t < ENDING.climax ? lightAt(t) * 2 : 0;
   if (t >= ENDING.rumble) a = Math.max(a, 1 + clamp01((t - ENDING.rumble) / 2.5) * 2);
   for (const j of JERKS) if (t >= j) a = Math.max(a, 5 * Math.exp(-(t - j) * 2.2));
   const [, c1] = ENDING.collapse;
@@ -256,7 +318,7 @@ const PUFFS: Puff[] = (() => {
   const add = (t0: number, gx: number, gy: number, h: number, life: number, r: number) =>
     puffs.push({ t0, gx, gy, h, life, r, drift: hash(n++) * 2 - 1 });
   // きしみはじめ：屋根と窓から少し
-  for (let i = 0; i < 6; i++) add(13 + i * 0.18, hash(i + 10) * 6, 3.6 + hash(i + 20) * 1.4, 30 + hash(i + 30) * 30, 2.2, 3);
+  for (let i = 0; i < 6; i++) add(ENDING.collapse[0] + 0.2 + i * 0.18, hash(i + 10) * 6, 3.6 + hash(i + 20) * 1.4, 30 + hash(i + 30) * 30, 2.2, 3);
   // 潰れるたびに、家のいろいろな場所から
   JERKS.forEach((j, k) => {
     for (let i = 0; i < 20; i++) {
@@ -268,7 +330,7 @@ const PUFFS: Puff[] = (() => {
     }
   });
   // 最後に地面すれすれに広がる大きな砂埃
-  for (let i = 0; i < 16; i++) add(18 + hash(i + 500) * 1.2, -1 + hash(i + 501) * 8, -1 + hash(i + 502) * 7, 2, 4.5, 8 + hash(i + 503) * 6);
+  for (let i = 0; i < 16; i++) add(JERKS[2] + 0.4 + hash(i + 500) * 1.2, -1 + hash(i + 501) * 8, -1 + hash(i + 502) * 7, 2, 4.5, 8 + hash(i + 503) * 6);
   return puffs;
 })();
 
@@ -329,7 +391,13 @@ const RUBBLE: Piece[] = (() => {
  * エンディングを描く。t は始まってからの秒、total は使われる得点（これまでに溜めた得点）。
  * 少女の姿は、戸を閉めたあとは描かない
  */
-export function drawEnding(ctx: CanvasRenderingContext2D, t: number, total: number, sprites: EndingSprites): void {
+/** エンディングに出す文（いまの言語の）。total は拠点と同じ得点の総計の表示 */
+export interface EndingTexts {
+  total: (n: string) => string;
+  epilogue: readonly string[];
+}
+
+export function drawEnding(ctx: CanvasRenderingContext2D, t: number, total: number, sprites: EndingSprites, texts: EndingTexts): void {
   ctx.fillStyle = C.bg;
   ctx.fillRect(0, 0, W, H);
 
@@ -352,7 +420,11 @@ export function drawEnding(ctx: CanvasRenderingContext2D, t: number, total: numb
   // 家の建っていた土地（闇に浮かぶ板）
   lot(ctx);
 
-  if (c < 0.97) house(ctx, t, L, quad, P, sprites, ENDING_LOOK);
+  if (c < 0.97) {
+    const glow = triggerGlow(t);
+    if (glow > 0) glowingHouse(ctx, glow, (g) => house(g, t, L, (pts, color) => fillQuad(g, pts.map(([x, y, h]) => P(x, y, h)), color), P, sprites, ENDING_LOOK));
+    else house(ctx, t, L, quad, P, sprites, ENDING_LOOK);
+  }
   rubble(ctx, c);
   dust(ctx, t);
   if (c > 0 && c < 0.97) fallingTiles(ctx, t);
@@ -372,21 +444,29 @@ export function drawEnding(ctx: CanvasRenderingContext2D, t: number, total: numb
     ctx.globalAlpha = 1;
   }
 
-  scoreCounter(ctx, t, total, L);
+  // 結びの文：ガレキの画面の下に、小さく2行
+  const [e0, e1] = ENDING.epilogue;
+  if (t > e0) {
+    ctx.globalAlpha = Math.ceil(clamp01((t - e0) / (e1 - e0)) * 4) / 4;
+    texts.epilogue.forEach((line, i) => drawText(ctx, line, Math.round(W / 2 - textWidth(line, 1) / 2), 240 + i * 12, 1, C.text));
+    ctx.globalAlpha = 1;
+  }
 
-  // 闇から見えてくる
+  // 闇から見えてくる（拠点が闇に沈んでいくのと同じく16段階で滑らかに）
   if (t < ENDING.fadeIn) {
-    ctx.globalAlpha = Math.ceil((1 - t / ENDING.fadeIn) * 8) / 8;
+    ctx.globalAlpha = Math.ceil((1 - t / ENDING.fadeIn) * 16) / 16;
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = 1;
   }
+
+  // 得点の総計は闇の上に描く（拠点が闇に沈むあいだも残っていた表示が、そのまま続いて見えるように）
+  scoreCounter(ctx, t, total, L, texts.total);
 }
 
 /**
  * タイトル：闇に浮かぶ家と、その前に立つ少女。家はゆっくり上下に漂い、闇には細かな塵が漂う。
  * 家は、クリアしたステージに当たる部分だけが戻っていて（HOUSE_PARTS）、戻った部分の窓と門灯に暖かい明かりがともる。
- * collapsed ならエンディングのあとで、家はなくガレキの山だけが残っていて、少女もいない。
  * 文字はタイトルのロゴと、prompt（はじめ方の一言。null なら出さない）だけ。
  * home なら家に帰ってくる演出（HOMECOMING）で、ロゴも案内も出さず、その部分が戻っていく
  */
@@ -407,74 +487,70 @@ export function drawTitle(ctx: CanvasRenderingContext2D, t: number, opts: TitleO
   const P = (gx: number, gy: number, h: number): P => ({ x: Math.round(OX + (gx - gy) * 12), y: Math.round(OY + (gx + gy) * 6 - h) });
   const quad = (pts: [number, number, number][], color: string) => fillQuad(ctx, pts.map(([x, y, h]) => P(x, y, h)), color);
   lot(ctx);
-  if (opts.collapsed) {
-    rubble(ctx, 1);
-  } else {
-    house(ctx, 0, 0, quad, P, sprites, { restored, lit: true });
-    // 明かりのともった窓と門灯の下の土に、うっすら光が落ちる
-    const glows = [
-      ...WINDOWS.filter((w) => w.h0 < F1).map((w) => ({ part: w.part, q: w.face === 'y' ? P((w.u0 + w.u1) / 2, 5.6, 0) : P(6.6, (w.u0 + w.u1) / 2, 0) })),
-      { part: 'STAGE1', q: P(PORCH_LAMP.u, 5.5, 0) },
-    ];
-    for (const { part, q } of glows) {
-      ctx.globalAlpha = (Math.ceil(restored(part) * 4) / 4) * 0.1;
-      if (ctx.globalAlpha > 0) fillEllipse(ctx, q.x, q.y, 7, 2, C.warm);
-      ctx.globalAlpha = 1;
-    }
-    // 敷石と壁の根もとに伸びた草（玄関が戻ると消える）
-    weeds(ctx, P, Math.ceil((1 - restored('STAGE1')) * 4) / 4);
-    // 戻っていく部分から、埃が舞い上がって消える
-    if (home && restoring > 0 && restoring < 1) restoreMotes(ctx, P, home.part, restoring);
-    if (exit !== null) {
-      // 玄関の引き戸に明かりがともる（家の中で待っているものがある）
-      const u0 = ENTRANCE.u0;
-      const u1 = ENTRANCE.u1;
-      const mid = (u0 + u1) / 2;
-      ctx.globalAlpha = Math.ceil(clamp01((exit - TITLE_OUT.door[0]) / (TITLE_OUT.door[1] - TITLE_OUT.door[0])) * 4) / 4;
-      quad([[u0, 5, 5], [u1, 5, 5], [u1, 5, ENTRANCE.h1], [u0, 5, ENTRANCE.h1]], C.warm);
-      ctx.globalAlpha = 1;
-      quad([[mid - 0.05, 5, 0], [mid + 0.05, 5, 0], [mid + 0.05, 5, ENTRANCE.h1], [mid - 0.05, 5, ENTRANCE.h1]], C.wood);
-      ctx.globalAlpha = 0.12;
-      fillEllipse(ctx, P(mid, 5.6, 0).x, P(mid, 5.6, 0).y, 9, 3, C.warm);
-      ctx.globalAlpha = 1;
-    }
-    if (exit !== null && exit >= TITLE_OUT.turn) {
-      // 振り返って戸口へ歩き、戸口をくぐると家の中の明かりに見えなくなる
-      const [w0, w1] = TITLE_OUT.walk;
-      const u = clamp01((exit - w0) / (w1 - w0));
-      const gy = 6.2 - 1.2 * u;
-      const g = P(1.2, gy, 0);
-      const alpha = clamp01((gy - 5) / 0.5);
-      const img = u > 0 && u < 1 ? sprites.back[1 + (Math.floor(exit * 8) % (sprites.back.length - 1))] : sprites.back[0];
-      const a = Math.ceil(alpha * 4) / 4;
-      if (a > 0) {
-        ctx.globalAlpha = 0.35 * a;
-        fillEllipse(ctx, g.x, g.y, 4, 1, '#000');
-        ctx.globalAlpha = a;
-        ctx.drawImage(img, g.x - GIRL_FOOT_X, g.y - GIRL_FOOT_Y);
-      }
-      ctx.globalAlpha = 1;
-      ctx.restore();
-      ctx.globalAlpha = home ? 0 : 1 - Math.ceil(clamp01(exit / TITLE_OUT.logo) * 4) / 4;
-      if (ctx.globalAlpha > 0) logo(ctx, t, false);
-      ctx.globalAlpha = Math.ceil(clamp01((exit - TITLE_OUT.fade[0]) / (TITLE_OUT.fade[1] - TITLE_OUT.fade[0])) * 4) / 4;
-      ctx.fillStyle = C.bg;
-      ctx.fillRect(0, 0, W, H);
-      ctx.globalAlpha = 1;
-      return;
-    }
-    // 少女：玄関の前の敷石に立って、拍に合わせて身体を揺らしている
-    const g = P(1.2, 6.2, 0);
-    const dip = (t % opts.beatSec) / opts.beatSec < 0.5 ? 1 : 0;
-    ctx.globalAlpha = 0.35;
-    fillEllipse(ctx, g.x, g.y, 4, 1, '#000');
+  house(ctx, 0, 0, quad, P, sprites, { restored, lit: true });
+  // 明かりのともった窓と門灯の下の土に、うっすら光が落ちる
+  const glows = [
+    ...WINDOWS.filter((w) => w.h0 < F1).map((w) => ({ part: w.part, q: w.face === 'y' ? P((w.u0 + w.u1) / 2, 5.6, 0) : P(6.6, (w.u0 + w.u1) / 2, 0) })),
+    { part: 'STAGE1', q: P(PORCH_LAMP.u, 5.5, 0) },
+  ];
+  for (const { part, q } of glows) {
+    ctx.globalAlpha = (Math.ceil(restored(part) * 4) / 4) * 0.1;
+    if (ctx.globalAlpha > 0) fillEllipse(ctx, q.x, q.y, 7, 2, C.warm);
     ctx.globalAlpha = 1;
-    const img = sprites.front[0];
-    // 腰から上だけを沈める（ステージ中の少女と同じ揺れ方）
-    const waist = 17;
-    ctx.drawImage(img, 0, waist, img.width, img.height - waist, g.x - GIRL_FOOT_X, g.y - GIRL_FOOT_Y + waist, img.width, img.height - waist);
-    ctx.drawImage(img, 0, 0, img.width, waist, g.x - GIRL_FOOT_X, g.y - GIRL_FOOT_Y + dip, img.width, waist);
   }
+  // 敷石と壁の根もとに伸びた草（玄関が戻ると消える）
+  weeds(ctx, P, Math.ceil((1 - restored('STAGE1')) * 4) / 4);
+  // 戻っていく部分から、埃が舞い上がって消える
+  if (home && restoring > 0 && restoring < 1) restoreMotes(ctx, P, home.part, restoring);
+  if (exit !== null) {
+    // 玄関の引き戸に明かりがともる（家の中で待っているものがある）
+    const u0 = ENTRANCE.u0;
+    const u1 = ENTRANCE.u1;
+    const mid = (u0 + u1) / 2;
+    ctx.globalAlpha = Math.ceil(clamp01((exit - TITLE_OUT.door[0]) / (TITLE_OUT.door[1] - TITLE_OUT.door[0])) * 4) / 4;
+    quad([[u0, 5, 5], [u1, 5, 5], [u1, 5, ENTRANCE.h1], [u0, 5, ENTRANCE.h1]], C.warm);
+    ctx.globalAlpha = 1;
+    quad([[mid - 0.05, 5, 0], [mid + 0.05, 5, 0], [mid + 0.05, 5, ENTRANCE.h1], [mid - 0.05, 5, ENTRANCE.h1]], C.wood);
+    ctx.globalAlpha = 0.12;
+    fillEllipse(ctx, P(mid, 5.6, 0).x, P(mid, 5.6, 0).y, 9, 3, C.warm);
+    ctx.globalAlpha = 1;
+  }
+  if (exit !== null && exit >= TITLE_OUT.turn) {
+    // 振り返って戸口へ歩き、戸口をくぐると家の中の明かりに見えなくなる
+    const [w0, w1] = TITLE_OUT.walk;
+    const u = clamp01((exit - w0) / (w1 - w0));
+    const gy = 6.2 - 1.2 * u;
+    const g = P(1.2, gy, 0);
+    const alpha = clamp01((gy - 5) / 0.5);
+    const img = u > 0 && u < 1 ? sprites.back[1 + (Math.floor(exit * 8) % (sprites.back.length - 1))] : sprites.back[0];
+    const a = Math.ceil(alpha * 4) / 4;
+    if (a > 0) {
+      ctx.globalAlpha = 0.35 * a;
+      fillEllipse(ctx, g.x, g.y, 4, 1, '#000');
+      ctx.globalAlpha = a;
+      ctx.drawImage(img, g.x - GIRL_FOOT_X, g.y - GIRL_FOOT_Y);
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    ctx.globalAlpha = home ? 0 : 1 - Math.ceil(clamp01(exit / TITLE_OUT.logo) * 4) / 4;
+    if (ctx.globalAlpha > 0) logo(ctx, t);
+    ctx.globalAlpha = Math.ceil(clamp01((exit - TITLE_OUT.fade[0]) / (TITLE_OUT.fade[1] - TITLE_OUT.fade[0])) * 4) / 4;
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+    return;
+  }
+  // 少女：玄関の前の敷石に立って、拍に合わせて身体を揺らしている
+  const g = P(1.2, 6.2, 0);
+  const dip = (t % opts.beatSec) / opts.beatSec < 0.5 ? 1 : 0;
+  ctx.globalAlpha = 0.35;
+  fillEllipse(ctx, g.x, g.y, 4, 1, '#000');
+  ctx.globalAlpha = 1;
+  const img = sprites.front[0];
+  // 腰から上だけを沈める（ステージ中の少女と同じ揺れ方）
+  const waist = 17;
+  ctx.drawImage(img, 0, waist, img.width, img.height - waist, g.x - GIRL_FOOT_X, g.y - GIRL_FOOT_Y + waist, img.width, img.height - waist);
+  ctx.drawImage(img, 0, 0, img.width, waist, g.x - GIRL_FOOT_X, g.y - GIRL_FOOT_Y + dip, img.width, waist);
   ctx.restore();
 
   if (home) {
@@ -485,27 +561,27 @@ export function drawTitle(ctx: CanvasRenderingContext2D, t: number, opts: TitleO
     ctx.globalAlpha = 1;
     return;
   }
-  logo(ctx, t, opts.collapsed);
+  logo(ctx, t);
   if (opts.prompt && exit === null && Math.floor(t * 1.6) % 2 === 0) {
     const scale = 1;
     const tw = textWidth(opts.prompt, scale);
-    drawText(ctx, opts.prompt, Math.round(W / 2 - tw / 2) + 1, 257, scale, C.bg);
-    drawText(ctx, opts.prompt, Math.round(W / 2 - tw / 2), 256, scale, C.text);
+    drawText(ctx, opts.prompt, Math.round(W / 2 - tw / 2) + 1, 247, scale, C.bg);
+    drawText(ctx, opts.prompt, Math.round(W / 2 - tw / 2), 246, scale, C.text);
   }
 }
 
-/** タイトルのロゴ。大きな文字の下に、細い線を一本。エンディングのあとは色が沈む */
-function logo(ctx: CanvasRenderingContext2D, t: number, collapsed: boolean): void {
+/** タイトルのロゴ。大きな文字の下に、細い線を一本 */
+function logo(ctx: CanvasRenderingContext2D, t: number): void {
   const text = 'METROGRID';
   const scale = 4;
   const tw = textWidth(text, scale);
   const x = Math.round(W / 2 - tw / 2);
   const y = 30;
   drawText(ctx, text, x + 2, y + 2, scale, '#000');
-  drawText(ctx, text, x, y, scale, collapsed ? C.textDim : C.text);
+  drawText(ctx, text, x, y, scale, C.text);
   // 線は、ゆっくり左右へ伸び縮みする（呼吸のように）
   const half = Math.round(tw / 2 - 6 - Math.sin(t * 0.8) * 4);
-  ctx.fillStyle = collapsed ? C.rubbleWoodDark : C.textDim;
+  ctx.fillStyle = C.textDim;
   ctx.fillRect(W / 2 - half, y + GLYPH_H * scale + 6, half * 2, 1);
 }
 
@@ -766,28 +842,9 @@ function house(
     for (const [g, v] of LOWER_HOLES) lowerRoof(g, g + 0.38, v, v + 0.2, C.bg);
   });
 
-  // 少女（ベランダ）。手すりより奥に描く
-  girl(ctx, t, P, sprites);
-
-  // ベランダ：床と手すり
+  // ベランダの床
   quad([[1.7, F2_FRONT, BALCONY_H], [4.3, F2_FRONT, BALCONY_H], [4.3, BALCONY_FRONT, BALCONY_H], [1.7, BALCONY_FRONT, BALCONY_H]], C.wood);
   quad([[1.7, BALCONY_FRONT, BALCONY_H], [4.3, BALCONY_FRONT, BALCONY_H], [4.3, BALCONY_FRONT, BALCONY_H - 2], [1.7, BALCONY_FRONT, BALCONY_H - 2]], C.woodDark);
-  for (let i = 0; i <= 8; i++) {
-    const g = 1.7 + (2.6 * i) / 8;
-    const a = P(g, BALCONY_FRONT, BALCONY_H);
-    const b = P(g, BALCONY_FRONT, BALCONY_H + 8);
-    plotLine(ctx, a.x, a.y, b.x, b.y, C.rail);
-  }
-  for (const g of [F2_FRONT + 0.4, F2_FRONT + 0.8]) {
-    const a = P(4.3, g, BALCONY_H);
-    const b = P(4.3, g, BALCONY_H + 8);
-    plotLine(ctx, a.x, a.y, b.x, b.y, C.rail);
-  }
-  const r0 = P(1.7, BALCONY_FRONT, BALCONY_H + 9);
-  const r1 = P(4.3, BALCONY_FRONT, BALCONY_H + 9);
-  const r2 = P(4.3, F2_FRONT, BALCONY_H + 9);
-  plotLine(ctx, r0.x, r0.y, r1.x, r1.y, C.rail);
-  plotLine(ctx, r1.x, r1.y, r2.x, r2.y, C.rail);
 
   // 二階の屋根：棟は x 方向。奥の斜面（少しだけ見える）、手前の斜面、+x 側の妻
   quad([[-0.4, 1.8, RIDGE], [6.4, 1.8, RIDGE], [6.4, -0.4, F2 - 1], [-0.4, -0.4, F2 - 1]], C.roofLine);
@@ -821,35 +878,62 @@ function house(
     for (const [g, v] of UPPER_HOLES) upperRoof(g, g + 0.4, v, v + 0.12, C.bg);
   });
 
+  // 少女（ベランダ）。床の上、手すりより奥に描く。屋根のあとに描くのは、少女が軒より背が高く、軒の下で頭が欠けないように
+  // （戸口より奥にいるあいだは見えないので、二階の壁や軒の前に出ることはない）
+  const pose = girlPose(t, sprites);
+  if (pose) drawGirl(ctx, pose, P);
+
+  // ベランダの手すり
+  for (let i = 0; i <= 8; i++) {
+    const g = 1.7 + (2.6 * i) / 8;
+    const a = P(g, BALCONY_FRONT, BALCONY_H);
+    const b = P(g, BALCONY_FRONT, BALCONY_H + 8);
+    plotLine(ctx, a.x, a.y, b.x, b.y, C.rail);
+  }
+  for (const g of [F2_FRONT + 0.4, F2_FRONT + 0.8]) {
+    const a = P(4.3, g, BALCONY_H);
+    const b = P(4.3, g, BALCONY_H + 8);
+    plotLine(ctx, a.x, a.y, b.x, b.y, C.rail);
+  }
+  const r0 = P(1.7, BALCONY_FRONT, BALCONY_H + 9);
+  const r1 = P(4.3, BALCONY_FRONT, BALCONY_H + 9);
+  const r2 = P(4.3, F2_FRONT, BALCONY_H + 9);
+  plotLine(ctx, r0.x, r0.y, r1.x, r1.y, C.rail);
+  plotLine(ctx, r1.x, r1.y, r2.x, r2.y, C.rail);
+
 }
 
-/** ベランダの少女：戸口から出てきて、手を挙げ、手を下ろして、家の中へ戻る */
-function girl(ctx: CanvasRenderingContext2D, t: number, P: (gx: number, gy: number, h: number) => P, sprites: EndingSprites): void {
+/** ベランダの少女：戸口から出てきて、手を挙げ、手を下ろして、家の中へ戻る。いないときは null */
+function girlPose(t: number, sprites: EndingSprites): { gy: number; img: HTMLCanvasElement; alpha: number } | null {
   const [o0, o1] = ENDING.walkOut;
   const [i0, i1] = ENDING.walkIn;
-  if (t < o0 || t >= i1) return;
+  if (t < o0 || t >= i1) return null;
   let gy: number;
   let img: HTMLCanvasElement;
-  let alpha = 1;
+  let alpha: number;
   const walkFrame = (frames: HTMLCanvasElement[]) => frames[1 + (Math.floor(t * 8) % (frames.length - 1))];
   if (t < o1) {
     const u = (t - o0) / (o1 - o0);
     gy = GIRL_IN + (GIRL_OUT - GIRL_IN) * u;
     img = walkFrame(sprites.front);
-    alpha = clamp01(u * 3);
   } else if (t < i0) {
     gy = GIRL_OUT;
     img = t >= ENDING.raise && t < ENDING.lower ? sprites.raise : sprites.front[0];
   } else {
-    // 振り返って、ふだんどおりの足どりで戸口へ。戸口をくぐると暗がりに見えなくなる
+    // 振り返って、ふだんどおりの足どりで戸口へ
     const u = (t - i0) / (i1 - i0);
     gy = GIRL_OUT + (GIRL_IN - GIRL_OUT) * u;
     img = walkFrame(sprites.back);
-    alpha = clamp01((1 - u) * 3);
   }
-  const p = P(GIRL_X, gy, BALCONY_H);
-  ctx.globalAlpha = alpha;
-  ctx.drawImage(img, p.x - GIRL_FOOT_X, p.y - GIRL_FOOT_Y);
+  // 戸口の暗がりから浮かび上がり、戸口をくぐると暗がりに見えなくなる（戸口より奥では見せない。頭が戸の上の壁に欠けるので）
+  alpha = clamp01((gy - F2_FRONT) / 0.3);
+  return { gy, img, alpha };
+}
+
+function drawGirl(ctx: CanvasRenderingContext2D, pose: { gy: number; img: HTMLCanvasElement; alpha: number }, P: (gx: number, gy: number, h: number) => P): void {
+  const p = P(GIRL_X, pose.gy, BALCONY_H);
+  ctx.globalAlpha = pose.alpha;
+  ctx.drawImage(pose.img, p.x - GIRL_FOOT_X, p.y - GIRL_FOOT_Y);
   ctx.globalAlpha = 1;
 }
 
@@ -870,20 +954,49 @@ function girlLight(ctx: CanvasRenderingContext2D, x: number, y: number, L: numbe
   ctx.globalAlpha = 1;
 }
 
-/** 使われていく得点：画面の上の数字が減り、その分の光の粒が少女の手へ流れ込む */
-function scoreCounter(ctx: CanvasRenderingContext2D, t: number, total: number, L: number): void {
+/** 拠点の得点の総計の表示（renderer の hubTotal）の左上。エンディングのはじめは同じ位置・大きさで出す */
+const TOTAL_AT = { x: 6, y: 13 };
+/** 得点の総計が、拠点の位置から画面の上の真ん中へ動いて大きくなる（動きはじめ、大きくなる）。大きくなるのは手を挙げるとき */
+const TOTAL_MOVE = [2.8, ENDING.raise];
+
+/**
+ * 使われていく得点：はじめは拠点と同じ「TOTAL 0000000」を同じ位置に出しておき、画面の上の真ん中へ動いて大きくなる。
+ * それから数字が減り、その分の光の粒が少女の手へ流れ込む
+ */
+function scoreCounter(ctx: CanvasRenderingContext2D, t: number, total: number, L: number, totalText: (n: string) => string): void {
   const [a, b] = ENDING.light;
-  if (t < a - 0.6 || t > ENDING.lower + 1) return;
-  const appear = clamp01((t - (a - 0.6)) / 0.6) * (1 - clamp01((t - ENDING.lower) / 1));
+  if (t > ENDING.lower + 1) return;
   const left = Math.round(total * (1 - usedAt(t)));
   const label = String(left).padStart(7, '0');
   const scale = 2;
   const tw = textWidth(label, scale);
   const x = Math.round(W / 2 - tw / 2);
   const y = 22;
+  const [m0, m1] = TOTAL_MOVE;
+  if (t < m1) {
+    // 拠点の表示のまま → 「TOTAL」が消えて、数字だけが真ん中へ動く（小さいまま。着いたところで大きくなる）
+    const prefix = totalText('');
+    const u = clamp01((t - m0) / (m1 - m0));
+    const e = u * u * (3 - 2 * u);
+    // 拠点の表示で数字が始まる位置（「TOTAL 」の幅だと、末尾の字間の 1 ドットぶん左にずれる）
+    const from = { x: TOTAL_AT.x + textWidth(totalText(label), 1) - textWidth(label, 1), y: TOTAL_AT.y };
+    const to = { x: Math.round(W / 2 - textWidth(label, 1) / 2), y: y + Math.round((GLYPH_H * scale - GLYPH_H) / 2) };
+    const px = Math.round(from.x + (to.x - from.x) * e);
+    const py = Math.round(from.y + (to.y - from.y) * e);
+    ctx.globalAlpha = 1 - Math.ceil(clamp01(u / 0.4) * 4) / 4;
+    if (ctx.globalAlpha > 0) {
+      drawText(ctx, prefix, TOTAL_AT.x + 1, TOTAL_AT.y + 1, 1, C.bg);
+      drawText(ctx, prefix, TOTAL_AT.x, TOTAL_AT.y, 1, C.gem);
+    }
+    ctx.globalAlpha = 1;
+    drawText(ctx, label, px + 1, py + 1, 1, C.bg);
+    drawText(ctx, label, px, py, 1, C.gem);
+    return;
+  }
+  const appear = 1 - clamp01((t - ENDING.lower) / 1);
   ctx.globalAlpha = Math.ceil(appear * 4) / 4;
   drawText(ctx, label, x + 1, y + 1, scale, C.bg);
-  drawText(ctx, label, x, y, scale, L > 0 ? C.lightCore : C.text);
+  drawText(ctx, label, x, y, scale, C.gem);
   ctx.globalAlpha = 1;
   // 光の粒：数字から少女の手へ。使われる勢いが強いほど多い
   if (t >= a && t < b) {

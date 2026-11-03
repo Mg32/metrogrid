@@ -13,8 +13,8 @@ const EN = {
   start: 'PRESS ENTER / TAP',
   reset: 'RESET',
   tutorial: 'TUTORIAL',
-  skipTutorial: 'SKIP TUTORIAL',
-  otherLang: '日本語',
+  otherLang: 'にほんご',
+  sound: (on: boolean): string => (on ? 'SOUND ON' : 'SOUND OFF'),
   // ボタン
   home: 'HOME',
   retry: 'RETRY',
@@ -45,6 +45,8 @@ const EN = {
   wait: 'WAIT',
   stop: 'STOP!',
   cleared: 'CLEARED',
+  // エンディングのあと、ガレキの画面の下に出る結びの文（2行）
+  epilogue: ['FROM THEN ON, THE TSUKUMOGAMI OF THE HOUSE', 'NEVER APPEARED ANYWHERE AGAIN.'],
   stage: (name: string) =>
       (name === 'UPSTAIRS' ? 'UPSTAIRS' : name.replace(/(\d+)$/, ' $1')),
 };
@@ -54,17 +56,17 @@ const JA: typeof EN = {
   start: 'ENTER/TAP ではじめる',
   reset: 'リセット',
   tutorial: 'チュートリアル',
-  skipTutorial: 'チュートリアルをとばす',
   otherLang: 'ENGLISH',
+  sound: (on: boolean) => (on ? 'サウンドON' : 'サウンドOFF'),
   // ボタン
   home: 'もどる',
   retry: 'やりなおす',
   title: 'タイトルへ',
-  skip: 'とばす',
+  skip: 'スキップ',
   // 確認
   upstairs: 'ほんとうに 2かいへ のぼる？',
-  erase: 'きろくを すべて けしますか？',
-  eraseNote: 'クリアしたステージと、ためたスコアが きえます。',
+  erase: 'きろくを すべて けす？',
+  eraseNote: 'クリアしたステージと ためたスコアが きえます。',
   yes: (selected: boolean): string => (selected ? '>はい' : ' はい'),
   no: (selected: boolean): string => (selected ? '>いいえ' : ' いいえ'),
   // 結果
@@ -86,6 +88,7 @@ const JA: typeof EN = {
   wait: 'WAIT',
   stop: 'STOP!',
   cleared: 'CLEARED',
+  epilogue: ['それから いえの つくもがみは', 'もう どこにも すがたを みせません。'],
   stage: (name: string) => name === 'UPSTAIRS' ? '2かい' :
       name === 'TUTORIAL'                      ? 'チュートリアル' :
                             name.replace(/^STAGE(\d+)$/, 'STAGE $1'),

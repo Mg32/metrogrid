@@ -1,4 +1,4 @@
-import { audioContext, unlockAudio } from './context.ts';
+import { audioContext, audioOut, unlockAudio } from './context.ts';
 import { loadSound } from './sounds.ts';
 
 /**
@@ -69,7 +69,7 @@ export class Metronome implements Conductor {
     const ctx = this.ctx;
     this.master = ctx.createGain();
     this.master.gain.value = 0.35;
-    this.master.connect(ctx.destination);
+    this.master.connect(audioOut());
 
     this.beatSec = 60 / opts.bpm;
     this.nextBeat = -opts.countInBars * 4;
@@ -174,7 +174,7 @@ export class Music implements Conductor {
     // 拠点の曲は繰り返す（拍がずれないよう、曲の長さはちょうど小節の倍数にしておく）
     src.loop = opts.loop ?? false;
     const gain = ctx.createGain();
-    gain.connect(ctx.destination);
+    gain.connect(audioOut());
     src.connect(gain);
     // 無音の小節のぶん、曲のファイルの頭を遅らせる
     const at = ctx.currentTime + 0.1 + (opts.waitBars ?? 0) * barSec;

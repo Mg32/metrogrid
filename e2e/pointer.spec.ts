@@ -11,12 +11,18 @@ const POINTERS = [
   { name: 'タッチ', device: MOBILE, type: 'touch' },
 ] as const;
 
-/** 画面の下の隅のボタン（左は Esc、右は R などのボタン）、タイトルの右上の言語のボタン、確認の YES・NO */
+/** 画面の下の隅のボタン（左は Esc、右は R などのボタン）、確認の YES・NO。タイトルのボタンは並びが変わるので btn() で探す */
 const LEFT_BTN = [34, 288 - 15] as const;
 const RIGHT_BTN = [288 - 34, 288 - 15] as const;
-const LANG_BTN = [288 - 30, 15] as const;
 const YES_BTN = [114, 164] as const;
 const NO_BTN = [178, 164] as const;
+
+/** いまの場面の、key のボタンの中心（バッファ上の座標） */
+async function btn(page: Page, key: string): Promise<[number, number]> {
+  const b = (await game(page)).buttons.find((b) => b.key === key);
+  if (!b) throw new Error(`ボタン ${key} がない`);
+  return [b.x + b.w / 2, b.y + b.h / 2];
+}
 
 for (const p of POINTERS) {
   test.describe(p.name, () => {
@@ -80,29 +86,72 @@ for (const p of POINTERS) {
       expect(errors).toEqual([]);
     });
 
+    if (p.type === 'mouse') {
+      test('マウスがボタンの上にあると、カーソルが指の形になる', async ({ page }) => {
+        const errors = collectErrors(page);
+        await page.goto('/?seed=1');
+        await frames(page);
+        const cursor = () => page.evaluate(() => document.querySelector('canvas')!.style.cursor);
+        const on = await client(page, ...(await btn(page, 'KeyM')));
+        await page.mouse.move(on.x, on.y);
+        await frames(page);
+        expect(await cursor()).toBe('pointer');
+        const off = await client(page, 144, 144);
+        await page.mouse.move(off.x, off.y);
+        await frames(page);
+        expect(await cursor()).toBe('');
+        expect(errors).toEqual([]);
+      });
+    }
+
     if (p.type === 'touch') {
-      test('タイトルの右上のボタンで、日本語と英語が切り替わる（始まらない）', async ({ page }) => {
+      test('タイトルの言語のボタンで、日本語と英語が切り替わる（始まらない）', async ({ page }) => {
         const errors = collectErrors(page);
         await page.goto('/?seed=1');
         await frames(page);
         const first = (await game(page)).lang;
-        await tap(page, LANG_BTN);
+        await tap(page, await btn(page, 'KeyL'));
         await frames(page);
         expect((await game(page)).lang).toBe(first === 'ja' ? 'en' : 'ja');
-        await tap(page, LANG_BTN);
+        await tap(page, await btn(page, 'KeyL'));
         await frames(page);
         expect((await game(page)).lang).toBe(first);
         expect((await game(page)).scene).toBe('title');
         expect(errors).toEqual([]);
       });
 
-      test('タイトルの SKIP TUTORIAL で、チュートリアルを飛ばして拠点へ', async ({ page }) => {
+      test('タイトルの音のボタンで、音のオン・オフが切り替わる（始まらない）', async ({ page }) => {
         const errors = collectErrors(page);
         await page.goto('/?seed=1');
         await frames(page);
-        await tap(page, [288 - 40, 288 - 15]);
-        await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
-        expect(await page.evaluate(() => localStorage.getItem('metrogrid.cleared'))).toContain('TUTORIAL');
+        await tap(page, await btn(page, 'KeyM'));
+        await frames(page);
+        expect((await game(page)).sound).toBe(false);
+        await tap(page, await btn(page, 'KeyM'));
+        await frames(page);
+        expect((await game(page)).sound).toBe(true);
+        expect((await game(page)).scene).toBe('title');
+        expect(errors).toEqual([]);
+      });
+
+      test('タイトルのボタンは画面の下に横に並ぶ。はじめてはチュートリアルのボタンの場所が空いていて、済ませたらもう一度遊べる', async ({ page }) => {
+        const errors = collectErrors(page);
+        await page.goto('/?seed=1');
+        await frames(page);
+        const first = (await game(page)).buttons;
+        expect(first.map((b) => b.key)).toEqual(['Delete', 'KeyL', 'KeyM']);
+        expect(new Set(first.map((b) => b.y)).size).toBe(1);
+        expect(first[0].y).toBeGreaterThan(288 / 2);
+
+        await page.evaluate(() => localStorage.setItem('metrogrid.cleared', JSON.stringify(['TUTORIAL'])));
+        await page.goto('/?seed=1');
+        await frames(page);
+        const done = (await game(page)).buttons;
+        expect(done.map((b) => b.key)).toEqual(['Delete', 'KeyL', 'KeyT', 'KeyM']);
+        // はじめてのときは、チュートリアルのボタンの場所が空いている（ほかのボタンの位置は変わらない）
+        expect(done.filter((b) => b.key !== 'KeyT')).toEqual(first);
+        await tap(page, await btn(page, 'KeyT'));
+        await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('TUTORIAL');
         expect(errors).toEqual([]);
       });
 
@@ -112,13 +161,13 @@ for (const p of POINTERS) {
         await page.evaluate(() => localStorage.setItem('metrogrid.cleared', JSON.stringify(['TUTORIAL', 'STAGE1'])));
         await page.goto('/?seed=1');
         await frames(page);
-        await tap(page, LEFT_BTN);
+        await tap(page, await btn(page, 'Delete'));
         await expect.poll(async () => (await game(page)).scene).toBe('confirm');
         await tap(page, NO_BTN);
         await expect.poll(async () => (await game(page)).scene).toBe('title');
         expect(await page.evaluate(() => localStorage.getItem('metrogrid.cleared'))).not.toBeNull();
 
-        await tap(page, LEFT_BTN);
+        await tap(page, await btn(page, 'Delete'));
         await expect.poll(async () => (await game(page)).scene).toBe('confirm');
         await tap(page, YES_BTN);
         await frames(page);

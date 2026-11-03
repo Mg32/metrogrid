@@ -19,7 +19,7 @@ import {
   TH,
   TW,
 } from './pixel.ts';
-import { drawEnding, drawTitle, type TitleOpts } from './ending.ts';
+import { drawEnding, drawTitle, type EndingTexts, type TitleOpts } from './ending.ts';
 import { THINGS } from './things.ts';
 import { lang, msg } from '../lang.ts';
 import { STICK_RADIUS } from '../touch.ts';
@@ -36,6 +36,12 @@ const MAX_SCALE = 4;
 const FLOOR_THICK = 6;
 /** スタートの後ろの階段（StageDef.stairs）の1段の高さ */
 const STAIR_H = 6;
+/** 拠点の二階への階段（stairs()）の段 i（0 が手前のいちばん低い段）の踏み面の真ん中：入口のマスからの x のずれ（マス。左上が負）と高さ（ドット） */
+const STAIR_STEP_X = (i: number) => 0.35 - i * 0.32;
+const STAIR_STEP_H = (i: number) => (i + 1) * 5;
+/** 二階への階段を昇る：昇る段の数と、1段にかける秒（main.ts の UP_FADE のあいだに昇りきる） */
+const UPSTAIRS_STEPS = 6;
+const UPSTAIRS_STEP_SEC = 0.22;
 /**
  * 階段のあるステージ（チュートリアル）の始まり：はじめは誰もいない。APPEAR_BARS 小節（曲は鳴らさない）で階段のいちばん下に
  * 少女が現れ、次の1小節（曲の前奏。カウント）で1拍1段ずつ昇ってスタートに着く。main.ts はこのぶん曲の頭を遅らせる
@@ -634,6 +640,8 @@ export class Renderer {
   hubReveal: { def: Stage['def']; order: ReadonlyMap<number, number> } | null = null;
   /** ハブの入口の下に出す一言（クリア済みなど）。main.ts が設定する */
   portalNote: (stage: string) => string | null = () => null;
+  /** 二階へ昇ると決めてからの秒（拠点が闇に沈んでいくあいだ。少女が階段を昇っていく）。それ以外は null。main.ts が設定する */
+  upstairsSec: number | null = null;
   private lot: HTMLCanvasElement;
   /** ステージごとの、各マスの街灯の明るさ */
   private lightMaps = new WeakMap<Stage, Uint8Array>();
@@ -747,9 +755,9 @@ export class Renderer {
 
   /**
    * タップできるボタン（バッファ上の矩形）。selected は選んでいる状態（確認の YES など）。
-   * keyLabel は同じことができるキーの名前で、四角で囲んでラベルの左に添える
+   * keyLabel は同じことができるキーの名前で、四角で囲んでラベルの左に添える。hover はマウスが上にある（下地と枠を明るくする）
    */
-  buttons(list: { label: string; keyLabel: string; x: number; y: number; w: number; h: number; selected?: boolean }[]): void {
+  buttons(list: { label: string; keyLabel: string; x: number; y: number; w: number; h: number; selected?: boolean; hover?: boolean }[]): void {
     const ctx = this.lctx;
     for (const b of list) {
       const color = b.selected ? COLORS.gem : COLORS.text;
@@ -759,9 +767,14 @@ export class Renderer {
         ctx.globalAlpha = 0.7;
         ctx.fillStyle = COLORS.bg;
         ctx.fillRect(b.x, b.y, b.w, b.h);
+        if (b.hover) {
+          ctx.globalAlpha = 0.8;
+          ctx.fillStyle = COLORS.dot;
+          ctx.fillRect(b.x + 1, b.y + 1, b.w - 2, b.h - 2);
+        }
         ctx.globalAlpha = 1;
       }
-      strokeRect(ctx, b.x, b.y, b.w, b.h, b.selected ? COLORS.gem : COLORS.dot);
+      strokeRect(ctx, b.x, b.y, b.w, b.h, b.selected ? COLORS.gem : b.hover ? COLORS.text : COLORS.dot);
       if (b.label) {
         const x0 = Math.round(b.x + (b.w - capW - 4 - textWidth(b.label, 1)) / 2);
         this.keycap(b.keyLabel, x0, b.y + b.h / 2, color);
@@ -853,7 +866,27 @@ export class Renderer {
       walk = climb.walk;
       odd = climb.to % 2 !== 0;
     }
-    const drop = climb ? Math.round(climb.k * STAIR_H) : 0;
+    let drop = climb ? Math.round(climb.k * STAIR_H) : 0;
+    // 二階へ昇る：二階への階段（stairs() の段）を1段ずつ昇り、上の段ほど闇に溶ける。
+    // 段 j の踏み面の真ん中は、入口のマスから左上へ STAIR_STEP_X(j) マス、高さ STAIR_STEP_H(j) ドット。少女は入口のマスの真ん中（床）から、段 1 → 段 6 と乗っていく
+    const up = this.upstairsSec !== null && sim.status === 'portal' ? this.upstairsSec / UPSTAIRS_STEP_SEC : null;
+    let upAlpha = 1;
+    if (up !== null) {
+      const s = Math.min(up, UPSTAIRS_STEPS);
+      const i = Math.floor(s);
+      const u = s - i;
+      // 1段のうち、はじめの半分で次の段へ上がる
+      const k = Math.min(1, u * 2);
+      const at = (n: number) => (n === 0 ? { x: 0, h: 0 } : { x: STAIR_STEP_X(n), h: STAIR_STEP_H(n) });
+      const a = at(i);
+      const b = at(Math.min(i + 1, UPSTAIRS_STEPS));
+      px = sim.x + lerp(a.x, b.x, k);
+      py = sim.y;
+      drop = -Math.round(lerp(a.h, b.h, k));
+      walk = s < UPSTAIRS_STEPS ? u : 1;
+      odd = i % 2 !== 0;
+      upAlpha = 1 - s / (UPSTAIRS_STEPS + 1);
+    }
     // ステージの始まり：カウントの頭の拍で、少女がスタートに現れる（チュートリアルは階段の演出 climb）
     const beatU = songTime / (tickSec * TICKS_PER_BEAT);
     const atStart = sim.x === stage.start.x && sim.y === stage.start.y && !moved;
@@ -877,10 +910,11 @@ export class Renderer {
       const g = iso(gate.x, gate.y);
       this.camX = lerp(p.sx, g.sx, look);
       this.camY = lerp(p.sy, g.sy, look);
-    } else {
+    } else if (up === null) {
       this.camX = lerp(this.camX, p.sx, 0.12);
       this.camY = lerp(this.camY, p.sy, 0.12);
     }
+    // 二階への階段を昇っているあいだは、カメラを上り口に止めておく（少女だけが昇っていく）
     const offX = Math.round(LW / 2 - this.camX);
     const offY = Math.round(LH / 2 - this.camY - 8);
     ctx.save();
@@ -1082,7 +1116,8 @@ export class Renderer {
               if (target === 'UPSTAIRS') this.stairs(sx, sy);
               else this.goalDoor(sx, sy, pulse, PORTAL_LIGHT[target]);
               ctx.globalAlpha = 1;
-              if (flash !== null && flash >= 0 && flash < 1) this.revealFlash(sx, sy, flash, PORTAL_LIGHT[target] ?? COLORS.goal);
+              // 二階への階段は光の柱を立てない（足もとの輪だけ）
+              if (flash !== null && flash >= 0 && flash < 1) this.revealFlash(sx, sy, flash, PORTAL_LIGHT[target] ?? COLORS.goal, target !== 'UPSTAIRS');
             },
           });
           if (Math.max(Math.abs(x - px), Math.abs(y - py)) <= 3 && (flash === null || flash >= 0)) {
@@ -1271,7 +1306,10 @@ export class Renderer {
       });
     }
 
-    if (exitSec !== null) {
+    if (up !== null) {
+      // 階段（入口のマスに描く）より後に描く
+      sprites.push({ depth: sim.x + sim.y + 0.5, draw: () => this.faded(upAlpha, () => this.player(p.sx, p.sy + TH / 2, 'left', walk, odd, tickF)) });
+    } else if (exitSec !== null) {
       sprites.push({ depth: px + py + 0.5, draw: () => this.playerEntering(p.sx, p.sy + TH / 2, sim.facing, exitSec) });
     } else if (gone < 1) {
       const dy = own?.dy ?? 0;
@@ -2230,8 +2268,8 @@ export class Renderer {
     const STEPS = 7;
     // 奥（高い段）から手前へ
     for (let i = STEPS - 1; i >= 0; i--) {
-      const gx = 0.35 - i * 0.32;
-      const top = (i + 1) * 5;
+      const gx = STAIR_STEP_X(i);
+      const top = STAIR_STEP_H(i);
       const pt = (dx: number, dy: number, h: number) => ({
         x: Math.round(sx + ((gx + dx - dy) * TW) / 2),
         y: Math.round(sy + TH / 2 + ((gx + dx + dy) * TH) / 2 - h),
@@ -2276,7 +2314,6 @@ export class Renderer {
     ctx.fillRect(sx - 6, g - 22, 12, 2);
   }
 
-  /** 拠点に現れた入口が放つ光：光の柱と、足もとから広がる輪。k は 0〜1（1 で消える） */
   /** 新しく現れる入口のマス（入口がなければ、最後に現れるマス） */
   private revealGate(stage: Stage, order: ReadonlyMap<number, number>): Vec | null {
     let gate: Vec | null = null;
@@ -2295,12 +2332,13 @@ export class Renderer {
     return gate;
   }
 
-  private revealFlash(sx: number, sy: number, k: number, light: string): void {
+  /** 拠点に現れた入口が放つ光：光の柱（pillar のとき）と、足もとから広がる輪。k は 0〜1（1 で消える） */
+  private revealFlash(sx: number, sy: number, k: number, light: string, pillar: boolean): void {
     const ctx = this.lctx;
     const g = sy + TH / 2;
     const fade = 1 - k;
     ctx.fillStyle = light;
-    for (let r = 0; r < BEACON_H; r += 2) {
+    for (let r = 0; pillar && r < BEACON_H; r += 2) {
       const a = fade * (1 - r / BEACON_H);
       ctx.globalAlpha = 0.3 * a;
       ctx.fillRect(sx - 6, g - 22 - r - 2, 12, 2);
@@ -2590,6 +2628,11 @@ export class Renderer {
     drawText(this.lctx, text, left, top, scale, color);
   }
 
+  /** 拠点の、これまでに溜めた得点の総計（エンディングで使われる値。エンディングのはじめも同じ位置・大きさで出す：ending.ts の TOTAL_AT） */
+  hubTotal(): void {
+    this.text(msg().total(String(this.totalScore).padStart(7, '0')), 6, 15, 1, COLORS.gem);
+  }
+
   hud(sim: Sim, songTime: number, tickSec: number): void {
     const beatSec = tickSec * TICKS_PER_BEAT;
 
@@ -2597,8 +2640,7 @@ export class Renderer {
     if (sim.stage.kind === 'hub') {
       this.beatDots(songTime, beatSec);
       this.text(msg().hub, 6, 7, 1, COLORS.textDim);
-      // これまでに溜めた得点の総計（エンディングで使われる値）
-      this.text(msg().total(String(this.totalScore).padStart(7, '0')), 6, 15, 1, COLORS.gem);
+      this.hubTotal();
       return;
     }
     if (sim.stage.kind === 'tutorial') {
@@ -2717,17 +2759,23 @@ export class Renderer {
   }
 
   /** エンディング（ending.ts）。t は始まってからの秒、total は使われる得点 */
-  ending(t: number, total: number): void {
-    drawEnding(this.lctx, t, total, {
-      front: this.girl[GIRL_DIR.down],
-      back: this.girl[GIRL_DIR.up],
-      raise: this.girlRaise,
-    });
+  ending(t: number, total: number, texts: EndingTexts): void {
+    drawEnding(
+      this.lctx,
+      t,
+      total,
+      {
+        front: this.girl[GIRL_DIR.down],
+        back: this.girl[GIRL_DIR.up],
+        raise: this.girlRaise,
+      },
+      texts,
+    );
   }
 
   /**
    * タイトル（ending.ts の drawTitle）：闇に浮かぶ家と、その前に立つ少女。t は秒。
-   * 家はクリアしたステージに当たる部分が戻っている。collapsed はエンディングのあと（ガレキだけが残る）。
+   * 家はクリアしたステージに当たる部分が戻っている。
    * home は家に帰ってくる演出（ending.ts の HOMECOMING）
    */
   title(t: number, opts: TitleOpts): void {
@@ -2738,11 +2786,11 @@ export class Renderer {
     });
   }
 
-  /** 画面全体を闇で覆う（v は 0〜1。色数を増やさないよう4段階） */
-  darken(v: number): void {
+  /** 画面全体を闇で覆う（v は 0〜1。色数を増やさないよう、ふだんは4段階。長く消えていくところは steps を増やして滑らかに） */
+  darken(v: number, steps = 4): void {
     if (v <= 0) return;
     const ctx = this.lctx;
-    ctx.globalAlpha = Math.ceil(clamp01(v) * 4) / 4;
+    ctx.globalAlpha = Math.ceil(clamp01(v) * steps) / steps;
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, LW, LH);
     ctx.globalAlpha = 1;

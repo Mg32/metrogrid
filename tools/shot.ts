@@ -92,6 +92,7 @@ const SCENES: [string, string][] = args.view
       ['s4-autumn', 'stage=STAGE4&view=29,55,150'],
       ['s4-autumn2', 'stage=STAGE4&view=26,37,200'],
       ['s4-snow', 'stage=STAGE4&view=21,11,250'],
+      ['s4-gutter', 'stage=STAGE4&view=2,11,260'],
       ['s4-goal', 'stage=STAGE4&view=13,4,280'],
       // STAGE 5：夜逃げから廃屋まで
       ['s5-start', 'stage=STAGE5&view=15,107,0'],
@@ -105,7 +106,8 @@ const SCENES: [string, string][] = args.view
       ['s5-roof', 'stage=STAGE5&view=25,15,180'],
       ['s5-goal', 'stage=STAGE5&view=19,6,200'],
       ['hub-stairs', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4,STAGE5&view=4,10,0'],
-      ...[1, 3.5, 6, 9.5, 11.6, 14.3, 16.3, 18.2, 24].map((t): [string, string] => [`ending-${t}`, `ending=${t}&total=48210`]),
+      ...[1, 2.7, 3.3, 4, 6, 9.5, 12, 14.6, 16.3, 17.5, 18, 19.3, 20.5, 22.7, 24.7, 26.3, 32, 38].map((t): [string, string] => [`ending-${t}`, `ending=${t}&total=48210`]),
+      ['ending-38-en', 'ending=38&total=48210&lang=en'],
     ];
 
 const scale = Number(args.scale);

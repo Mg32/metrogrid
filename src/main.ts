@@ -1,5 +1,6 @@
 import './style.css';
 import { Music, type Conductor } from './audio/conductor.ts';
+import { soundOn, toggleSound } from './audio/context.ts';
 import { Sfx } from './audio/sfx.ts';
 import { InputRecorder, makePlayLog } from './game/playlog.ts';
 import { createRandom, randomSeed } from './game/random.ts';
@@ -43,7 +44,7 @@ import { Stick } from './touch.ts';
  * タッチ・マウスでの操作（デスクトップでもスマホでも、画面と操作は同じ。端末で分けない）
  *   歩く：画面のどこかに指を置き（マウスなら押し）、そのままずらした向きへ歩く（右上へずらすと上、右下は右、左下は下、左上は左。
  *         クォータービューの画面の斜めにそのまま対応する）。指を離すか、置いたところへ戻すと止まる（src/touch.ts）
- *   キーの代わり：画面の下の隅のボタン（戻る、やり直す、チュートリアルを飛ばす。タイトルでは記録を消す、チュートリアルを飛ばす・遊ぶ。タイトルの右上は言語の切り替え）。
+ *   キーの代わり：画面の下の隅のボタン（戻る、やり直す、チュートリアルを飛ばす。タイトルでは画面の下に横に並べて、記録を消す、言語の切り替え、チュートリアルをもう一度遊ぶ、音のオン・オフ）。
  *         ボタンはいつでも出し、同じことができるキーを四角で囲んで添える。それ以外の場面ではタップ・クリックが Enter の代わり
  *   二階へ昇るかの確認は、YES を2回タップで決まる（取り返しがつかないので、うっかり1回では決まらないようにする）
  */
@@ -84,7 +85,7 @@ let revealUntil = 0;
 
 const stageLabel = (name: string) => msg().stage(name);
 
-type Scene = 'title' | 'titleOut' | 'homecoming' | 'loading' | 'play' | 'leaving' | 'backing' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
+type Scene = 'title' | 'titleOut' | 'homecoming' | 'loading' | 'play' | 'leaving' | 'backing' | 'result' | 'view' | 'confirm' | 'goingUp' | 'ending' | 'ruins';
 
 /** 歩く向きを決めている指 */
 let steer: Stick | null = null;
@@ -100,13 +101,15 @@ interface Button {
   w: number;
   h: number;
   selected?: boolean;
+  /** マウスが上にある */
+  hover?: boolean;
 }
 
 /** ボタンの大きさ（バッファのドット）。スマホで指で押しやすいように大きめ */
 const BTN_W = 60;
 const BTN_H = 22;
 /** ボタンに添えるキーの名前 */
-const KEY_LABEL: Record<string, string> = { Delete: 'DEL', Escape: 'ESC', KeyR: 'R', KeyT: 'T', KeyY: 'Y', KeyN: 'N', KeyL: 'L' };
+const KEY_LABEL: Record<string, string> = { Delete: 'DEL', Escape: 'ESC', KeyR: 'R', KeyT: 'T', KeyY: 'Y', KeyN: 'N', KeyL: 'L', KeyM: 'M' };
 /** ボタンの幅：BTN_W か、キーの名前とラベルが収まる幅（言語でラベルの長さが変わる） */
 const btnW = (label: string, key: string) => Math.max(BTN_W, textWidth(KEY_LABEL[key], 1) + textWidth(label, 1) + 14);
 const left = (label: string, key: string): Button => ({ label, key, keyLabel: KEY_LABEL[key], x: 4, y: 288 - BTN_H - 4, w: btnW(label, key), h: BTN_H });
@@ -121,14 +124,25 @@ const right = (label: string, key: string): Button => {
  */
 function screenButtons(): Button[] {
   if (scene === 'title') {
-    // はじめてならチュートリアルを飛ばせる。チュートリアルを済ませていれば、もう一度遊べる。右上は言語の切り替え
+    // 画面の下に横に並べる：記録を消す、言語の切り替え、もう一度チュートリアル、音のオン・オフ。
+    // はじめてのときはチュートリアルから始まるので、チュートリアルのボタンの場所は空けておく（飛ばすのはチュートリアルの中の SKIP で）
     const m = msg();
-    const langW = btnW(m.otherLang, 'KeyL');
-    return [
-      left(m.reset, 'Delete'),
-      cleared.has(tutorial.name) ? right(m.tutorial, 'KeyT') : right(m.skipTutorial, 'Escape'),
-      { label: m.otherLang, key: 'KeyL', keyLabel: 'L', x: 288 - langW - 4, y: 4, w: langW, h: BTN_H },
+    const row: (Omit<Button, 'x' | 'y'> | null)[] = [
+      { label: m.reset, key: 'Delete', keyLabel: KEY_LABEL.Delete, w: btnW(m.reset, 'Delete'), h: BTN_H },
+      { label: m.otherLang, key: 'KeyL', keyLabel: 'L', w: btnW(m.otherLang, 'KeyL'), h: BTN_H },
+      cleared.has(tutorial.name) ? { label: m.tutorial, key: 'KeyT', keyLabel: 'T', w: btnW(m.tutorial, 'KeyT'), h: BTN_H } : null,
+      // 音のボタンの幅は、オンでもオフでも変わらないようにする
+      { label: m.sound(soundOn()), key: 'KeyM', keyLabel: 'M', w: Math.max(btnW(m.sound(true), 'KeyM'), btnW(m.sound(false), 'KeyM')), h: BTN_H },
     ];
+    const gap = 4;
+    const widths = row.map((b) => b?.w ?? btnW(m.tutorial, 'KeyT'));
+    let x = Math.round((288 - widths.reduce((s, w) => s + w, 0) - gap * (row.length - 1)) / 2);
+    const placed: Button[] = [];
+    row.forEach((b, i) => {
+      if (b) placed.push({ ...b, x, y: 288 - BTN_H - 4 });
+      x += widths[i] + gap;
+    });
+    return placed;
   }
   if (scene === 'confirm') {
     // 確認の画面の YES・NO の文字を囲む（キーの名前は枠の下）。YES は選んでから、もう一度で決まる
@@ -148,6 +162,12 @@ function screenButtons(): Button[] {
   }
   return [];
 }
+
+/** p（バッファの位置）にあるボタン */
+const buttonAt = (p: { x: number; y: number }): Button | undefined =>
+  screenButtons().find((btn) => p.x >= btn.x && p.x < btn.x + btn.w && p.y >= btn.y && p.y < btn.y + btn.h);
+/** マウスの指しているバッファの位置（ボタンのマウスオーバー用。タッチでは持たない） */
+let hoverAt: { x: number; y: number } | null = null;
 
 let scene: Scene = 'title';
 let sim: Sim | null = null;
@@ -254,13 +274,27 @@ function endingSec(): number {
   return fixedEndingSec ?? performance.now() / 1000 - endingAt;
 }
 
+/** 二階へ昇ると決めてから、拠点の画面と曲が消えていくまで（秒）。消えきったらエンディングへ */
+const UP_FADE = 1.5;
+let goUpAt = 0;
+const goUpSec = () => performance.now() / 1000 - goUpAt;
+
+/** 二階へ昇る：拠点の画面と曲を消していき、エンディングへ */
+function goUpstairs(): void {
+  conductor.fadeOut(UP_FADE);
+  input.clearPressed();
+  steer = null;
+  scene = 'goingUp';
+  goUpAt = performance.now() / 1000;
+}
+
 /** エンディングへ。音を鳴らし、時刻を数えはじめる */
 function startEnding(): void {
   conductor.stop();
   input.clearPressed();
   scene = 'ending';
   endingAt = performance.now() / 1000;
-  sfx.ending({ light: ENDING.light, rumble: ENDING.rumble, jerks: ENDING.jerks, settle: ENDING.settle });
+  sfx.ending({ light: ENDING.light, climax: ENDING.climax, trigger: ENDING.trigger, rumble: ENDING.rumble, jerks: ENDING.jerks, settle: ENDING.settle });
 }
 
 function clearSec(): number | null {
@@ -318,6 +352,15 @@ function setReveal(def: StageDef): void {
 function goHub(from?: string): void {
   const hub = buildHub(cleared);
   void play(hub, (from && hubReturnCell(hub, from)) || undefined);
+}
+
+/** 二階へ昇らなかった：曲を止めずに、階段の上り口の前から歩き続ける */
+function stayDownstairs(): void {
+  const at = sim && hubReturnCell(sim.stage.def, UPSTAIRS);
+  if (!sim || !at) return goHub(UPSTAIRS);
+  sim.leavePortal(at);
+  input.clearPressed();
+  scene = 'play';
 }
 
 /** タイトルから始める。はじめてならチュートリアル、そうでなければ拠点 */
@@ -402,7 +445,7 @@ canvas.addEventListener('pointerdown', (e) => {
   unlockAudio();
   e.preventDefault();
   const b = renderer.toBuffer(e.clientX, e.clientY);
-  const hit = screenButtons().find((btn) => b.x >= btn.x && b.x < btn.x + btn.w && b.y >= btn.y && b.y < btn.y + btn.h);
+  const hit = buttonAt(b);
   if (hit) {
     input.press(hit.key);
     return;
@@ -420,9 +463,13 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 });
 canvas.addEventListener('pointermove', (e) => {
-  if (steer?.id !== e.pointerId) return;
   const b = renderer.toBuffer(e.clientX, e.clientY);
+  if (e.pointerType === 'mouse') hoverAt = b;
+  if (steer?.id !== e.pointerId) return;
   steer.move(b.x, b.y);
+});
+canvas.addEventListener('pointerleave', () => {
+  hoverAt = null;
 });
 const endSteer = (e: PointerEvent) => {
   if (steer?.id === e.pointerId) steer = null;
@@ -440,9 +487,9 @@ function update(): void {
 
   if (scene === 'title') {
     if (input.consumePressed('KeyL')) toggleLang();
+    else if (input.consumePressed('KeyM')) toggleSound();
     else if (input.consumePressed('Delete') || input.consumePressed('Backspace')) openReset();
     else if (start) leaveTitle(startGame);
-    else if (esc && !cleared.has(tutorial.name)) leaveTitle(skipTutorial);
     else if (tut && cleared.has(tutorial.name)) leaveTitle(() => void play(tutorial));
   } else if (scene === 'titleOut') {
     // 少女が家の中へ入っていくあいだは操作できない
@@ -470,10 +517,10 @@ function update(): void {
     }
     const no = esc || input.consumePressed('KeyN') || (start && !confirmYes);
     if ((start || yes) && confirmYes) {
-      if (confirmKind === 'upstairs') startEnding();
+      if (confirmKind === 'upstairs') goUpstairs();
       else resetAll();
     } else if (no) {
-      if (confirmKind === 'upstairs') goHub(UPSTAIRS);
+      if (confirmKind === 'upstairs') stayDownstairs();
       else scene = 'title';
     }
   } else if (scene === 'leaving') {
@@ -482,6 +529,9 @@ function update(): void {
   } else if (scene === 'backing') {
     // 戻る演出のあいだは操作できない
     if (backSec() >= BACK.end) backTo();
+  } else if (scene === 'goingUp') {
+    // 画面と曲が消えていくあいだは操作できない
+    if (goUpSec() >= UP_FADE) startEnding();
   } else if (scene === 'ending') {
     // エンディングは飛ばせない。終わると、ガレキだけが残った画面へ
     if (fixedEndingSec === null && endingSec() > ENDING.end + 2) {
@@ -513,7 +563,8 @@ function update(): void {
       if (sim.events[heardEvents].kind === 'pickup') sfx.pickup(sim.multiplier);
     }
     if (sim.status === 'portal' && sim.portal === UPSTAIRS) {
-      conductor.stop();
+      // 確かめているあいだも拠点の曲は鳴らしたまま（昇ればエンディングで止まり、昇らなければそのまま歩き続ける）
+      steer = null;
       input.clearPressed();
       confirmYes = false;
       confirmKind = 'upstairs';
@@ -540,7 +591,6 @@ function drawTitle(): void {
   const go = msg().start;
   renderer.title(scene === 'homecoming' ? performance.now() / 1000 : (fixedTitleSec ?? performance.now() / 1000), {
     restored: (part) => (cleared.has(part) ? 1 : 0),
-    collapsed: false,
     prompt: dev ? `${go} - DEV: ${stageLabel(dev.name)}` : go,
     beatSec: 60 / 100,
     exit: scene === 'titleOut' ? titleOutSec() : null,
@@ -562,15 +612,20 @@ function draw(): void {
           : sim
             ? Math.max(sim.tick, 0) * tickSec
             : 0;
-  if (scene === 'ending') {
-    renderer.ending(endingSec(), total);
-  } else if (scene === 'ruins') {
-    renderer.title(performance.now() / 1000, { restored: () => 1, collapsed: true, prompt: null, beatSec: 0.6 });
+  if (scene === 'ending' || scene === 'ruins') {
+    // エンディングが終わっても、ガレキの画面のまま（結びの文が出る）
+    renderer.ending(endingSec(), total, msg());
   } else if (sim && scene !== 'title' && scene !== 'titleOut' && scene !== 'homecoming') {
+    renderer.upstairsSec = scene === 'goingUp' ? goUpSec() : null;
     renderer.world(sim, songTime, tickSec, clearSec(), scene === 'leaving' ? leaveSec() : null, scene === 'backing' ? backSec() : null);
     // クリア演出と、拠点の入口に入る演出・戻る演出のあいだは HUD を消す（得点は結果の欄で数え上げる）
     if (scene !== 'loading' && scene !== 'leaving' && scene !== 'backing' && clearSec() === null) renderer.hud(sim, songTime, tickSec);
     // 拠点とチュートリアルは、闇から明るくなって始まる（読み込んでいるあいだは闇のまま。ステージは world がカウントに合わせて明るくする）
+    // 二階へ昇る：少女が階段を昇っていき、画面が闇に沈んでいく。溜めた得点の総計だけは残し、エンディングでそのまま使われていく
+    if (scene === 'goingUp') {
+      renderer.darken(goUpSec() / UP_FADE, 16);
+      renderer.hubTotal();
+    }
     if (sim.stage.kind !== 'stage') {
       if (scene === 'loading') renderer.darken(1);
       else if (scene === 'play') renderer.darken(1 - (performance.now() / 1000 - playAt) / FADE_IN);
@@ -602,7 +657,10 @@ function draw(): void {
   }
 
   if (scene === 'play' && steer) renderer.stick(steer);
-  renderer.buttons(screenButtons());
+  // マウスが上にあるボタンは明るくし、カーソルを指の形にする（ずらして歩いているあいだは出さない）
+  const hovered = hoverAt && !steer ? buttonAt(hoverAt) : undefined;
+  renderer.buttons(screenButtons().map((b) => (hovered && b.key === hovered.key ? { ...b, hover: true } : b)));
+  canvas.style.cursor = hovered ? 'pointer' : '';
   renderer.present();
 }
 
@@ -662,6 +720,12 @@ if (import.meta.env.DEV) {
       },
       get lang() {
         return lang();
+      },
+      get sound() {
+        return soundOn();
+      },
+      get buttons() {
+        return screenButtons().map(({ key, x, y, w, h }) => ({ key, x, y, w, h }));
       },
     },
   });

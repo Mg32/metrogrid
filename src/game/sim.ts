@@ -108,6 +108,16 @@ export class Sim {
     return c;
   }
 
+  /** ハブで入口に入ったのを取り消し、at（入口の前）から歩き続けられるようにする（二階へ昇るかの確認で「いいえ」のとき） */
+  leavePortal(at: Vec): void {
+    this.status = 'playing';
+    this.portal = null;
+    this.x = this.fromX = at.x;
+    this.y = this.fromY = at.y;
+    this.zoneEntry = { ...at };
+    this.moveTick = -Infinity;
+  }
+
   /** 開発用：プレイヤーを任意のマスに置く */
   debugPlace(x: number, y: number): void {
     this.x = this.fromX = x;
