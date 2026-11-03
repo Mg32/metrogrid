@@ -57,7 +57,7 @@ for (const p of POINTERS) {
       await page.goto('/?seed=1');
       await frames(page);
       await tap(page, [144, 144]);
-      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('TUTORIAL');
+      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('TUTORIAL');
       // 曲を読み込んでいるあいだ（loading）のボタンは効かない
       await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 

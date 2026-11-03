@@ -61,5 +61,5 @@ export async function dots(page: Page): Promise<number[]> {
   }, layout);
 }
 
-/** 曲を読み込んで遊び始めるまで待つ上限（ミリ秒）。テストを並べて動かすと、読み込みに数秒かかることがある */
-export const LOAD_MS = 15000;
+/** 曲を読み込んで遊び始めるまで待つ上限（ミリ秒）。テストを並べて動かすと、読み込みに10秒ほどかかることがある（STAGE1 の長い曲） */
+export const LOAD_MS = 20000;

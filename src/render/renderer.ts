@@ -338,6 +338,8 @@ const PORTAL_LIGHT: Record<string, string> = {
  */
 export const LEAVE = { fade: 1.0, end: 1.5 };
 const ARRIVE_BEATS = 2;
+/** 拠点とチュートリアルが闇から明るくなる秒（タイトルや、Esc で戻る演出の闇から続けて始まるとき） */
+export const FADE_IN = 0.5;
 
 /**
  * Esc（HOME・SKIP・TITLE のボタン）で画面を戻る演出（秒）。曲が消えていくのに合わせて、道のタイルが少女から遠い順に
@@ -2660,12 +2662,22 @@ export class Renderer {
    * タイトル（ending.ts の drawTitle）：闇に浮かぶ家と、その前に立つ少女。t は秒。
    * cleared はクリアしたステージの数（その数だけ窓に明かりがともる）。collapsed はエンディングのあと（ガレキだけが残る）
    */
-  title(t: number, opts: { cleared: number; collapsed: boolean; prompt: string | null; beatSec: number }): void {
+  title(t: number, opts: { cleared: number; collapsed: boolean; prompt: string | null; beatSec: number; exit?: number | null }): void {
     drawTitle(this.lctx, t, opts, {
       front: this.girl[GIRL_DIR.down],
       back: this.girl[GIRL_DIR.up],
       raise: this.girlRaise,
     });
+  }
+
+  /** 画面全体を闇で覆う（v は 0〜1。色数を増やさないよう4段階） */
+  darken(v: number): void {
+    if (v <= 0) return;
+    const ctx = this.lctx;
+    ctx.globalAlpha = Math.ceil(clamp01(v) * 4) / 4;
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, LW, LH);
+    ctx.globalAlpha = 1;
   }
 
   /**

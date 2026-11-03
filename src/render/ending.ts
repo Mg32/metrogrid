@@ -39,6 +39,20 @@ export const ENDING = {
   end: 26,
 };
 
+/**
+ * タイトルから始めるときの演出（押してからの秒）。少女が振り返り（turn）、玄関の引き戸に明かりがともって（door）、
+ * 少女が戸口へ歩いて家の中へ消える（walk）。ロゴと案内の文は薄れて消え（logo）、画面が闇に沈む（fade）。end で拠点などへ。
+ * 拠点（家の中）は闇から明るくなって始まる（renderer の FADE_IN）
+ */
+export const TITLE_OUT = {
+  turn: 0.15,
+  door: [0.1, 0.4],
+  walk: [0.3, 1.1],
+  logo: 0.5,
+  fade: [0.9, 1.4],
+  end: 1.4,
+};
+
 /** 描くのに要る絵（少女のコマは renderer が作って渡す） */
 export interface EndingSprites {
   /** 正面（左下向き）の立ちと歩き */
@@ -321,14 +335,16 @@ export function drawEnding(ctx: CanvasRenderingContext2D, t: number, total: numb
  * タイトル：闇に浮かぶ家と、その前に立つ少女。家はゆっくり上下に漂い、闇には細かな塵が漂う。
  * cleared はクリアしたステージの数で、その数だけ窓に暖かい明かりがともる（拠点と同じく、家が少しずつ元に戻っていく）。
  * collapsed ならエンディングのあとで、家はなくガレキの山だけが残っていて、少女もいない。
- * 文字はタイトルのロゴと、prompt（はじめ方の一言。null なら出さない）だけ
+ * 文字はタイトルのロゴと、prompt（はじめ方の一言。null なら出さない）だけ。
+ * exit は始めるキーを押してからの秒（TITLE_OUT。押す前は null）
  */
 export function drawTitle(
   ctx: CanvasRenderingContext2D,
   t: number,
-  opts: { cleared: number; collapsed: boolean; prompt: string | null; beatSec: number },
+  opts: { cleared: number; collapsed: boolean; prompt: string | null; beatSec: number; exit?: number | null },
   sprites: EndingSprites,
 ): void {
+  const exit = opts.exit ?? null;
   ctx.fillStyle = C.bg;
   ctx.fillRect(0, 0, W, H);
   motes(ctx, t);
@@ -353,6 +369,44 @@ export function drawTitle(
       fillEllipse(ctx, q.x, q.y, 7, 2, C.warm);
       ctx.globalAlpha = 1;
     }
+    if (exit !== null) {
+      // 玄関の引き戸に明かりがともる（家の中で待っているものがある）
+      const u0 = ENTRANCE.u0;
+      const u1 = ENTRANCE.u1;
+      const mid = (u0 + u1) / 2;
+      ctx.globalAlpha = Math.ceil(clamp01((exit - TITLE_OUT.door[0]) / (TITLE_OUT.door[1] - TITLE_OUT.door[0])) * 4) / 4;
+      quad([[u0, 5, 5], [u1, 5, 5], [u1, 5, ENTRANCE.h1], [u0, 5, ENTRANCE.h1]], C.warm);
+      ctx.globalAlpha = 1;
+      quad([[mid - 0.05, 5, 0], [mid + 0.05, 5, 0], [mid + 0.05, 5, ENTRANCE.h1], [mid - 0.05, 5, ENTRANCE.h1]], C.wood);
+      ctx.globalAlpha = 0.12;
+      fillEllipse(ctx, P(mid, 5.6, 0).x, P(mid, 5.6, 0).y, 9, 3, C.warm);
+      ctx.globalAlpha = 1;
+    }
+    if (exit !== null && exit >= TITLE_OUT.turn) {
+      // 振り返って戸口へ歩き、戸口をくぐると家の中の明かりに見えなくなる
+      const [w0, w1] = TITLE_OUT.walk;
+      const u = clamp01((exit - w0) / (w1 - w0));
+      const gy = 6.2 - 1.2 * u;
+      const g = P(1.2, gy, 0);
+      const alpha = clamp01((gy - 5) / 0.5);
+      const img = u > 0 && u < 1 ? sprites.back[1 + (Math.floor(exit * 8) % (sprites.back.length - 1))] : sprites.back[0];
+      const a = Math.ceil(alpha * 4) / 4;
+      if (a > 0) {
+        ctx.globalAlpha = 0.35 * a;
+        fillEllipse(ctx, g.x, g.y, 4, 1, '#000');
+        ctx.globalAlpha = a;
+        ctx.drawImage(img, g.x - GIRL_FOOT_X, g.y - GIRL_FOOT_Y);
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+      ctx.globalAlpha = 1 - Math.ceil(clamp01(exit / TITLE_OUT.logo) * 4) / 4;
+      if (ctx.globalAlpha > 0) logo(ctx, t, false);
+      ctx.globalAlpha = Math.ceil(clamp01((exit - TITLE_OUT.fade[0]) / (TITLE_OUT.fade[1] - TITLE_OUT.fade[0])) * 4) / 4;
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+      return;
+    }
     // 少女：玄関の前の敷石に立って、拍に合わせて身体を揺らしている
     const g = P(1.2, 6.2, 0);
     const dip = (t % opts.beatSec) / opts.beatSec < 0.5 ? 1 : 0;
@@ -368,7 +422,7 @@ export function drawTitle(
   ctx.restore();
 
   logo(ctx, t, opts.collapsed);
-  if (opts.prompt && Math.floor(t * 1.6) % 2 === 0) {
+  if (opts.prompt && exit === null && Math.floor(t * 1.6) % 2 === 0) {
     const scale = 1;
     const tw = textWidth(opts.prompt, scale);
     drawText(ctx, opts.prompt, Math.round(W / 2 - tw / 2) + 1, 257, scale, C.bg);

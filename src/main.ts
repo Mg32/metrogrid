@@ -10,8 +10,8 @@ import { STAGE_ORDER, STAGES, tutorial } from './game/stages/index.ts';
 import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
 import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
-import { ENDING } from './render/ending.ts';
-import { APPEAR_BARS, BACK, CLEAR, LEAVE, Renderer, revealEnd } from './render/renderer.ts';
+import { ENDING, TITLE_OUT } from './render/ending.ts';
+import { APPEAR_BARS, BACK, CLEAR, FADE_IN, LEAVE, Renderer, revealEnd } from './render/renderer.ts';
 import { Stick } from './touch.ts';
 
 /**
@@ -82,7 +82,7 @@ let revealUntil = 0;
 
 const stageLabel = (name: string) => name.replace(/(\d+)$/, ' $1');
 
-type Scene = 'title' | 'loading' | 'play' | 'leaving' | 'backing' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
+type Scene = 'title' | 'titleOut' | 'loading' | 'play' | 'leaving' | 'backing' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
 
 /** 歩く向きを決めている指 */
 let steer: Stick | null = null;
@@ -186,6 +186,21 @@ let backFrom: Scene = 'play';
 let backTo: () => void = () => {};
 const backSec = () => performance.now() / 1000 - backAt;
 
+/** タイトルで始めるキーを押した時刻（performance.now() の秒）と、演出（TITLE_OUT）のあとに移る処理 */
+let titleOutAt = 0;
+let titleOutTo: () => void = () => {};
+const titleOutSec = () => performance.now() / 1000 - titleOutAt;
+/** 遊び始めた時刻（performance.now() の秒）。拠点とチュートリアルは、ここから FADE_IN 秒で闇から明るくなる */
+let playAt = 0;
+
+/** タイトルから始める：少女が家の中へ入っていく演出のあと to へ */
+function leaveTitle(to: () => void): void {
+  scene = 'titleOut';
+  titleOutAt = performance.now() / 1000;
+  titleOutTo = to;
+  input.clearPressed();
+}
+
 /** 曲を消していき、道が沈んで消える演出のあと to へ */
 function goBack(to: () => void): void {
   backFrom = scene;
@@ -250,6 +265,7 @@ async function play(def: StageDef, start?: Vec): Promise<void> {
   const waitBars = stage.def.stairs ? APPEAR_BARS : 0;
   await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: hub ? 0 : 1, waitBars, track: stage.def.name, loop: hub });
   scene = 'play';
+  playAt = performance.now() / 1000;
 }
 
 /** 拠点を遊び始めるとき、初めてクリアしたステージがあれば、新しい入口が現れる演出をする */
@@ -390,9 +406,12 @@ function update(): void {
 
   if (scene === 'title') {
     if (input.consumePressed('Delete') || input.consumePressed('Backspace')) openReset();
-    else if (start) startGame();
-    else if (esc && !cleared.has(tutorial.name)) skipTutorial();
-    else if (tut && cleared.has(tutorial.name)) void play(tutorial);
+    else if (start) leaveTitle(startGame);
+    else if (esc && !cleared.has(tutorial.name)) leaveTitle(skipTutorial);
+    else if (tut && cleared.has(tutorial.name)) leaveTitle(() => void play(tutorial));
+  } else if (scene === 'titleOut') {
+    // 少女が家の中へ入っていくあいだは操作できない
+    if (titleOutSec() >= TITLE_OUT.end) titleOutTo();
   } else if (scene === 'result' && sim) {
     const e = clearSec();
     if (e !== null && e < CLEAR.end && (start || retry)) {
@@ -486,6 +505,7 @@ function drawTitle(): void {
     collapsed: false,
     prompt: dev ? `${go} - DEV: ${stageLabel(dev.name)}` : go,
     beatSec: 60 / 100,
+    exit: scene === 'titleOut' ? titleOutSec() : null,
   });
 }
 
@@ -507,10 +527,15 @@ function draw(): void {
     renderer.ending(endingSec(), total);
   } else if (scene === 'ruins') {
     renderer.title(performance.now() / 1000, { cleared: 0, collapsed: true, prompt: null, beatSec: 0.6 });
-  } else if (sim && scene !== 'title') {
+  } else if (sim && scene !== 'title' && scene !== 'titleOut') {
     renderer.world(sim, songTime, tickSec, clearSec(), scene === 'leaving' ? leaveSec() : null, scene === 'backing' ? backSec() : null);
     // クリア演出と、拠点の入口に入る演出・戻る演出のあいだは HUD を消す（得点は結果の欄で数え上げる）
     if (scene !== 'loading' && scene !== 'leaving' && scene !== 'backing' && clearSec() === null) renderer.hud(sim, songTime, tickSec);
+    // 拠点とチュートリアルは、闇から明るくなって始まる（読み込んでいるあいだは闇のまま。ステージは world がカウントに合わせて明るくする）
+    if (sim.stage.kind !== 'stage') {
+      if (scene === 'loading') renderer.darken(1);
+      else if (scene === 'play') renderer.darken(1 - (performance.now() / 1000 - playAt) / FADE_IN);
+    }
   }
 
   if (scene === 'confirm' && confirmKind === 'upstairs') {
@@ -518,7 +543,7 @@ function draw(): void {
   } else if (scene === 'confirm') {
     drawTitle();
     renderer.confirm('ERASE ALL PROGRESS?', 'CLEARED STAGES AND TOTAL SCORE WILL BE LOST.', confirmYes);
-  } else if (scene === 'title') {
+  } else if (scene === 'title' || scene === 'titleOut') {
     drawTitle();
   } else if (sim && scene === 'result') {
     const e = clearSec();

@@ -33,7 +33,7 @@ test('はじめてはチュートリアルから。Esc でスキップすると�
   await page.goto('/?seed=1');
   await frames(page);
   await page.keyboard.press('Enter');
-  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('TUTORIAL');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('TUTORIAL');
   // 曲を読み込んでいるあいだ（loading）のキーは効かない
   await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 
@@ -84,7 +84,7 @@ test('タイトルの RESET：確認で NO ならそのまま、YES なら記録
   await expect.poll(async () => (await game(page)).scene).toBe('title');
   expect(await page.evaluate(() => [localStorage.getItem('metrogrid.cleared'), localStorage.getItem('metrogrid.total')])).toEqual([null, null]);
   await page.keyboard.press('Enter');
-  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: 5000 }).toBe('TUTORIAL');
+  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('TUTORIAL');
   expect(errors).toEqual([]);
 });
 
