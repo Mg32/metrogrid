@@ -40,8 +40,8 @@ const STAIR_H = 6;
 const STAIR_STEP_X = (i: number) => 0.35 - i * 0.32;
 const STAIR_STEP_H = (i: number) => (i + 1) * 5;
 /** 二階への階段を昇る：昇る段の数と、1段にかける秒（main.ts の UP_FADE のあいだに昇りきる） */
-const UPSTAIRS_STEPS = 6;
-const UPSTAIRS_STEP_SEC = 0.22;
+export const UPSTAIRS_STEPS = 6;
+export const UPSTAIRS_STEP_SEC = 0.22;
 /**
  * 階段のあるステージ（チュートリアル）の始まり：はじめは誰もいない。APPEAR_BARS 小節（曲は鳴らさない）で階段のいちばん下に
  * 少女が現れ、次の1小節（曲の前奏。カウント）で1拍1段ずつ昇ってスタートに着く。main.ts はこのぶん曲の頭を遅らせる
@@ -391,6 +391,11 @@ export const REVEAL = {
 /** 光が消えて、視点が少女へ戻り始める秒 */
 function revealShown(order: ReadonlyMap<number, number>): number {
   return REVEAL.delay + Math.max(0, ...order.values()) * REVEAL.step + REVEAL.rise + REVEAL.flash;
+}
+
+/** 道がせり上がり始める秒と、せり上がりきる秒（拠点に戻ってからの秒。効果音に使う） */
+export function revealRise(order: ReadonlyMap<number, number>): { rise: number; land: number } {
+  return { rise: REVEAL.delay, land: revealShown(order) - REVEAL.flash };
 }
 
 /** 演出が終わる（視点が少女へ戻りきる）秒（order は hubReveal の結果） */

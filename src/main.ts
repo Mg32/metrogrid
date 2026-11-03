@@ -14,7 +14,7 @@ import { lang, msg, toggleLang } from './lang.ts';
 import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
 import { ENDING, endingEnd, HOMECOMING, TITLE_OUT } from './render/ending.ts';
 import { textWidth } from './render/font.ts';
-import { APPEAR_BARS, BACK, CLEAR, FADE_IN, LEAVE, Renderer, revealEnd } from './render/renderer.ts';
+import { APPEAR_BARS, BACK, CLEAR, FADE_IN, LEAVE, Renderer, revealEnd, revealRise, UPSTAIRS_STEP_SEC, UPSTAIRS_STEPS } from './render/renderer.ts';
 import { Stick } from './touch.ts';
 
 /**
@@ -238,6 +238,7 @@ let playAt = 0;
 
 /** タイトルから始める：少女が家の中へ入っていく演出のあと to へ */
 function leaveTitle(to: () => void): void {
+  sfx.start();
   scene = 'titleOut';
   titleOutAt = performance.now() / 1000;
   titleOutTo = to;
@@ -248,6 +249,7 @@ function leaveTitle(to: () => void): void {
 function homecoming(part: string, to: () => void): void {
   conductor.stop();
   sfx.stop();
+  sfx.homecoming(HOMECOMING.restore);
   input.clearPressed();
   scene = 'homecoming';
   homeAt = performance.now() / 1000;
@@ -263,6 +265,7 @@ function goBack(to: () => void): void {
   backTo = to;
   conductor.fadeOut(BACK.end);
   sfx.stop();
+  sfx.back();
   steer = null;
   input.clearPressed();
 }
@@ -282,6 +285,7 @@ const goUpSec = () => performance.now() / 1000 - goUpAt;
 /** 二階へ昇る：拠点の画面と曲を消していき、エンディングへ */
 function goUpstairs(): void {
   conductor.fadeOut(UP_FADE);
+  sfx.upstairs(UPSTAIRS_STEPS, UPSTAIRS_STEP_SEC);
   input.clearPressed();
   steer = null;
   scene = 'goingUp';
@@ -336,6 +340,10 @@ async function play(def: StageDef, start?: Vec): Promise<void> {
   // 階段のあるステージ（チュートリアル）は、曲の前に少女が現れる小節を置く（曲もカウントも鳴らさない）
   const waitBars = stage.def.stairs ? APPEAR_BARS : 0;
   await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: hub ? 0 : 1, waitBars, track: stage.def.name, loop: hub });
+  if (renderer.hubReveal?.def === stage.def) {
+    const { rise, land } = revealRise(renderer.hubReveal.order);
+    sfx.reveal(rise, land);
+  }
   scene = 'play';
   playAt = performance.now() / 1000;
 }
@@ -409,6 +417,8 @@ function finishPlay(s: Sim): void {
       save();
       if (s.stage.kind === 'stage') pendingReveal = name;
     }
+  } else {
+    sfx.timeUp();
   }
   // 開発サーバーでは、最後まで遊んだ記録を playlogs/ に保存する（自動テストのプレイは残さない）
   if (import.meta.env.DEV && !navigator.webdriver) {
@@ -490,9 +500,16 @@ function update(): void {
   const tut = input.consumePressed('KeyT');
 
   if (scene === 'title') {
-    if (input.consumePressed('KeyL')) toggleLang();
-    else if (input.consumePressed('KeyM')) toggleSound();
-    else if (input.consumePressed('Delete') || input.consumePressed('Backspace')) openReset();
+    if (input.consumePressed('KeyL')) {
+      toggleLang();
+      sfx.select();
+    } else if (input.consumePressed('KeyM')) {
+      toggleSound();
+      sfx.select();
+    } else if (input.consumePressed('Delete') || input.consumePressed('Backspace')) {
+      sfx.select();
+      openReset();
+    }
     else if (start) leaveTitle(startGame);
     else if (tut && cleared.has(tutorial.name)) leaveTitle(() => void play(tutorial));
   } else if (scene === 'titleOut') {
@@ -512,6 +529,7 @@ function update(): void {
     else if (esc) resultBack(sim);
   } else if (scene === 'confirm') {
     // 左右で選び、Enter で決める。Esc・N は「いいえ」。Y は YES のボタンと同じ（選んでから、もう一度で決まる）
+    const was = confirmYes;
     if (input.consumePressed('ArrowLeft') || input.consumePressed('KeyA')) confirmYes = true;
     if (input.consumePressed('ArrowRight') || input.consumePressed('KeyD')) confirmYes = false;
     let yes = input.consumePressed('KeyY');
@@ -519,11 +537,16 @@ function update(): void {
       confirmYes = true;
       yes = false;
     }
+    if (confirmYes !== was) sfx.select();
     const no = esc || input.consumePressed('KeyN') || (start && !confirmYes);
     if ((start || yes) && confirmYes) {
       if (confirmKind === 'upstairs') goUpstairs();
-      else resetAll();
+      else {
+        sfx.select();
+        resetAll();
+      }
     } else if (no) {
+      sfx.select(true);
       if (confirmKind === 'upstairs') stayDownstairs();
       else scene = 'title';
     }
@@ -562,9 +585,13 @@ function update(): void {
       recorder.record(sim.tick + 1, held);
       sim.step(sim.tick + 1, held);
     }
-    // 得点マスを取った音
+    // 得点マスを取った音、ミスの音（欠けに落ちたときは落ちる音）、停止マスではじき返された音
     for (; heardEvents < sim.events.length; heardEvents++) {
-      if (sim.events[heardEvents].kind === 'pickup') sfx.pickup(sim.multiplier);
+      const ev = sim.events[heardEvents];
+      if (ev.kind === 'pickup') sfx.pickup(sim.multiplier);
+      else if (ev.kind === 'miss' && ev.fell) sfx.fall();
+      else if (ev.kind === 'miss') sfx.miss();
+      else if (ev.kind === 'bounce') sfx.bounce();
     }
     if (sim.status === 'portal' && sim.portal === UPSTAIRS) {
       // 確かめているあいだも拠点の曲は鳴らしたまま（昇ればエンディングで止まり、昇らなければそのまま歩き続ける）
@@ -581,6 +608,7 @@ function update(): void {
         leaveTarget = target;
         // 拠点の曲は、闇に沈むまでのあいだに消えていく
         conductor.fadeOut(LEAVE.end);
+        sfx.portal();
         steer = null;
         input.clearPressed();
       }
