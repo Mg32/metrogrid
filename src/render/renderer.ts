@@ -366,20 +366,35 @@ export const CLEAR = {
 
 /**
  * 拠点に新しい入口が現れる演出の進行（拠点に戻ってからの秒）。
- * 新しいマスが、もとの床の側から入口へ向かって順に闇の下からせり上がり、最後に入口が光を放つ。演出のあいだは歩けない（main.ts）
+ * まず視点が新しい入口へ動き（入口が画面の中央に来る）、新しいマスが、もとの床の側から入口へ向かって順に闇の下から
+ * せり上がり、最後に入口が光を放つ。光が消えたら視点が少女へ戻る。演出のあいだは歩けない（main.ts）
  */
 export const REVEAL = {
-  /** せり上がり始める。順番が1つ進むごとの遅れ。1マスがせり上がりきるまで */
-  delay: 0.6,
+  /** 視点が入口へ動き始める。動ききるまで（戻るときも同じ） */
+  look: 0.2,
+  pan: 0.7,
+  /** せり上がり始める（視点が動ききってから）。順番が1つ進むごとの遅れ。1マスがせり上がりきるまで */
+  delay: 1.0,
   step: 0.14,
   rise: 0.5,
   /** 入口がせり上がりきってから、光が消えるまで */
   flash: 1.6,
 };
 
-/** 演出が終わる秒（order は hubReveal の結果） */
-export function revealEnd(order: ReadonlyMap<number, number>): number {
+/** 光が消えて、視点が少女へ戻り始める秒 */
+function revealShown(order: ReadonlyMap<number, number>): number {
   return REVEAL.delay + Math.max(0, ...order.values()) * REVEAL.step + REVEAL.rise + REVEAL.flash;
+}
+
+/** 演出が終わる（視点が少女へ戻りきる）秒（order は hubReveal の結果） */
+export function revealEnd(order: ReadonlyMap<number, number>): number {
+  return revealShown(order) + REVEAL.pan;
+}
+
+/** 視点を入口へ寄せる割合（0 は少女、1 は入口）。拠点に戻ってからの秒 t で決まる */
+function revealLook(order: ReadonlyMap<number, number>, t: number): number {
+  const ease = (u: number) => u * u * (3 - 2 * u);
+  return ease(clamp01((t - REVEAL.look) / REVEAL.pan)) * (1 - ease(clamp01((t - revealShown(order)) / REVEAL.pan)));
 }
 
 const ZONE_LABEL: Record<Zone, string> = { 0: 'SAFE 1/4', 1: 'RISK 1/8', 2: 'HIGH 1/16' };
@@ -834,7 +849,7 @@ export class Renderer {
 
     // 床の高さ（このステージを描くあいだだけ。iso() が持ち上げる）
     elevation = this.elevationOf(stage);
-    // カメラはプレイヤーを追う
+    // カメラはプレイヤーを追う。拠点に新しい入口が現れる演出のあいだは、入口を中央に寄せてから少女へ戻す
     const p = iso(px, py);
     p.sy += drop;
     if (this.camSim !== sim) {
@@ -842,8 +857,18 @@ export class Renderer {
       this.camX = p.sx;
       this.camY = p.sy;
     }
-    this.camX = lerp(this.camX, p.sx, 0.12);
-    this.camY = lerp(this.camY, p.sy, 0.12);
+    const revealing = this.hubReveal?.def === stage.def ? this.hubReveal.order : null;
+    const gate = revealing && this.revealGate(stage, revealing);
+    const look = revealing && gate ? revealLook(revealing, songTime) : 0;
+    if (gate && look > 0) {
+      // 時刻だけで決める（静止表示でも同じ位置）。戻りきると look が 0 になり、少女を追う動きにそのままつながる
+      const g = iso(gate.x, gate.y);
+      this.camX = lerp(p.sx, g.sx, look);
+      this.camY = lerp(p.sy, g.sy, look);
+    } else {
+      this.camX = lerp(this.camX, p.sx, 0.12);
+      this.camY = lerp(this.camY, p.sy, 0.12);
+    }
     const offX = Math.round(LW / 2 - this.camX);
     const offY = Math.round(LH / 2 - this.camY - 8);
     ctx.save();
@@ -2227,6 +2252,24 @@ export class Renderer {
   }
 
   /** 拠点に現れた入口が放つ光：光の柱と、足もとから広がる輪。k は 0〜1（1 で消える） */
+  /** 新しく現れる入口のマス（入口がなければ、最後に現れるマス） */
+  private revealGate(stage: Stage, order: ReadonlyMap<number, number>): Vec | null {
+    let gate: Vec | null = null;
+    let last = -1;
+    for (let y = 0; y < stage.height; y++) {
+      for (let x = 0; x < stage.width; x++) {
+        const k = order.get(stage.index(x, y));
+        if (k === undefined) continue;
+        if (stage.cell(x, y)?.obj?.type === 'portal') return { x, y };
+        if (k > last) {
+          last = k;
+          gate = { x, y };
+        }
+      }
+    }
+    return gate;
+  }
+
   private revealFlash(sx: number, sy: number, k: number, light: string): void {
     const ctx = this.lctx;
     const g = sy + TH / 2;

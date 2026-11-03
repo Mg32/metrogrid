@@ -60,10 +60,10 @@ const SCENES: [string, string][] = args.view
       ['tutorial-fast', 'stage=TUTORIAL&view=16,19,20'],
       ['hub-first', 'stage=HUB&cleared=TUTORIAL&view=6,11,0'],
       // 拠点に新しい入口が現れる演出（STAGE2 を初めてクリアして戻ったところ。116 BPM で 1tick ≒ 0.13 秒）
-      ['hub-reveal-1', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2&reveal=STAGE2&view=6,8,7'],
-      ['hub-reveal-2', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2&reveal=STAGE2&view=6,8,11'],
-      ['hub-reveal-3', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2&reveal=STAGE2&view=6,8,15'],
-      ['hub-reveal-stairs', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4,STAGE5&reveal=STAGE5&view=6,10,11'],
+      ['hub-reveal-1', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2&reveal=STAGE2&view=6,8,10'],
+      ['hub-reveal-2', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2&reveal=STAGE2&view=6,8,14'],
+      ['hub-reveal-3', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2&reveal=STAGE2&view=6,8,18'],
+      ['hub-reveal-stairs', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4,STAGE5&reveal=STAGE5&view=6,10,14'],
       ['hub-all', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4&total=48210&view=6,8,0'],
       // STAGE 3：時代の重なった通り
       ['s3-start', 'stage=STAGE3&view=9,65,0'],
