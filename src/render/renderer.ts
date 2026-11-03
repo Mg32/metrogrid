@@ -21,6 +21,7 @@ import {
 } from './pixel.ts';
 import { drawEnding, drawTitle, type TitleOpts } from './ending.ts';
 import { THINGS } from './things.ts';
+import { lang, msg } from '../lang.ts';
 import { STICK_RADIUS } from '../touch.ts';
 import { GIRL_FOOT_X, GIRL_FOOT_Y, GIRL_FRAMES, GIRL_H, GIRL_RAISE, GIRL_W, GIRL_WAIST_Y, paintGirl } from './girl.ts';
 
@@ -397,7 +398,6 @@ function revealLook(order: ReadonlyMap<number, number>, t: number): number {
   return ease(clamp01((t - REVEAL.look) / REVEAL.pan)) * (1 - ease(clamp01((t - revealShown(order)) / REVEAL.pan)));
 }
 
-const ZONE_LABEL: Record<Zone, string> = { 0: 'SAFE 1/4', 1: 'RISK 1/8', 2: 'HIGH 1/16' };
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
@@ -976,7 +976,7 @@ export class Renderer {
     const feet = p.sy + TH / 2;
     // 停止マスの上で、まだ1拍たっていない：足元を確かめるあいだ「WAIT」
     if (sim.status === 'playing' && stage.cell(sim.x, sim.y)?.obj?.type === 'stop' && sim.stillTicks < TICKS_PER_BEAT) {
-      labels.push({ x: p.sx, y: p.sy - 26, text: 'WAIT', color: COLORS.stopEdge });
+      labels.push({ x: p.sx, y: p.sy - 26, text: msg().wait, color: COLORS.stopEdge });
     }
 
     for (let y = 0; y < stage.height; y++) {
@@ -1061,7 +1061,7 @@ export class Renderer {
             },
           });
           if (Math.max(Math.abs(x - px), Math.abs(y - py)) <= 3 && (flash === null || flash >= 0)) {
-            labels.push({ x: sx, y: sy - 30, text: target.replace(/(\d+)$/, ' $1'), color: target === 'UPSTAIRS' ? COLORS.textDim : COLORS.text });
+            labels.push({ x: sx, y: sy - 30, text: msg().stage(target), color: target === 'UPSTAIRS' ? COLORS.textDim : COLORS.text });
             const note = this.portalNote(target);
             if (note) labels.push({ x: sx, y: sy - 22, text: note, color: COLORS.gem });
           }
@@ -1340,7 +1340,7 @@ export class Renderer {
       } else if (ev.kind === 'pickup') {
         labels.push({ x: sx, y: sy - 12 - Math.round(age * 16), text: `+${ev.amount}`, color: COLORS.text });
       } else if (ev.kind === 'bounce' && age < 0.3) {
-        labels.push({ x: sx, y: sy - 18, text: 'STOP!', color: COLORS.warn });
+        labels.push({ x: sx, y: sy - 18, text: msg().stop, color: COLORS.warn });
       }
     }
     for (const l of labels) this.text(l.text, l.x, l.y, 1, l.color, 'center');
@@ -2571,9 +2571,9 @@ export class Renderer {
     // 拠点：時間も得点もない。拍の点と、操作の案内だけ
     if (sim.stage.kind === 'hub') {
       this.beatDots(songTime, beatSec);
-      this.text('HOME', 6, 7, 1, COLORS.textDim);
+      this.text(msg().hub, 6, 7, 1, COLORS.textDim);
       // これまでに溜めた得点の総計（エンディングで使われる値）
-      this.text(`TOTAL ${String(this.totalScore).padStart(7, '0')}`, 6, 15, 1, COLORS.gem);
+      this.text(msg().total(String(this.totalScore).padStart(7, '0')), 6, 15, 1, COLORS.gem);
       return;
     }
     if (sim.stage.kind === 'tutorial') {
@@ -2581,7 +2581,7 @@ export class Renderer {
       let best: { text: string; d: number } | null = null;
       for (const h of sim.stage.def.hints ?? []) {
         const d = Math.abs(h.x - sim.x) + Math.abs(h.y - sim.y);
-        if (d <= 3 && (!best || d < best.d)) best = { text: h.text, d };
+        if (d <= 3 && (!best || d < best.d)) best = { text: h.text[lang()], d };
       }
       if (best) {
         const ctx = this.lctx;
@@ -2593,20 +2593,19 @@ export class Renderer {
       }
     }
 
-    this.text(`SCORE ${String(sim.score).padStart(6, '0')}`, 6, 7, 1, COLORS.text);
+    const m = msg();
+    this.text(m.score(String(sim.score).padStart(6, '0')), 6, 7, 1, COLORS.text);
     this.text(`*${sim.multiplier}`, 6, 15, 1, sim.multiplier > 1 ? COLORS.gem : COLORS.textDim);
-    if (sim.misses > 0) this.text(`MISS ${sim.misses}`, 6, 23, 1, COLORS.textDim);
+    if (sim.misses > 0) this.text(m.miss(sim.misses), 6, 23, 1, COLORS.textDim);
 
     const remain = Math.max(0, sim.totalTicks * tickSec - Math.max(0, songTime));
     const mm = Math.floor(remain / 60);
     const ss = Math.floor(remain % 60);
     this.text(`${mm}:${String(ss).padStart(2, '0')}`, LW - 6, 7, 1, remain < 10 ? COLORS.warn : COLORS.text, 'right');
     const bar = Math.min(sim.stage.def.bars, Math.max(0, Math.floor(songTime / (beatSec * 4))) + 1);
-    this.text(`BAR ${bar}/${sim.stage.def.bars}`, LW - 6, 15, 1, COLORS.textDim, 'right');
+    this.text(m.bar(bar, sim.stage.def.bars), LW - 6, 15, 1, COLORS.textDim, 'right');
 
     this.beatDots(songTime, beatSec);
-    const zone = sim.stage.cell(sim.x, sim.y)!.zone;
-    this.text(ZONE_LABEL[zone], LW / 2, 15, 1, zone === 0 ? COLORS.textDim : COLORS.warn, 'center');
 
     // カウントの数字は曲の頭の4拍だけ（チュートリアルの、少女が現れる小節では出さない）
     const n = Math.ceil(-songTime / beatSec);
@@ -2656,7 +2655,7 @@ export class Renderer {
   }
 
   /** クリアの結果の欄。e はゴールしてからの秒。CLEAR.panel から出て、得点を1行ずつ数え上げる。prompt は数え終わったあとの操作の案内 */
-  clearResult(sim: Sim, e: number, note: string | null, prompt: string): void {
+  clearResult(sim: Sim, e: number, prompt: string): void {
     const t = e - CLEAR.panel;
     if (t < 0) return;
     const ctx = this.lctx;
@@ -2666,16 +2665,17 @@ export class Renderer {
     ctx.fillRect(0, 50, LW, 186);
     ctx.globalAlpha = 1;
 
-    const title = 'CLEAR';
-    this.text(title.slice(0, Math.floor(t / 0.08)), LW / 2 - textWidth(title, 3) / 2, 74, 3, COLORS.goal);
-    if (t > 0.3) this.text(sim.stage.def.name.replace(/(\d+)$/, ' $1'), LW / 2, 94, 1, COLORS.textDim, 'center');
+    const m = msg();
+    const title = m.clear;
+    this.text([...title].slice(0, Math.floor(t / 0.08)).join(''), LW / 2 - textWidth(title, 3) / 2, 74, 3, COLORS.goal);
+    if (t > 0.3) this.text(m.stage(sim.stage.def.name), LW / 2, 94, 1, COLORS.textDim, 'center');
 
     const remainBeats = sim.goalBonus / GOAL_BONUS_PER_BEAT;
     const rows = [
-      { label: 'SCORE', value: sim.score - sim.goalBonus, y: 120, prefix: '' },
-      { label: 'GOAL BONUS', value: sim.goalBonus, y: 140, prefix: '+', note: `${remainBeats} BEATS LEFT` },
-      { label: 'MISS', value: sim.misses, y: 166, prefix: '' },
-      { label: 'TOTAL', value: sim.score, y: 196, prefix: '', big: true },
+      { label: m.rowScore, value: sim.score - sim.goalBonus, y: 120, prefix: '' },
+      { label: m.rowBonus, value: sim.goalBonus, y: 140, prefix: '+', note: m.beatsLeft(remainBeats) },
+      { label: m.rowMiss, value: sim.misses, y: 166, prefix: '' },
+      { label: m.rowTotal, value: sim.score, y: 196, prefix: '', big: true },
     ];
     rows.forEach((r, i) => {
       const rt = t - CLEAR.rows[i];
@@ -2688,7 +2688,6 @@ export class Renderer {
       this.text(`${r.prefix}${shown}`, LW - 64, r.y, scale, color, 'right');
       if (r.note && done) this.text(r.note, LW - 64, r.y + 9, 1, COLORS.textDim, 'right');
     });
-    if (e >= CLEAR.end && note) this.text(note, LW / 2, 104, 1, COLORS.goal, 'center');
     if (e >= CLEAR.end && Math.floor(e * 2) % 2 === 0) this.text(prompt, LW / 2, 222, 1, COLORS.gem, 'center');
   }
 
@@ -2737,8 +2736,8 @@ export class Renderer {
     ctx.globalAlpha = 1;
     this.text(question, LW / 2, LH / 2 - (note ? 30 : 16), 2, COLORS.text, 'center');
     if (note) this.text(note, LW / 2, LH / 2 - 10, 1, COLORS.textDim, 'center');
-    this.text(yes ? '> YES' : '  YES', LW / 2 - 30, LH / 2 + 20, 2, yes ? COLORS.gem : COLORS.textDim, 'center');
-    this.text(!yes ? '> NO' : '  NO', LW / 2 + 34, LH / 2 + 20, 2, !yes ? COLORS.gem : COLORS.textDim, 'center');
+    this.text(msg().yes(yes), LW / 2 - 30, LH / 2 + 20, 2, yes ? COLORS.gem : COLORS.textDim, 'center');
+    this.text(msg().no(!yes), LW / 2 + 34, LH / 2 + 20, 2, !yes ? COLORS.gem : COLORS.textDim, 'center');
   }
 
   overlay(lines: { text: string; scale?: number; color?: string }[]): void {

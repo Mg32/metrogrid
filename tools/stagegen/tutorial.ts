@@ -21,46 +21,47 @@ const line = (x0: number, y0: number, x1: number, y1: number, ch: string) => {
   for (let x = x0, y = y0; ; x += dx, y += dy) { t(x, y, ch); if (x === x1 && y === y1) break; }
 };
 const hazards: HazardDef[] = [];
-const hints: StageDef['hints'] = [];
-const hint = (x: number, y: number, text: string) => hints.push({ x, y, text });
+const hints: NonNullable<StageDef['hints']> = [];
+/** 案内は英語と日本語で */
+const hint = (x: number, y: number, en: string, ja: string) => hints.push({ x, y, text: { en, ja } });
 
 // 1. 歩く：玄関を出て、まっすぐ上へ
 o(2, 31, 'H'); o(4, 31, 'L');
 line(3, 31, 3, 26, '.'); o(3, 31, 'S');
-hint(3, 30, 'HOLD AN ARROW KEY OR DRAG TO WALK');
+hint(3, 30, 'HOLD AN ARROW KEY OR DRAG TO WALK', 'やじるしキーを おしつづけるか、ドラッグで あるく');
 // 冒頭のカウント（1小節＝4拍）のあいだに、スタートの後ろの階段を1拍1段ずつ昇ってくる（1拍で1マス進むことを見せる）
 const STAIRS = 4;
 // 2. 曲がる・止まる：右へ曲がり、また上へ
 line(3, 25, 8, 25, '.');
-hint(4, 25, 'ONE STEP PER BEAT. LET GO TO STOP');
+hint(4, 25, 'ONE STEP PER BEAT. LET GO TO STOP', '1はくで 1ぽ。はなすと とまる');
 line(8, 24, 8, 22, '.');
 // 3. 得点マス
 o(8, 23, 'a');
-hint(8, 24, 'GEMS LOSE VALUE EVERY BEAT');
+hint(8, 24, 'GEMS LOSE VALUE EVERY BEAT', 'ほうせきは 1はくごとに かちが へる');
 // 4. 速い道：景色の薄い道は八分、もっと薄い道は十六分で進む
 line(8, 21, 15, 21, ',');
-hint(9, 21, 'FADED ROAD: 2 STEPS PER BEAT');
+hint(9, 21, 'FADED ROAD: 2 STEPS PER BEAT', 'いろあせた みちは、1はくで 2ほ');
 line(16, 21, 16, 17, ':');
-hint(16, 20, 'MORE FADED: 4 STEPS. STOP IN TIME!');
+hint(16, 20, 'MORE FADED: 4 STEPS. STOP IN TIME!', 'もっと うすい みちは 4ほ。いきすぎないで！');
 // 5. 欠け：曲がり角の先が欠けていて、行き過ぎると落ちる
 t(16, 16, ' '); t(17, 17, ' '); t(17, 16, ' '); t(15, 16, ' ');
-hint(16, 18, 'GAPS: YOU FALL AND GO BACK');
+hint(16, 18, 'GAPS: YOU FALL AND GO BACK', 'かけた ところに おちると、もどされる');
 line(15, 17, 11, 17, '.');
 o(13, 17, 'b');
 // 6. 遊具：箱ブランコが道を横切って揺れる（道の1マスだけ）。座席が通り過ぎるのを待って通る
 line(11, 16, 11, 12, '.');
 // 周期は拍（4 tick）の倍数にしない。倍数だと、振り始めの位置によっては切れ目がカウントの頭と噛み合わない
 hazards.push({ type: 'swing', cells: [[11, 14]], axis: 'x', period: 22 });
-hint(11, 16, 'SWINGS KNOCK YOU BACK. WAIT FOR A GAP');
+hint(11, 16, 'SWINGS KNOCK YOU BACK. WAIT FOR A GAP', 'ブランコに あたると もどされる。すきまを まつ');
 // 7. 停止マス：ぐらつく踏み石は1拍止まらないと渡れない
 o(11, 11, 'P'); t(11, 11, '.');
-hint(11, 12, 'WOBBLY STONE: STAND STILL FOR 1 BEAT');
+hint(11, 12, 'WOBBLY STONE: STAND STILL FOR 1 BEAT', 'ぐらつく いしの うえでは、1はく とまる');
 line(11, 10, 11, 8, '.');
 // 8. ゴール
 line(12, 8, 16, 8, '.');
 o(17, 8, 'G'); t(17, 8, '.');
 for (const [x, y] of [[17, 7], [18, 8], [17, 9]]) t(x, y, ' ');
-hint(14, 8, 'REACH THE DOOR BEFORE THE SONG ENDS');
+hint(14, 8, 'REACH THE DOOR BEFORE THE SONG ENDS', 'きょくが おわるまでに、とびらへ たどりつく');
 // 街灯と、ほかの家の入口
 for (const [x, y] of [[4, 27], [9, 26], [9, 22], [12, 20], [17, 19], [10, 18], [12, 13], [12, 10], [15, 9]]) o(x, y, 'L');
 for (const [x, y] of [[2, 28], [7, 24], [10, 14]]) o(x, y, 'E');
@@ -103,7 +104,7 @@ ${Object.entries(scores).map(([k, v]) => `    ${k}: { value: ${v.value}, decay: 
 ${hazards.map(h).join('\n')}
   ],
   hints: [
-${hints.map((x) => `    { x: ${x.x}, y: ${x.y}, text: '${x.text}' },`).join('\n')}
+${hints.map((x) => `    { x: ${x.x}, y: ${x.y}, text: { en: '${x.text.en}', ja: '${x.text.ja}' } },`).join('\n')}
   ],
 };
 `;

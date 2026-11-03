@@ -4,6 +4,22 @@ import { collectErrors, DESKTOP, frames, game, LOAD_MS } from './helpers.ts';
 // キーボードだけで遊べるか（デスクトップの画面で。画面と操作は端末で分けていない）
 test.use(DESKTOP);
 
+test('タイトルの L で日本語と英語が切り替わり、読み込み直しても残る', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto('/?seed=1');
+  await frames(page);
+  const first = (await game(page)).lang;
+  const other = first === 'ja' ? 'en' : 'ja';
+  await page.keyboard.press('KeyL');
+  await frames(page);
+  expect((await game(page)).lang).toBe(other);
+  await page.reload();
+  await frames(page);
+  expect((await game(page)).lang).toBe(other);
+  expect((await game(page)).scene).toBe('title');
+  expect(errors).toEqual([]);
+});
+
 test('タイトルから始めて歩ける', async ({ page }) => {
   const errors = collectErrors(page);
   await page.goto('/?seed=1');

@@ -10,9 +10,10 @@ const POINTERS = [
   { name: 'タッチ', device: MOBILE, type: 'touch' },
 ] as const;
 
-/** 画面の下の隅のボタン（左は Esc、右は R などのボタン）と、確認の YES・NO */
+/** 画面の下の隅のボタン（左は Esc、右は R などのボタン）、タイトルの右上の言語のボタン、確認の YES・NO */
 const LEFT_BTN = [34, 288 - 15] as const;
 const RIGHT_BTN = [288 - 34, 288 - 15] as const;
+const LANG_BTN = [288 - 30, 15] as const;
 const YES_BTN = [114, 164] as const;
 const NO_BTN = [178, 164] as const;
 
@@ -75,6 +76,21 @@ for (const p of POINTERS) {
       await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
       const g = await game(page);
       expect([g.sim!.x, g.sim!.y]).toEqual([6, 13]);
+      expect(errors).toEqual([]);
+    });
+
+    test('タイトルの右上のボタンで、日本語と英語が切り替わる（始まらない）', async ({ page }) => {
+      const errors = collectErrors(page);
+      await page.goto('/?seed=1');
+      await frames(page);
+      const first = (await game(page)).lang;
+      await tap(page, LANG_BTN);
+      await frames(page);
+      expect((await game(page)).lang).toBe(first === 'ja' ? 'en' : 'ja');
+      await tap(page, LANG_BTN);
+      await frames(page);
+      expect((await game(page)).lang).toBe(first);
+      expect((await game(page)).scene).toBe('title');
       expect(errors).toEqual([]);
     });
 

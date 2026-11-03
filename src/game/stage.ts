@@ -37,8 +37,8 @@ export interface StageDef {
   /** pick を指定すると、その文字のマスの中からプレイごとに pick 個だけ選んで出す（丸暗記対策） */
   scores: Record<string, { value: number; decay: number; pick?: number }>;
   hazards: HazardDef[];
-  /** 地面に浮かぶ案内（プレイヤーが近づくと出る）。英大文字・数字・記号のみ */
-  hints?: { x: number; y: number; text: string }[];
+  /** 地面に浮かぶ案内（プレイヤーが近づくと出る）。英語（英大文字・数字・記号のみ）と日本語 */
+  hints?: { x: number; y: number; text: { en: string; ja: string } }[];
   /**
    * スタートの後ろ（進む向きの反対）から昇ってくる階段の段数。カウントの拍ごとに1段ずつ昇ってスタートに着く
    * （チュートリアルの冒頭で、1拍で1マス進むことを見せる）。見た目だけで、歩けるマスではない

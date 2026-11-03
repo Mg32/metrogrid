@@ -5,16 +5,19 @@ export interface GameHandle {
   scene: string;
   sim: { tick: number; x: number; y: number; status: string; misses: number; stage: string } | null;
   layout: { scale: number; ox: number; oy: number; width: number; height: number };
+  /** 画面の言語 */
+  lang: string;
 }
 
 export async function game(page: Page): Promise<GameHandle> {
   return page.evaluate(() => {
-    const g = (window as unknown as { __game: { scene: string; sim: (Omit<NonNullable<GameHandle['sim']>, 'stage'> & { stage: { def: { name: string } } }) | null; layout: GameHandle['layout'] } }).__game;
+    const g = (window as unknown as { __game: { scene: string; sim: (Omit<NonNullable<GameHandle['sim']>, 'stage'> & { stage: { def: { name: string } } }) | null; layout: GameHandle['layout']; lang: string } }).__game;
     const s = g.sim;
     return {
       scene: g.scene,
       sim: s && { tick: s.tick, x: s.x, y: s.y, status: s.status, misses: s.misses, stage: s.stage.def.name },
       layout: g.layout,
+      lang: g.lang,
     };
   });
 }

@@ -9,8 +9,10 @@ import { buildHub, hubReturnCell, hubReveal, UPSTAIRS } from './game/stages/hub.
 import { STAGE_ORDER, STAGES, tutorial } from './game/stages/index.ts';
 import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
+import { lang, msg, toggleLang } from './lang.ts';
 import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
 import { ENDING, HOMECOMING, TITLE_OUT } from './render/ending.ts';
+import { textWidth } from './render/font.ts';
 import { APPEAR_BARS, BACK, CLEAR, FADE_IN, LEAVE, Renderer, revealEnd } from './render/renderer.ts';
 import { Stick } from './touch.ts';
 
@@ -33,6 +35,7 @@ import { Stick } from './touch.ts';
  *   ?total=N          これまでに溜めた得点をこの値に差し替える（保存しない）
  *   ?bpm=N            ステージ（拠点以外）の BPM をこの値にする（曲を作る前に試す用。ステージの定義は変えない）
  *   ?bars=N           ステージ（拠点以外）の長さ（小節）をこの値にする
+ *   ?lang=ja|en       画面の言語をこの言語にする（保存しない。ふだんはタイトルの言語のボタンか L キーで切り替え、このブラウザに残る）
  *   ?upstairs         すべてクリアした拠点の、二階への階段の前から始める（階段 → 確認 → エンディングの確認用。
  *                     ?cleared を付けなければクリアの記録を差し替えたことになり、保存しない）
  */
@@ -40,7 +43,7 @@ import { Stick } from './touch.ts';
  * タッチ・マウスでの操作（デスクトップでもスマホでも、画面と操作は同じ。端末で分けない）
  *   歩く：画面のどこかに指を置き（マウスなら押し）、そのままずらした向きへ歩く（右上へずらすと上、右下は右、左下は下、左上は左。
  *         クォータービューの画面の斜めにそのまま対応する）。指を離すか、置いたところへ戻すと止まる（src/touch.ts）
- *   キーの代わり：画面の下の隅のボタン（戻る、やり直す、チュートリアルを飛ばす。タイトルでは記録を消す、チュートリアルを飛ばす・遊ぶ）。
+ *   キーの代わり：画面の下の隅のボタン（戻る、やり直す、チュートリアルを飛ばす。タイトルでは記録を消す、チュートリアルを飛ばす・遊ぶ。タイトルの右上は言語の切り替え）。
  *         ボタンはいつでも出し、同じことができるキーを四角で囲んで添える。それ以外の場面ではタップ・クリックが Enter の代わり
  *   二階へ昇るかの確認は、YES を2回タップで決まる（取り返しがつかないので、うっかり1回では決まらないようにする）
  */
@@ -62,7 +65,7 @@ const cleared = devCleared !== null ? new Set(devCleared.split(',').filter(Boole
 const save = () => {
   if (devCleared === null) saveCleared(cleared);
 };
-renderer.portalNote = (name) => (cleared.has(name) ? 'CLEARED' : null);
+renderer.portalNote = (name) => (cleared.has(name) ? msg().cleared : null);
 /** これまでに溜めた得点（エンディングで使われる） */
 const devTotal = params.get('total');
 let total = devTotal !== null ? Number(devTotal) : loadTotal();
@@ -74,14 +77,12 @@ const devDef = (): StageDef | null => (devStage === 'HUB' ? buildHub(cleared) : 
 
 let stage = new Stage(devDef() ?? STAGE_ORDER[0]);
 let tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
-/** このクリアで拠点に新しく現れた入口（結果の欄に出す） */
-let newlyUnlocked: string | null = null;
 /** 初めてクリアしたステージ。次に拠点に戻ったとき、新しい入口が現れる演出をする（?reveal=NAME で試せる） */
 let pendingReveal: string | null = params.get('reveal');
 /** 拠点の演出が終わる秒（それまでは歩けない） */
 let revealUntil = 0;
 
-const stageLabel = (name: string) => name.replace(/(\d+)$/, ' $1');
+const stageLabel = (name: string) => msg().stage(name);
 
 type Scene = 'title' | 'titleOut' | 'homecoming' | 'loading' | 'play' | 'leaving' | 'backing' | 'result' | 'view' | 'confirm' | 'ending' | 'ruins';
 
@@ -105,9 +106,14 @@ interface Button {
 const BTN_W = 60;
 const BTN_H = 22;
 /** ボタンに添えるキーの名前 */
-const KEY_LABEL: Record<string, string> = { Delete: 'DEL', Escape: 'ESC', KeyR: 'R', KeyT: 'T', KeyY: 'Y', KeyN: 'N' };
-const left = (label: string, key: string, w = BTN_W): Button => ({ label, key, keyLabel: KEY_LABEL[key], x: 4, y: 288 - BTN_H - 4, w, h: BTN_H });
-const right = (label: string, key: string, w = BTN_W): Button => ({ label, key, keyLabel: KEY_LABEL[key], x: 288 - w - 4, y: 288 - BTN_H - 4, w, h: BTN_H });
+const KEY_LABEL: Record<string, string> = { Delete: 'DEL', Escape: 'ESC', KeyR: 'R', KeyT: 'T', KeyY: 'Y', KeyN: 'N', KeyL: 'L' };
+/** ボタンの幅：BTN_W か、キーの名前とラベルが収まる幅（言語でラベルの長さが変わる） */
+const btnW = (label: string, key: string) => Math.max(BTN_W, textWidth(KEY_LABEL[key], 1) + textWidth(label, 1) + 14);
+const left = (label: string, key: string): Button => ({ label, key, keyLabel: KEY_LABEL[key], x: 4, y: 288 - BTN_H - 4, w: btnW(label, key), h: BTN_H });
+const right = (label: string, key: string): Button => {
+  const w = btnW(label, key);
+  return { label, key, keyLabel: KEY_LABEL[key], x: 288 - w - 4, y: 288 - BTN_H - 4, w, h: BTN_H };
+};
 
 /**
  * いまの場面のボタン。タッチでもマウスでも押せるよう、いつでも出す（キーボードだけ・タップだけ・マウスだけで遊べるように）。
@@ -115,23 +121,30 @@ const right = (label: string, key: string, w = BTN_W): Button => ({ label, key, 
  */
 function screenButtons(): Button[] {
   if (scene === 'title') {
-    // はじめてならチュートリアルを飛ばせる。チュートリアルを済ませていれば、もう一度遊べる
-    return [left('RESET', 'Delete'), cleared.has(tutorial.name) ? right('TUTORIAL', 'KeyT') : right('SKIP TUTORIAL', 'Escape', 76)];
+    // はじめてならチュートリアルを飛ばせる。チュートリアルを済ませていれば、もう一度遊べる。右上は言語の切り替え
+    const m = msg();
+    const langW = btnW(m.otherLang, 'KeyL');
+    return [
+      left(m.reset, 'Delete'),
+      cleared.has(tutorial.name) ? right(m.tutorial, 'KeyT') : right(m.skipTutorial, 'Escape'),
+      { label: m.otherLang, key: 'KeyL', keyLabel: 'L', x: 288 - langW - 4, y: 4, w: langW, h: BTN_H },
+    ];
   }
   if (scene === 'confirm') {
     // 確認の画面の YES・NO の文字を囲む（キーの名前は枠の下）。YES は選んでから、もう一度で決まる
     return [
       { label: '', key: 'KeyY', keyLabel: 'Y', x: 288 / 2 - 62, y: 288 / 2 + 11, w: 64, h: 19, selected: confirmYes },
-      { label: '', key: 'KeyN', keyLabel: 'N', x: 288 / 2 + 6, y: 288 / 2 + 11, w: 56, h: 19 },
+      { label: '', key: 'KeyN', keyLabel: 'N', x: 288 / 2 + 4, y: 288 / 2 + 11, w: 60, h: 19 },
     ];
   }
   // クリアしたあとはホームへ戻るだけ（やり直しは拠点の入口から）。時間切れならやり直せる
-  if (scene === 'result') return sim?.status === 'cleared' ? [left('HOME', 'Escape')] : [left('HOME', 'Escape'), right('RETRY', 'KeyR')];
+  const m = msg();
+  if (scene === 'result') return sim?.status === 'cleared' ? [left(m.home, 'Escape')] : [left(m.home, 'Escape'), right(m.retry, 'KeyR')];
   // 静止表示（?view）でも、遊んでいるときと同じボタンを出す
   if ((scene === 'play' || scene === 'view') && sim) {
-    if (sim.stage.kind === 'hub') return [left('TITLE', 'Escape')];
-    if (sim.stage.kind === 'tutorial') return [left('SKIP', 'Escape'), right('RETRY', 'KeyR')];
-    return [left('HOME', 'Escape'), right('RETRY', 'KeyR')];
+    if (sim.stage.kind === 'hub') return [left(m.title, 'Escape')];
+    if (sim.stage.kind === 'tutorial') return [left(m.skip, 'Escape'), right(m.retry, 'KeyR')];
+    return [left(m.home, 'Escape'), right(m.retry, 'KeyR')];
   }
   return [];
 }
@@ -336,7 +349,6 @@ function finishPlay(s: Sim): void {
   conductor.finish();
   input.clearPressed();
   scene = 'result';
-  newlyUnlocked = null;
   // これまでに溜めた得点（クリアでも時間切れでも、そのプレイの得点を足す）
   total += s.score;
   renderer.totalScore = total;
@@ -349,8 +361,6 @@ function finishPlay(s: Sim): void {
       cleared.add(name);
       save();
       if (s.stage.kind === 'stage') pendingReveal = name;
-      const i = STAGE_ORDER.findIndex((d) => d.name === name);
-      if (i >= 0 && i + 1 < STAGE_ORDER.length) newlyUnlocked = STAGE_ORDER[i + 1].name;
     }
   }
   // 開発サーバーでは、最後まで遊んだ記録を playlogs/ に保存する（自動テストのプレイは残さない）
@@ -429,7 +439,8 @@ function update(): void {
   const tut = input.consumePressed('KeyT');
 
   if (scene === 'title') {
-    if (input.consumePressed('Delete') || input.consumePressed('Backspace')) openReset();
+    if (input.consumePressed('KeyL')) toggleLang();
+    else if (input.consumePressed('Delete') || input.consumePressed('Backspace')) openReset();
     else if (start) leaveTitle(startGame);
     else if (esc && !cleared.has(tutorial.name)) leaveTitle(skipTutorial);
     else if (tut && cleared.has(tutorial.name)) leaveTitle(() => void play(tutorial));
@@ -526,7 +537,7 @@ function update(): void {
 function drawTitle(): void {
   // 遊び方は文字で書かず、チュートリアルで覚えてもらう（チュートリアルは途中でも Esc・SKIP で飛ばせる）
   const dev = devDef();
-  const go = 'PRESS ENTER OR TAP';
+  const go = msg().start;
   renderer.title(scene === 'homecoming' ? performance.now() / 1000 : (fixedTitleSec ?? performance.now() / 1000), {
     restored: (part) => (cleared.has(part) ? 1 : 0),
     collapsed: false,
@@ -567,30 +578,25 @@ function draw(): void {
   }
 
   if (scene === 'confirm' && confirmKind === 'upstairs') {
-    renderer.confirm('REALLY GO UPSTAIRS?', null, confirmYes);
+    renderer.confirm(msg().upstairs, null, confirmYes);
   } else if (scene === 'confirm') {
     drawTitle();
-    renderer.confirm('ERASE ALL PROGRESS?', 'CLEARED STAGES AND TOTAL SCORE WILL BE LOST.', confirmYes);
+    renderer.confirm(msg().erase, msg().eraseNote, confirmYes);
   } else if (scene === 'title' || scene === 'titleOut' || scene === 'homecoming') {
     drawTitle();
   } else if (sim && scene === 'result') {
     const e = clearSec();
     if (e !== null) {
-      renderer.clearResult(
-        sim,
-        e,
-        newlyUnlocked ? `A NEW DOOR AT HOME: ${stageLabel(newlyUnlocked)}` : null,
-        'ENTER / TAP: GO HOME',
-      );
+      renderer.clearResult(sim, e, msg().goHome);
     } else {
+      const m = msg();
       renderer.overlay([
-        { text: 'TIME UP', scale: 3, color: '#d0675a' },
+        { text: m.timeUp, scale: 3, color: '#d0675a' },
         { text: '' },
-        { text: `SCORE ${sim.score}`, scale: 2 },
-        { text: 'NO GOAL (SCORE KEPT)', color: '#8d857a' },
-        { text: `MISS ${sim.misses}`, color: '#8d857a' },
+        { text: m.score(sim.score), scale: 2 },
+        { text: m.miss(sim.misses), color: '#8d857a' },
         { text: '' },
-        { text: 'ENTER / TAP: RETRY', color: '#e3c56e' },
+        { text: m.retryPrompt, color: '#e3c56e' },
       ]);
     }
   }
@@ -653,6 +659,9 @@ if (import.meta.env.DEV) {
       },
       get layout() {
         return renderer.layout;
+      },
+      get lang() {
+        return lang();
       },
     },
   });

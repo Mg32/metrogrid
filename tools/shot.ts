@@ -6,6 +6,7 @@
  *   npm run shot -- --view 12,5,40 --name foo    任意の位置と tick（?view と同じ）。--stage STAGE2 でステージを選ぶ
  *   npm run shot -- --scale 1                    等倍で撮る
  *   npm run shot -- --only hub                   名前がそれで始まる場面だけ
+ *   npm run shot -- --lang en                    画面の言語（既定は日本語。名前が -en で終わる場面は英語で撮る）
  */
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,6 +22,7 @@ const { values: args } = parseArgs({
     seed: { type: 'string', default: '1' },
     stage: { type: 'string' },
     only: { type: 'string' },
+    lang: { type: 'string', default: 'ja' },
   },
 });
 
@@ -29,6 +31,12 @@ const SCENES: [string, string][] = args.view
   ? [[args.name, `view=${args.view}${args.stage ? `&stage=${args.stage}` : ''}`]]
   : [
       ['title', 'title=0.5'],
+      // 英語の画面（文の多い場面だけ）
+      ['title-en', 'title=0.5&lang=en'],
+      ['tutorial-start-en', 'stage=TUTORIAL&view=3,30,0&lang=en'],
+      ['tutorial-fast-en', 'stage=TUTORIAL&view=16,19,20&lang=en'],
+      ['hub-all-en', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4&total=48210&view=6,8,0&lang=en'],
+      ['clear-result-en', 'clear=6&lang=en'],
       ['title-progress', 'title=0.5&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3'],
       ['title-all', 'title=0.5&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4,STAGE5'],
       // 家に帰ってくる演出（STAGE5 を初めてクリアしたところ。二階が戻っていく。秒は HOMECOMING）
@@ -112,7 +120,8 @@ const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'msed
 try {
   const page = await browser.newPage({ viewport: { width: 288 * scale, height: 288 * scale }, deviceScaleFactor: 1 });
   for (const [name, query] of SCENES.filter(([n]) => !args.only || n.startsWith(args.only))) {
-    await page.goto(`${base}?seed=${args.seed}&${query}`);
+    const lang = query.includes('lang=') ? '' : `&lang=${args.lang}`;
+    await page.goto(`${base}?seed=${args.seed}&${query}${lang}`);
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
     const file = path.join(outDir, `${name}.png`);
     await page.screenshot({ path: file });
