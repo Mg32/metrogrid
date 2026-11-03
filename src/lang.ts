@@ -53,7 +53,7 @@ const EN = {
 
 const JA: typeof EN = {
   // タイトル
-  start: 'ENTER/TAP ではじめる',
+  start: 'ENTER/TAP で はじめる',
   reset: 'リセット',
   tutorial: 'チュートリアル',
   otherLang: 'ENGLISH',
