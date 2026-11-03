@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { collectErrors, frames, game, LOAD_MS } from './helpers.ts';
+import { collectErrors, expect, frames, game, LOAD_MS, test } from './helpers.ts';
 
 // 操作しない場面（URL パラメータでの静止表示など）でエラーが出ないか
 

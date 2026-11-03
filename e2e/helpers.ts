@@ -1,4 +1,24 @@
-import type { Page } from '@playwright/test';
+import { test as base, type BrowserContext, type Page } from '@playwright/test';
+
+/**
+ * 曲と効果音のファイル（src/assets/sound/）を読み込ませない（空の応答を返す）。
+ * 曲は全部で数十 MB あり、テストのたびに取りに行って解読すると重く、並べて動かすと読み込みが待ち時間に間に合わない。
+ * 読めなければゲームは仮のメトロノーム・合成した効果音で鳴らす（src/audio/sounds.ts。console.warn は出るが、エラーではない）
+ */
+export async function noSound(context: BrowserContext): Promise<void> {
+  // 開発サーバーでは、ファイルの URL を返すモジュール（…ogg?url）も同じ場所にあるので、クエリのない（ファイルそのもの）だけを止める
+  const isSound = (url: URL) => url.pathname.includes('/assets/sound/') && url.search === '';
+  await context.route(isSound, (route) => route.fulfill({ status: 200, body: '' }));
+}
+
+/** E2E のテストはこれを使う（どのページも曲を読み込まない） */
+export const test = base.extend({
+  context: async ({ context }, use) => {
+    await noSound(context);
+    await use(context);
+  },
+});
+export { expect } from '@playwright/test';
 
 /** main.ts が開発サーバーで公開している状態 */
 export interface GameHandle {

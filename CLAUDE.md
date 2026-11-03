@@ -19,11 +19,12 @@
 | `npm test` | 単体テスト（`node --test`。ゲームロジック・ステージ定義・決定性・プレイ記録の再生一致） |
 | `npm run bots` | ボットに遊ばせて成績表を出し、企画書の設計意図どおりか判定する（失敗で終了コード1） |
 | `npm run replay` | プレイ記録を再生して一致を確かめ、プレイの傾向（いた場所、ミス、得点）を集計する |
-| `npm run e2e` | Playwright（インストール済みの Edge）。キーボードだけ（`keyboard`）・マウスだけとタッチだけ（`pointer`）で遊べるか、デスクトップとスマホで同じ画面か（`screen`）、ドットがぼやけていないか（`pixel`）、静止表示でエラーが出ないか（`smoke`） |
+| `npm run e2e` | Playwright（インストール済みの Edge）。キーボードだけ（`keyboard`）・マウスだけとタッチだけ（`pointer`）で遊べるか、デスクトップとスマホで同じ画面か（`screen`）、ドットがぼやけていないか（`pixel`）、静止表示でエラーが出ないか（`smoke`）。重いので、操作や画面の組み立てを変えたときだけ回す。曲と効果音は読み込ませない（仮のメトロノームで動く。`e2e/helpers.ts` の `noSound`）。ブラウザは同時に2つまで |
+| `npm run e2e:quick` | E2E のうち軽いもの（`pixel`・`smoke`。15秒ほど） |
 | `npm run shot` | 主要な場面のスクリーンショットを `screenshots/` に保存する |
 | `npm run sound` | `sound/` の WAV（人の手で作った曲・効果音）を `src/assets/sound/` に Opus と AAC で書き出す（FFmpeg が必要。名前の決まりは [sound/README.md](sound/README.md)） |
 | `npm run font` | `font/mini_mottiri/` の「みにもっちり」（TTF に埋め込まれた 8 ドットのビットマップ）から、ゲームで使うフォントのデータ `src/render/mottiri.ts` を書き出す |
-| `npm run check` | typecheck → test → bots → e2e をまとめて |
+| `npm run check` | typecheck → test → bots → e2e:quick をまとめて |
 
 ## 遊ぶ流れと操作
 
@@ -57,7 +58,8 @@
 - ゲームロジック（`src/game/`）を変えた → `npm test` と `npm run bots`。
 - ルールを変えた（同じ入力で結果が変わる変更）→ [src/game/playlog.ts](src/game/playlog.ts) の `RULES_VERSION` を上げる。古いプレイ記録は再生一致の検査から外れる。
 - ステージを変えた・足した → `npm test`（その場で動く危険物が必ず通れるか、も検査する）と `npm run bots` の判定を確認し、成績表の数字（安全ルートの残り拍数、強いボットとの差など）を報告する。
-- 見た目（`src/render/`）を変えた → `npm run e2e` と `npm run shot`、スクリーンショットを実際に見る。
+- 見た目（`src/render/`）を変えた → `npm run e2e:quick` と `npm run shot`、スクリーンショットを実際に見る。ボタン・操作・場面の流れ（`src/main.ts`、`src/input.ts`、`src/touch.ts`）や画面の大きさにかかわる変更なら `npm run e2e`。
+- E2E のテストは `e2e/helpers.ts` の `test` を使う（曲を読み込まないように）。同じ処理を通る操作を、マウスとタッチの両方で重ねて確かめない。
 - 判定が失敗したら、ボットの誤りなのかゲームの設計の問題なのかを切り分けて報告する。判定の基準を黙って緩めない。
 
 ## ステージ設計の決まり

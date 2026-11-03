@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { frames, game } from './helpers.ts';
+import { expect, frames, game, test } from './helpers.ts';
 
 /**
  * 288x288 の画面が、実画素で整数倍に拡大され、ぼやけずに表示されているか。

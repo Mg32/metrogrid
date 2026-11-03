@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { collectErrors, DESKTOP, frames, game, LOAD_MS } from './helpers.ts';
+import { collectErrors, DESKTOP, expect, frames, game, LOAD_MS, test } from './helpers.ts';
 
 // キーボードだけで遊べるか（デスクトップの画面で。画面と操作は端末で分けていない）
 test.use(DESKTOP);
@@ -20,31 +19,7 @@ test('タイトルの L で日本語と英語が切り替わり、読み込み�
   expect(errors).toEqual([]);
 });
 
-test('タイトルから始めて歩ける', async ({ page }) => {
-  const errors = collectErrors(page);
-  await page.goto('/?seed=1');
-  await frames(page);
-  expect((await game(page)).scene).toBe('title');
-
-  await page.keyboard.press('Enter');
-  // 少女が現れる1小節とカウント（1小節）、合わせて 4.8 秒が終わるまで待つ。テストを並べて動かすと、
-  // 曲の読み込みや音の出力が動き出すまでに数秒かかることがあるので長めに
-  await expect.poll(async () => (await game(page)).sim?.tick ?? -1, { timeout: 20000 }).toBeGreaterThan(0);
-  expect((await game(page)).scene).toBe('play');
-
-  // スタート（玄関の前）からは上（画面の右上）へ道が続いている
-  const before = (await game(page)).sim!;
-  await page.keyboard.down('ArrowUp');
-  await expect.poll(async () => (await game(page)).sim!.y, { timeout: 3000 }).toBeLessThan(before.y);
-  await page.keyboard.up('ArrowUp');
-
-  // チュートリアルの途中の Esc は、飛ばして拠点へ
-  await page.keyboard.press('Escape');
-  await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
-  expect(errors).toEqual([]);
-});
-
-test('はじめてはチュートリアルから。Esc でスキップすると拠点へ、拠点の入口から STAGE 1 へ', async ({ page }) => {
+test('はじめてはチュートリアルから。歩けて、Esc でスキップすると拠点へ、拠点の入口から STAGE 1 へ', async ({ page }) => {
   const errors = collectErrors(page);
   await page.goto('/?seed=1');
   await frames(page);
@@ -53,6 +28,14 @@ test('はじめてはチュートリアルから。Esc でスキップすると�
   // 曲を読み込んでいるあいだ（loading）のキーは効かない
   await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 
+  // 少女が現れる1小節とカウント（1小節）、合わせて 4.8 秒が終わると歩ける。スタート（玄関の前）からは上（画面の右上）へ道が続いている
+  await expect.poll(async () => (await game(page)).sim?.tick ?? -1, { timeout: LOAD_MS }).toBeGreaterThan(0);
+  const before = (await game(page)).sim!;
+  await page.keyboard.down('ArrowUp');
+  await expect.poll(async () => (await game(page)).sim!.y, { timeout: 3000 }).toBeLessThan(before.y);
+  await page.keyboard.up('ArrowUp');
+
+  // チュートリアルの途中の Esc は、飛ばして拠点へ
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
   await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');

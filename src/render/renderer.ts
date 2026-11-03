@@ -639,6 +639,8 @@ export class Renderer {
   private lightMaps = new WeakMap<Stage, Uint8Array>();
   private tintedRoads = new Map<string, HTMLCanvasElement>();
   private surfaces = new Map<string, HTMLCanvasElement>();
+  /** 高い床の側面（深さごとに、使うときに作って取っておく） */
+  private slabs = new Map<number, HTMLCanvasElement>();
   private elevations = new WeakMap<Stage, (x: number, y: number) => number>();
   private thingMaps = new WeakMap<Stage, Map<number, string>>();
 
@@ -677,6 +679,16 @@ export class Renderer {
     } catch {
       ro.observe(main);
     }
+  }
+
+  /** 高い床の、地面まで伸びた側面の絵。左上が (sx - TW / 2, sy) */
+  private slab(depth: number): HTMLCanvasElement {
+    let sp = this.slabs.get(depth);
+    if (!sp) {
+      sp = makeSprite(TW, TH + depth + 1, (ctx) => fillSlabSides(ctx, TW / 2, 0, TW, TH, depth));
+      this.slabs.set(depth, sp);
+    }
+    return sp;
   }
 
   /** 色合いつきの道のタイル（使うときに作って取っておく） */
@@ -873,6 +885,15 @@ export class Renderer {
     const offY = Math.round(LH / 2 - this.camY - 8);
     ctx.save();
     ctx.translate(offX, offY);
+    /**
+     * 世界の座標 (sx, sy) に描く物が画面に入るか。above は sy から上へ、below は下へはみ出す高さ。
+     * 大きなステージでは、画面の外のマスまで描くと重い（STAGE4・STAGE5）ので、外のマスは飛ばす
+     */
+    const onScreen = (sx: number, sy: number, above: number, below: number): boolean => {
+      const x = sx + offX;
+      const y = sy + offY;
+      return x > -TW * 2 && x < LW + TW * 2 && y + below >= 0 && y - above < LH;
+    };
 
     // クリア演出：扉から遠いマスほど遅れて、道が崩れて闇へ落ちていく。扉のマスだけが残る。null は崩れ落ちたあと
     const goal = stage.goal;
@@ -927,6 +948,8 @@ export class Renderer {
         const sx = iso(x, y).sx;
         const sy = iso(x, y).sy + f.dy;
         const rise = elevation(x, y);
+        // 高い床の側面は地面まで下へ伸びる。道の上の印（矢印、線路など）は少し上へはみ出す
+        if (!onScreen(sx, sy, 32, TH + FLOOR_THICK + rise + 1)) continue;
         if (cell.terrain === 'hole') ctx.drawImage(this.hole, sx - TW / 2, sy);
         if (cell.terrain === 'wall' && cell.obj?.type === 'prop') {
           // 小物の地面より下の部分（地面より上は立体物として後で描く）
@@ -938,7 +961,7 @@ export class Renderer {
         if (cell.terrain === 'wall') {
           // 歩けない面（水面、屋根、雪の屋根、二階の壁、人影の足場）。家具の塊は立体物として後で描く
           if (cell.scenery && SURFACES.has(cell.scenery)) {
-            if (rise > 0) fillSlabSides(ctx, sx, sy, TW, TH, FLOOR_THICK + rise);
+            if (rise > 0) ctx.drawImage(this.slab(FLOOR_THICK + rise), sx - TW / 2, sy);
             ctx.drawImage(this.surface(cell, tickF), sx - TW / 2, sy);
           }
           const th = things.get(stage.index(x, y));
@@ -947,7 +970,7 @@ export class Renderer {
         }
         if (cell.terrain !== 'floor') continue;
         // 高い床は、側面を地面まで伸ばす（企画書 第2.4節「床の高さ」）
-        if (rise > 0) fillSlabSides(ctx, sx, sy, TW, TH, FLOOR_THICK + rise);
+        if (rise > 0) ctx.drawImage(this.slab(FLOOR_THICK + rise), sx - TW / 2, sy);
         // 水のさざ波は半拍ごとに動く
         if (cell.water) ctx.drawImage(this.water[mod(Math.floor(tickF / (TICKS_PER_BEAT / 2)), 2)][cell.zone], sx - TW / 2, sy);
         else ctx.drawImage(this.road(cell, light[stage.index(x, y)]), sx - TW / 2, sy);
@@ -986,6 +1009,8 @@ export class Renderer {
         if (!f) continue;
         const sx = iso(x, y).sx;
         const sy = iso(x, y).sy + f.dy;
+        // 背の高い物（街灯、人影、家具の塊など）は上へ大きくはみ出す
+        if (!onScreen(sx, sy, 128, TH + FLOOR_THICK + elevation(x, y) + 8)) continue;
         const thing = cell.terrain === 'wall' ? things.get(stage.index(x, y)) : undefined;
         if (cell.terrain === 'wall' && cell.scenery && !SURFACES.has(cell.scenery)) {
           // 家具の塊：床（高さ 0）から、面の高さまでの箱。プレイヤーより手前で重なるときは透かす

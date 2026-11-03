@@ -1,9 +1,10 @@
-import { expect, test, type Page } from '@playwright/test';
-import { client, collectErrors, DESKTOP, frames, game, MOBILE, LOAD_MS } from './helpers.ts';
+import type { Page } from '@playwright/test';
+import { client, collectErrors, DESKTOP, expect, frames, game, MOBILE, LOAD_MS, test } from './helpers.ts';
 
 /**
- * タップだけ・マウスだけで遊べるか。画面と操作は端末で分けていないので、同じ手順をマウス（デスクトップの画面）と
- * タッチ（スマホの画面）で確かめる。押す場所は 288x288 のバッファ上の座標で指定する
+ * タップだけ・マウスだけで遊べるか。画面と操作は端末で分けていないので、遊ぶ流れ（タップ、ずらして歩く、ボタン）は
+ * マウス（デスクトップの画面）とタッチ（スマホの画面）の両方で確かめる。ほかのボタンは同じ処理を通るので、タッチだけで確かめる
+ * （E2E を軽くするため）。押す場所は 288x288 のバッファ上の座標で指定する
  */
 const POINTERS = [
   { name: 'マウス', device: DESKTOP, type: 'mouse' },
@@ -79,62 +80,64 @@ for (const p of POINTERS) {
       expect(errors).toEqual([]);
     });
 
-    test('タイトルの右上のボタンで、日本語と英語が切り替わる（始まらない）', async ({ page }) => {
-      const errors = collectErrors(page);
-      await page.goto('/?seed=1');
-      await frames(page);
-      const first = (await game(page)).lang;
-      await tap(page, LANG_BTN);
-      await frames(page);
-      expect((await game(page)).lang).toBe(first === 'ja' ? 'en' : 'ja');
-      await tap(page, LANG_BTN);
-      await frames(page);
-      expect((await game(page)).lang).toBe(first);
-      expect((await game(page)).scene).toBe('title');
-      expect(errors).toEqual([]);
-    });
+    if (p.type === 'touch') {
+      test('タイトルの右上のボタンで、日本語と英語が切り替わる（始まらない）', async ({ page }) => {
+        const errors = collectErrors(page);
+        await page.goto('/?seed=1');
+        await frames(page);
+        const first = (await game(page)).lang;
+        await tap(page, LANG_BTN);
+        await frames(page);
+        expect((await game(page)).lang).toBe(first === 'ja' ? 'en' : 'ja');
+        await tap(page, LANG_BTN);
+        await frames(page);
+        expect((await game(page)).lang).toBe(first);
+        expect((await game(page)).scene).toBe('title');
+        expect(errors).toEqual([]);
+      });
 
-    test('タイトルの SKIP TUTORIAL で、チュートリアルを飛ばして拠点へ', async ({ page }) => {
-      const errors = collectErrors(page);
-      await page.goto('/?seed=1');
-      await frames(page);
-      await tap(page, [288 - 40, 288 - 15]);
-      await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
-      expect(await page.evaluate(() => localStorage.getItem('metrogrid.cleared'))).toContain('TUTORIAL');
-      expect(errors).toEqual([]);
-    });
+      test('タイトルの SKIP TUTORIAL で、チュートリアルを飛ばして拠点へ', async ({ page }) => {
+        const errors = collectErrors(page);
+        await page.goto('/?seed=1');
+        await frames(page);
+        await tap(page, [288 - 40, 288 - 15]);
+        await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
+        expect(await page.evaluate(() => localStorage.getItem('metrogrid.cleared'))).toContain('TUTORIAL');
+        expect(errors).toEqual([]);
+      });
 
-    test('タイトルの RESET：NO ならそのまま、YES を2回で記録を消す', async ({ page }) => {
-      const errors = collectErrors(page);
-      await page.goto('/?seed=1');
-      await page.evaluate(() => localStorage.setItem('metrogrid.cleared', JSON.stringify(['TUTORIAL', 'STAGE1'])));
-      await page.goto('/?seed=1');
-      await frames(page);
-      await tap(page, LEFT_BTN);
-      await expect.poll(async () => (await game(page)).scene).toBe('confirm');
-      await tap(page, NO_BTN);
-      await expect.poll(async () => (await game(page)).scene).toBe('title');
-      expect(await page.evaluate(() => localStorage.getItem('metrogrid.cleared'))).not.toBeNull();
+      test('タイトルの RESET：NO ならそのまま、YES を2回で記録を消す', async ({ page }) => {
+        const errors = collectErrors(page);
+        await page.goto('/?seed=1');
+        await page.evaluate(() => localStorage.setItem('metrogrid.cleared', JSON.stringify(['TUTORIAL', 'STAGE1'])));
+        await page.goto('/?seed=1');
+        await frames(page);
+        await tap(page, LEFT_BTN);
+        await expect.poll(async () => (await game(page)).scene).toBe('confirm');
+        await tap(page, NO_BTN);
+        await expect.poll(async () => (await game(page)).scene).toBe('title');
+        expect(await page.evaluate(() => localStorage.getItem('metrogrid.cleared'))).not.toBeNull();
 
-      await tap(page, LEFT_BTN);
-      await expect.poll(async () => (await game(page)).scene).toBe('confirm');
-      await tap(page, YES_BTN);
-      await frames(page);
-      expect((await game(page)).scene).toBe('confirm');
-      await tap(page, YES_BTN);
-      await expect.poll(async () => (await game(page)).scene).toBe('title');
-      expect(await page.evaluate(() => localStorage.getItem('metrogrid.cleared'))).toBeNull();
-      expect(errors).toEqual([]);
-    });
+        await tap(page, LEFT_BTN);
+        await expect.poll(async () => (await game(page)).scene).toBe('confirm');
+        await tap(page, YES_BTN);
+        await frames(page);
+        expect((await game(page)).scene).toBe('confirm');
+        await tap(page, YES_BTN);
+        await expect.poll(async () => (await game(page)).scene).toBe('title');
+        expect(await page.evaluate(() => localStorage.getItem('metrogrid.cleared'))).toBeNull();
+        expect(errors).toEqual([]);
+      });
 
-    test('ステージ中の RETRY で、はじめからやり直す', async ({ page }) => {
-      const errors = collectErrors(page);
-      await page.goto('/?seed=1&stage=STAGE1&autostart');
-      await expect.poll(async () => (await game(page)).sim?.tick ?? -1, { timeout: LOAD_MS }).toBeGreaterThan(8);
-      await tap(page, RIGHT_BTN);
-      await expect.poll(async () => (await game(page)).sim?.tick ?? 99, { timeout: LOAD_MS }).toBeLessThan(8);
-      expect((await game(page)).sim?.stage).toBe('STAGE1');
-      expect(errors).toEqual([]);
-    });
+      test('ステージ中の RETRY で、はじめからやり直す', async ({ page }) => {
+        const errors = collectErrors(page);
+        await page.goto('/?seed=1&stage=STAGE1&autostart');
+        await expect.poll(async () => (await game(page)).sim?.tick ?? -1, { timeout: LOAD_MS }).toBeGreaterThan(8);
+        await tap(page, RIGHT_BTN);
+        await expect.poll(async () => (await game(page)).sim?.tick ?? 99, { timeout: LOAD_MS }).toBeLessThan(8);
+        expect((await game(page)).sim?.stage).toBe('STAGE1');
+        expect(errors).toEqual([]);
+      });
+    }
   });
 }

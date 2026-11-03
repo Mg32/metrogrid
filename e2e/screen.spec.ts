@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { collectErrors, DESKTOP, dots, frames, game, MOBILE } from './helpers.ts';
+import type { Page } from '@playwright/test';
+import { collectErrors, DESKTOP, dots, expect, frames, game, MOBILE, noSound, test } from './helpers.ts';
 
 /**
  * デスクトップのブラウザとスマホのブラウザで、同じ画面が表示されるか。
@@ -31,8 +31,9 @@ async function capture(page: Page, scene: (typeof SCENES)[number]): Promise<numb
 // ページを場面ごとに作り直すと、並べて動かしたときに読み込みが重なって遅いので、デスクトップとスマホのページを1つずつ使い回す
 test('デスクトップとスマホで同じ画面が表示される', async ({ browser, baseURL }) => {
   test.setTimeout(120_000);
-  const desktop = await (await browser.newContext({ ...DESKTOP, baseURL })).newPage();
-  const mobile = await (await browser.newContext({ ...MOBILE, baseURL })).newPage();
+  const contexts = [await browser.newContext({ ...DESKTOP, baseURL }), await browser.newContext({ ...MOBILE, baseURL })];
+  for (const c of contexts) await noSound(c);
+  const [desktop, mobile] = await Promise.all(contexts.map((c) => c.newPage()));
   const errors = [collectErrors(desktop), collectErrors(mobile)];
   for (const scene of SCENES) {
     await test.step(scene.name, async () => {

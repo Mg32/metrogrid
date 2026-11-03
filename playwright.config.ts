@@ -11,7 +11,9 @@ const channel = process.env.PW_CHANNEL ?? 'msedge';
 export default defineConfig({
   testDir: 'e2e',
   fullyParallel: true,
-  // 遊び始めるまでに曲を読み込むテストが多く、並べて動かすと時間がかかるので、1つのテストの上限を長めに
+  // ブラウザを同時に立ち上げるのは2つまで（既定の CPU の半分の数だと、コンピュータが重くなる）
+  workers: 2,
+  // 遊び始めるまでに実時間で待つ（少女が現れる・カウント）テストがあるので、1つのテストの上限を長めに
   timeout: 60_000,
   reporter: [['list']],
   use: {
