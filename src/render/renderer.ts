@@ -44,11 +44,11 @@ export const UPSTAIRS_STEPS = 6;
 export const UPSTAIRS_STEP_SEC = 0.22;
 /**
  * 階段のあるステージ（チュートリアル）の始まり：はじめは誰もいない。APPEAR_BARS 小節（曲は鳴らさない）で階段のいちばん下に
- * 少女が現れ、APPEAR_REST_BARS 小節そのまま待ち（現れるときの効果音の余韻が消えるまで）、次の1小節（曲の前奏。カウント）で
- * 1拍1段ずつ昇ってスタートに着く。main.ts は APPEAR_BARS + APPEAR_REST_BARS 小節ぶん曲の頭を遅らせる
+ * 少女が現れ、APPEAR_REST_BEATS 拍そのまま待ち（現れるときの効果音の余韻が消えるあたりまで）、次の1小節（曲の前奏。カウント）で
+ * 1拍1段ずつ昇ってスタートに着く。main.ts は APPEAR_BARS 小節 + APPEAR_REST_BEATS 拍ぶん曲の頭を遅らせる
  */
 export const APPEAR_BARS = 1;
-export const APPEAR_REST_BARS = 1;
+export const APPEAR_REST_BEATS = 2;
 /** 階段の、昇ってくる段より下に見える段の数（闇に溶けていく） */
 const STAIRS_FADE = 3;
 const PLAYER_H = 21;
@@ -154,6 +154,12 @@ const ROAD_LIGHT = FLOOR_LIGHT.alley;
 const FLOOR_STYLES = Object.keys(FLOOR_LIGHT) as FloorStyle[];
 /** 遊具の柱、ブランコの枠などの高さ */
 const POLE_H = 26;
+/**
+ * 回旋塔の柱の高さと鎖の長さ（ドット）。輪は柱のまわりの長方形の道筋を回るので、柱からの距離が 1〜2.2 マスと変わる。
+ * 鎖を長くして長さを変えずに吊り、離れるほど輪が少し持ち上がる（振り回されて外へ開く）ようにする
+ */
+const KAISENTO_H = 64;
+const KAISENTO_CHAIN = 60;
 /** 流されていく物が湧き口から跳び出す高さ（ドット） */
 const FLOW_HOP = 9;
 /** ステージのゴールの光の柱の高さ */
@@ -1184,10 +1190,12 @@ export class Renderer {
         if (h.look === 'kaisento' && h.pivot) {
           // 回旋塔：柱のてっぺんから鎖で吊った輪が、柱のまわりを回る
           const pv = iso(h.pivot.x, h.pivot.y);
+          const r = Math.min(Math.hypot(hx - h.pivot.x, hy - h.pivot.y) * CELL_LEN, KAISENTO_CHAIN);
+          const lift = Math.round(KAISENTO_H - Math.sqrt(KAISENTO_CHAIN * KAISENTO_CHAIN - r * r));
           sprites.push({ depth: h.pivot.x + h.pivot.y + 0.5, draw: () => this.kaisentoPole(pv.sx, pv.sy + TH / 2) });
           sprites.push({
             depth: hx + hy + 0.5,
-            draw: () => this.kaisentoRing(pv.sx, pv.sy + TH / 2, sx, sy + TH / 2),
+            draw: () => this.kaisentoRing(pv.sx, pv.sy + TH / 2, sx, sy + TH / 2, lift),
           });
         } else if (h.look === 'tram' || h.look === 'koinobori') {
           // 路面電車・鯉のぼり：先頭と、通ってきたマスにまたがる胴。向きは先頭の進む向き
@@ -1245,11 +1253,12 @@ export class Renderer {
         const hit = h.cellsAt(now)[0] ?? null;
         if (h.look === 'fan' && h.pivot) {
           const pv = h.pivot;
+          const head = h.arc ? h.headAt(tickF) : seat;
           sprites.push({
-            depth: Math.max(seat.x + seat.y, pv.x + pv.y) + 0.45,
+            depth: Math.max(head.x + head.y, pv.x + pv.y) + 0.45,
             draw: () => {
-              this.swingShadow(seat, hit);
-              this.fan(pv, seat, tickF);
+              this.swingShadow(head, hit);
+              this.fan(pv, head, tickF);
             },
           });
           continue;
@@ -2086,8 +2095,8 @@ export class Renderer {
   }
 
   /**
-   * 扇風機の首振り：pivot の台（段の間の闇に浮かぶ）に立ち、首を振って頭が道の上を往復する。head は頭のある位置（グリッド、小数）。
-   * 頭の真下のマスが危険（振り切って cells の外にあるときは危険でない）
+   * 扇風機の首振り：pivot の台（闇に浮かぶ）に立ち、首を振って頭が道の上で弧を描く。head は頭のある位置（グリッド、小数）。
+   * 頭の真下のマスが危険（cells の外にあるときは危険でない）
    */
   private fan(pivot: Vec, head: { x: number; y: number }, tickF: number): void {
     const ctx = this.lctx;
@@ -2130,7 +2139,9 @@ export class Renderer {
   /**
    * 柱時計の振り子：闇に浮かぶ柱時計から長い竿が下り、先の錘が道の上を横切るように揺れる。
    * ends は振れ幅の両端（グリッド座標）、seat は錘の真下の位置、reach は振れ幅（マス）。錘の真下のマスが危険。
-   * 錘は時計の中の支点を中心に、決まった長さの竿で円を描いて揺れる
+   * 振れる向きは道の斜めの向き（奥と手前）だが、立体のまま円を描かせると、手前へ振れたとき竿が長く、奥へ振れたとき短く見える。
+   * そこで錘は、画面の上で支点を中心とする決まった半径の円を描く（正面から見た振り子と同じ、左右に対称な弧）。
+   * 錘の左右の位置は真下のマスで決まり、高さだけが円から決まる
    */
   private pendulum(ends: { x: number; y: number }[], seat: { x: number; y: number }, reach: number): void {
     const ctx = this.lctx;
@@ -2139,10 +2150,19 @@ export class Renderer {
       const q = iso(gx, gy);
       return { x: q.sx, y: q.sy + TH / 2 - h };
     };
-    // 錘のいちばん低い所が地面から 6 ドット。支点（時計の振り子の窓の上）はその竿の長さだけ上
+    // 竿の長さ（画面のドット）。振り切ったときの傾きが MAX_SWING_ANGLE までになる長さ
+    const half = TW / 2;
+    const length = Math.max(36, Math.ceil((half * (reach + 0.5)) / Math.sin(MAX_SWING_ANGLE)));
+    // 支点の高さ：振れ幅のどこでも、錘が真下の地面から LOW ドット以上離れる高さ。振れの向きに u マスずれると、
+    // 真下の地面は画面で 6u 下がり、錘は円の上で支点から sqrt(length² - (12u)²) 下にある
     const LOW = 6;
-    const length = pendulumLength(reach, 46);
-    const HANG = LOW + length + 7;
+    let pivotH = 0;
+    for (let i = 0; i <= 40; i++) {
+      const u = reach * (i / 20 - 1);
+      const dx = Math.min(half * Math.abs(u), length);
+      pivotH = Math.max(pivotH, LOW + Math.sqrt(length * length - dx * dx) - (TH / 2) * u);
+    }
+    const HANG = Math.ceil(pivotH) + 7;
     const top = at(mid.x, mid.y, HANG);
     // 時計の箱：文字盤と、振り子の窓。下は闇へ竿が抜けている
     ctx.fillStyle = COLORS.woodDark;
@@ -2157,9 +2177,10 @@ export class Renderer {
     ctx.fillRect(top.x, top.y - 15, 3, 1);
     ctx.fillStyle = COLORS.glassDim;
     ctx.fillRect(top.x - 4, top.y - 8, 8, 9);
-    // 錘：支点を中心に円を描く（振り切るほど持ち上がる）
-    const u = seat.x - mid.x + (seat.y - mid.y);
-    const bob = at(seat.x, seat.y, Math.round(pendulumHeight(u, length, HANG - 7)));
+    // 錘：画面の上で、支点を中心に円を描く（振り切るほど持ち上がる）
+    const ground = at(seat.x, seat.y);
+    const dx = Math.min(Math.abs(ground.x - top.x), length);
+    const bob = { x: ground.x, y: Math.round(top.y - 7 + Math.sqrt(length * length - dx * dx)) };
     plotLine(ctx, top.x, top.y - 7, bob.x, bob.y, COLORS.brassDark);
     plotLine(ctx, top.x + 1, top.y - 7, bob.x + 1, bob.y, COLORS.brass);
     fillEllipse(ctx, bob.x, bob.y, 4, 4, COLORS.brassDark);
@@ -2411,24 +2432,24 @@ export class Renderer {
     fillEllipse(ctx, cx, ground, 3, 1, '#000');
     ctx.globalAlpha = 1;
     ctx.fillStyle = COLORS.rust;
-    ctx.fillRect(cx - 1, ground - POLE_H, 2, POLE_H);
+    ctx.fillRect(cx - 1, ground - KAISENTO_H, 2, KAISENTO_H);
     ctx.fillStyle = COLORS.rustDark;
-    ctx.fillRect(cx, ground - POLE_H, 1, POLE_H);
+    ctx.fillRect(cx, ground - KAISENTO_H, 1, KAISENTO_H);
     ctx.fillStyle = COLORS.rustLight;
-    ctx.fillRect(cx - 2, ground - POLE_H - 2, 4, 2);
+    ctx.fillRect(cx - 2, ground - KAISENTO_H - 2, 4, 2);
   }
 
-  /** 回旋塔の輪（柱のてっぺんから鎖で吊られている）。輪の真下のマスが危険 */
-  private kaisentoRing(pcx: number, pground: number, cx: number, ground: number): void {
+  /** 回旋塔の輪（柱のてっぺんから鎖で吊られている）。輪の真下のマスが危険。lift は輪の高さ（ドット） */
+  private kaisentoRing(pcx: number, pground: number, cx: number, ground: number, lift: number): void {
     const ctx = this.lctx;
-    const ry = ground - 8;
+    const ry = ground - lift;
     const r = 5;
     ctx.globalAlpha = 0.45;
     fillEllipse(ctx, cx, ground, r, 1, '#000');
     ctx.globalAlpha = 1;
     // 輪は水平。柱のてっぺんから、輪の左右の端へ鎖が2本
-    plotLine(ctx, pcx, pground - POLE_H, cx - r, ry, COLORS.rustDark);
-    plotLine(ctx, pcx, pground - POLE_H, cx + r, ry, COLORS.rustDark);
+    plotLine(ctx, pcx, pground - KAISENTO_H, cx - r, ry, COLORS.rustDark);
+    plotLine(ctx, pcx, pground - KAISENTO_H, cx + r, ry, COLORS.rustDark);
     strokeIsoRing(ctx, cx, ry, r, COLORS.rustDark, COLORS.rustLight);
   }
 
@@ -2751,7 +2772,7 @@ export class Renderer {
     const n = sim.stage.def.stairs ?? 0;
     if (!n || songTime >= 0 || sim.x !== sim.stage.start.x || sim.y !== sim.stage.start.y) return null;
     const u = songTime / (tickSec * TICKS_PER_BEAT);
-    if (u < -n) return { k: n, to: n, walk: 1, beat: 0, appear: clamp01((u + n + (APPEAR_BARS + APPEAR_REST_BARS) * 4) / (APPEAR_BARS * 4)) };
+    if (u < -n) return { k: n, to: n, walk: 1, beat: 0, appear: clamp01((u + n + APPEAR_BARS * 4 + APPEAR_REST_BEATS) / (APPEAR_BARS * 4)) };
     const b = Math.floor(u);
     const beat = u - b;
     // 段から段へ動くのは、ふつうに1マス歩くときと同じ長さ（world の slide と同じ）

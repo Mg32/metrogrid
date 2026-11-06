@@ -128,17 +128,21 @@ export type HazardDef =
   /**
    * 箱ブランコ。cells（axis 方向に一直線）の上を、座席が period tick で1往復する。
    * 振れ幅 reach（マス）が cells より広いと、振り切ったときは壁の上に出て、どのマスも危険でなくなる。
+   * arm（マス）があるときは、座席は一直線でなく pivot を中心とする半径 arm の弧の上を、cells の真ん中の向きから
+   * 左右に sweep 度まで振れる（axis と reach は使わない）。cells は弧の下にあって危険になるマス（座席の真下のマスが cells にあれば危険）。
    * look: 'pendulum' は柱時計の振り子（闇に浮かぶ時計から長い竿が下りている）、
-   * 'fan' は扇風機の首振り（pivot の台に立つ扇風機が首を振り、頭が cells の上を往復する）、
+   * 'fan' は扇風機の首振り（pivot の台に立つ扇風機が首を振り、頭が arm の長さの首の先で弧を描く）、
    * 'koinobori' は色あせた鯉のぼり（屋根の高さを、cells に沿って行き来して泳ぐ）、
    * 'tram' はもう走っていない路線の車両（線路を行き来し、振り切ると線路の端から闇へ走り去る）として描く
    */
   | {
       type: 'swing';
       cells: [number, number][];
-      axis: 'x' | 'y';
+      axis?: 'x' | 'y';
       period: number;
       reach?: number;
+      arm?: number;
+      sweep?: number;
       look?: 'pendulum' | 'fan' | 'koinobori' | 'tram';
       pivot?: [number, number];
     };

@@ -101,6 +101,7 @@ export class PeriodicHazard implements Hazard {
 /**
  * 箱ブランコ。座席の位置 u = reach × sin(2π(t + phase) / period)（マス単位、cells の中央が 0）。
  * 座席の真下のマスだけが危険。振り切って cells の外（壁の上）にあるときは、どのマスも危険でない。
+ * arm があるときは、座席は pivot を中心とする弧の上を、角度 sweep × sin(2π(t + phase) / period) で振れる（扇風機の頭）
  */
 export class SwingHazard implements Hazard {
   readonly kind = 'swing';
@@ -111,21 +112,41 @@ export class SwingHazard implements Hazard {
   readonly phase: number;
   readonly look: 'pendulum' | 'fan' | 'koinobori' | 'tram' | null;
   readonly pivot: Vec | null;
+  /** 弧を描くとき：半径（マス）、振れ幅（ラジアン）、真ん中の向き（pivot から cells の重心への角度）。一直線なら null */
+  readonly arc: { arm: number; sweep: number; heading: number; pivot: Vec } | null;
 
   constructor(def: Extract<HazardDef, { type: 'swing' }>, phase: number) {
     this.look = def.look ?? null;
     this.pivot = def.pivot ? { x: def.pivot[0], y: def.pivot[1] } : null;
     this.cells = def.cells.map(([x, y]) => ({ x, y }));
-    this.axis = def.axis;
+    this.axis = def.axis ?? 'x';
+    this.period = def.period;
+    this.phase = mod(phase, def.period);
+    if (def.arm !== undefined) {
+      if (!this.pivot || def.sweep === undefined) throw new Error('弧を描く箱ブランコには pivot と sweep が要る');
+      const cx = this.cells.reduce((a, c) => a + c.x, 0) / this.cells.length;
+      const cy = this.cells.reduce((a, c) => a + c.y, 0) / this.cells.length;
+      const heading = Math.atan2(cy - this.pivot.y, cx - this.pivot.x);
+      this.arc = { arm: def.arm, sweep: (def.sweep * Math.PI) / 180, heading, pivot: this.pivot };
+      this.reach = 0;
+      return;
+    }
+    this.arc = null;
+    if (!def.axis) throw new Error('箱ブランコには axis が要る');
     for (let i = 1; i < this.cells.length; i++) {
       const a = this.cells[i - 1];
       const b = this.cells[i];
       const ok = def.axis === 'x' ? b.x === a.x + 1 && b.y === a.y : b.y === a.y + 1 && b.x === a.x;
       if (!ok) throw new Error(`箱ブランコの cells は ${def.axis} 方向に連続して並べる`);
     }
-    this.period = def.period;
     this.reach = def.reach ?? (this.cells.length - 1) / 2 + 1.25;
-    this.phase = mod(phase, def.period);
+  }
+
+  /** 弧を描くとき、座席（扇風機の頭）の位置（グリッド、小数）。t は小数でもよい（描画用） */
+  headAt(t: number): { x: number; y: number } {
+    const a = this.arc!;
+    const th = a.heading + a.sweep * Math.sin((2 * Math.PI * (Math.max(0, t) + this.phase)) / this.period);
+    return { x: a.pivot.x + a.arm * Math.cos(th), y: a.pivot.y + a.arm * Math.sin(th) };
   }
 
   /** 座席の位置（マス単位、cells の中央が 0）。t は小数でもよい（描画用） */
@@ -135,6 +156,12 @@ export class SwingHazard implements Hazard {
 
   cellsAt(t: number): Vec[] {
     if (t < 0) return [];
+    if (this.arc) {
+      const h = this.headAt(t);
+      const x = Math.round(h.x);
+      const y = Math.round(h.y);
+      return this.cells.filter((c) => c.x === x && c.y === y);
+    }
     const i = Math.round(this.seatAt(t) + (this.cells.length - 1) / 2);
     return i >= 0 && i < this.cells.length ? [this.cells[i]] : [];
   }

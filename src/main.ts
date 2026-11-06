@@ -14,7 +14,7 @@ import { lang, msg, toggleLang } from './lang.ts';
 import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
 import { ENDING, endingEnd, HOMECOMING, TITLE_OUT } from './render/ending.ts';
 import { textWidth } from './render/font.ts';
-import { APPEAR_BARS, APPEAR_REST_BARS, BACK, CLEAR, FADE_IN, LEAVE, Renderer, revealEnd, revealRise, UPSTAIRS_STEP_SEC, UPSTAIRS_STEPS } from './render/renderer.ts';
+import { APPEAR_BARS, APPEAR_REST_BEATS, BACK, CLEAR, FADE_IN, LEAVE, Renderer, revealEnd, revealRise, UPSTAIRS_STEP_SEC, UPSTAIRS_STEPS } from './render/renderer.ts';
 import { Stick } from './touch.ts';
 
 /**
@@ -344,7 +344,7 @@ async function play(def: StageDef, start?: Vec): Promise<void> {
   // 曲のファイル（sound/music/<名前>.wav）があればそれを、なければメトロノームを鳴らす。拠点の曲は繰り返す
   const hub = stage.kind === 'hub';
   // 階段のあるステージ（チュートリアル）は、曲の前に少女が現れる小節を置く（曲もカウントも鳴らさない）
-  const waitBars = stage.def.stairs ? APPEAR_BARS + APPEAR_REST_BARS : 0;
+  const waitBars = stage.def.stairs ? APPEAR_BARS + APPEAR_REST_BEATS / 4 : 0;
   if (devLoadWait > 0) await new Promise((r) => setTimeout(r, devLoadWait * 1000));
   await conductor.start({ bpm: stage.def.bpm, bars: stage.def.bars, countInBars: hub ? 0 : 1, waitBars, track: stage.def.name, loop: hub });
   if (renderer.hubReveal?.def === stage.def) {
@@ -355,7 +355,7 @@ async function play(def: StageDef, start?: Vec): Promise<void> {
   // 光が降りてき始めてから、小節のちょうど半分で少女の姿になる（renderer の climbAt・playerAppearing）
   if (stage.def.stairs) {
     const beatSec = 60 / stage.def.bpm;
-    const appearAt = -(stage.def.stairs + (APPEAR_BARS + APPEAR_REST_BARS) * 4) * beatSec;
+    const appearAt = -(stage.def.stairs + APPEAR_BARS * 4 + APPEAR_REST_BEATS) * beatSec;
     const now = conductor.songTime();
     sfx.reveal(Math.max(0, appearAt - now), Math.max(0, appearAt + APPEAR_BARS * 2 * beatSec - now));
   }

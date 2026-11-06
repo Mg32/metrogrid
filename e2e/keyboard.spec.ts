@@ -45,7 +45,7 @@ test('はじめてはチュートリアルから。歩けて、Esc でスキッ�
   // 曲を読み込んでいるあいだ（loading）のキーは効かない
   await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 
-  // 少女が現れる1小節、そのまま待つ1小節、カウント（1小節）、合わせて 7.2 秒が終わると歩ける。スタート（玄関の前）からは上（画面の右上）へ道が続いている
+  // 少女が現れる1小節、そのまま待つ2拍、カウント（1小節）、合わせて 6.0 秒が終わると歩ける。スタート（玄関の前）からは上（画面の右上）へ道が続いている
   await expect.poll(async () => (await game(page)).sim?.tick ?? -1, { timeout: LOAD_MS }).toBeGreaterThan(0);
   const before = (await game(page)).sim!;
   await page.keyboard.down('ArrowUp');

@@ -179,9 +179,9 @@ function mapHazard(h: HazardDef, tr: (p: P) => P, transpose: boolean): HazardDef
     case 'flow':
       return { ...h, cells: h.cells.map(tr) };
     case 'swing': {
-      const axis = transpose ? (h.axis === 'x' ? 'y' : 'x') : h.axis;
+      const axis = h.axis && transpose ? (h.axis === 'x' ? 'y' : 'x') : h.axis;
       const cells = h.cells.map(tr).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-      return { ...h, axis, cells, ...(h.pivot ? { pivot: tr(h.pivot) } : {}) };
+      return { ...h, ...(axis ? { axis } : {}), cells, ...(h.pivot ? { pivot: tr(h.pivot) } : {}) };
     }
   }
 }
