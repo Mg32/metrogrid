@@ -638,6 +638,7 @@ function drawTitle(): void {
   const go = msg().start;
   renderer.title(scene === 'homecoming' ? performance.now() / 1000 : (fixedTitleSec ?? performance.now() / 1000), {
     restored: (part) => (cleared.has(part) ? 1 : 0),
+    logo: { title: msg().logo, subtitle: msg().subtitle },
     prompt: dev ? `${go} - DEV: ${stageLabel(dev.name)}` : go,
     beatSec: 60 / 100,
     exit: scene === 'titleOut' ? titleOutSec() : null,

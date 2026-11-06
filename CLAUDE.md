@@ -1,6 +1,7 @@
 # metrogrid
 
 音楽の拍に合わせてキャラクターが移動・探索する 2D ミニゲーム（TypeScript + Vite + Canvas、依存ライブラリなし）。
+作品の題名は「こわれた おうち」（`src/lang.ts` の `GAME_TITLE`）。英語の画面では題名を KOWARETA OUCHI、副題を BROKEN HOME と出す（`MESSAGES` の `logo`・`subtitle`）。metrogrid はリポジトリの名前。
 ユーザーへの応答（報告・説明）は日本語で書く。
 
 ## 企画書が正

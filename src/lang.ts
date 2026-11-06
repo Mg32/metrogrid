@@ -7,10 +7,16 @@
  */
 export type Lang = 'ja'|'en';
 
+/** 作品の題名。タイトルの画面のロゴに出す。英語の画面では、題名を音のままローマ字で書き、副題を添える（MESSAGES の logo・subtitle） */
+export const GAME_TITLE = 'こわれた おうち';
+
 const KEY = 'metrogrid.lang';
 
 const EN = {
   // タイトル
+  logo: 'KOWARETA OUCHI',
+  /** ロゴの下の副題（空ならなし） */
+  subtitle: 'BROKEN HOME',
   start: 'PRESS ENTER / TAP',
   reset: 'RESET',
   tutorial: 'TUTORIAL',
@@ -58,6 +64,8 @@ const EN = {
 
 const JA: typeof EN = {
   // タイトル
+  logo: GAME_TITLE,
+  subtitle: '',
   start: 'ENTER/TAP で はじめる',
   reset: 'リセット',
   tutorial: 'チュートリアル',

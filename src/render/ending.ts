@@ -1,4 +1,5 @@
 import { drawText, GLYPH_H, textWidth } from './font.ts';
+import { drawLogo, logoHeight, logoWidth } from './logo.ts';
 import { GIRL_FOOT_X, GIRL_FOOT_Y } from './girl.ts';
 import { fillDiamond, fillEllipse, fillPrismSides, fillQuad, plotLine } from './pixel.ts';
 
@@ -131,6 +132,8 @@ const CALM_LOOK: HouseLook = { ...ENDING_LOOK, calm: true };
 export interface TitleOpts {
   /** 家の部分ごとの戻り具合（0〜1。HOUSE_PARTS） */
   restored: (part: string) => number;
+  /** ロゴの題名と、その下の副題（空ならなし） */
+  logo: { title: string; subtitle: string };
   prompt: string | null;
   beatSec: number;
   /** 始めるキーを押してからの秒（TITLE_OUT。押す前は null） */
@@ -643,7 +646,7 @@ export function drawTitle(ctx: CanvasRenderingContext2D, t: number, opts: TitleO
     ctx.globalAlpha = 1;
     ctx.restore();
     ctx.globalAlpha = home ? 0 : 1 - Math.ceil(clamp01(exit / TITLE_OUT.logo) * 4) / 4;
-    if (ctx.globalAlpha > 0) logo(ctx, t);
+    if (ctx.globalAlpha > 0) logo(ctx, t, opts.logo);
     ctx.globalAlpha = Math.ceil(clamp01((exit - TITLE_OUT.fade[0]) / (TITLE_OUT.fade[1] - TITLE_OUT.fade[0])) * 4) / 4;
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, W, H);
@@ -671,7 +674,7 @@ export function drawTitle(ctx: CanvasRenderingContext2D, t: number, opts: TitleO
     ctx.globalAlpha = 1;
     return;
   }
-  logo(ctx, t);
+  logo(ctx, t, opts.logo);
   if (opts.prompt && exit === null && Math.floor(t * 1.6) % 2 === 0) {
     const scale = 1;
     const tw = textWidth(opts.prompt, scale);
@@ -680,19 +683,25 @@ export function drawTitle(ctx: CanvasRenderingContext2D, t: number, opts: TitleO
   }
 }
 
-/** タイトルのロゴ。大きな文字の下に、細い線を一本 */
-function logo(ctx: CanvasRenderingContext2D, t: number): void {
-  const text = 'METROGRID';
-  const scale = 4;
-  const tw = textWidth(text, scale);
-  const x = Math.round(W / 2 - tw / 2);
-  const y = 30;
-  drawText(ctx, text, x + 2, y + 2, scale, '#000');
-  drawText(ctx, text, x, y, scale, C.text);
+/** タイトルのロゴ。大きな文字の下に、細い線を一本。副題があれば線の下に小さく */
+function logo(ctx: CanvasRenderingContext2D, t: number, { title: text, subtitle }: TitleOpts['logo']): void {
+  // ロゴの字（logo.ts）を2倍で。英字の題名は2行になるので、少し上から
+  const scale = 2;
+  const tw = logoWidth(text, scale);
+  const th = logoHeight(text, scale);
+  const y = th > 30 ? 20 : 28;
+  drawLogo(ctx, text, W / 2 + 2, y + 2, scale, '#000');
+  drawLogo(ctx, text, W / 2, y, scale, C.text);
   // 線は、ゆっくり左右へ伸び縮みする（呼吸のように）
   const half = Math.round(tw / 2 - 6 - Math.sin(t * 0.8) * 4);
   ctx.fillStyle = C.textDim;
-  ctx.fillRect(W / 2 - half, y + GLYPH_H * scale + 6, half * 2, 1);
+  ctx.fillRect(W / 2 - half, y + th + 6, half * 2, 1);
+  if (subtitle) {
+    const sw = textWidth(subtitle, 1);
+    const sy = y + th + 12;
+    drawText(ctx, subtitle, Math.round(W / 2 - sw / 2) + 1, sy + 1, 1, '#000');
+    drawText(ctx, subtitle, Math.round(W / 2 - sw / 2), sy, 1, C.textDim);
+  }
 }
 
 /** 闇に漂う細かな塵：ゆっくり上へ流れ、ときどき瞬く */
