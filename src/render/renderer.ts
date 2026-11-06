@@ -44,9 +44,11 @@ export const UPSTAIRS_STEPS = 6;
 export const UPSTAIRS_STEP_SEC = 0.22;
 /**
  * 階段のあるステージ（チュートリアル）の始まり：はじめは誰もいない。APPEAR_BARS 小節（曲は鳴らさない）で階段のいちばん下に
- * 少女が現れ、次の1小節（曲の前奏。カウント）で1拍1段ずつ昇ってスタートに着く。main.ts はこのぶん曲の頭を遅らせる
+ * 少女が現れ、APPEAR_REST_BARS 小節そのまま待ち（現れるときの効果音の余韻が消えるまで）、次の1小節（曲の前奏。カウント）で
+ * 1拍1段ずつ昇ってスタートに着く。main.ts は APPEAR_BARS + APPEAR_REST_BARS 小節ぶん曲の頭を遅らせる
  */
 export const APPEAR_BARS = 1;
+export const APPEAR_REST_BARS = 1;
 /** 階段の、昇ってくる段より下に見える段の数（闇に溶けていく） */
 const STAIRS_FADE = 3;
 const PLAYER_H = 21;
@@ -2749,7 +2751,7 @@ export class Renderer {
     const n = sim.stage.def.stairs ?? 0;
     if (!n || songTime >= 0 || sim.x !== sim.stage.start.x || sim.y !== sim.stage.start.y) return null;
     const u = songTime / (tickSec * TICKS_PER_BEAT);
-    if (u < -n) return { k: n, to: n, walk: 1, beat: 0, appear: clamp01((u + n + APPEAR_BARS * 4) / (APPEAR_BARS * 4)) };
+    if (u < -n) return { k: n, to: n, walk: 1, beat: 0, appear: clamp01((u + n + (APPEAR_BARS + APPEAR_REST_BARS) * 4) / (APPEAR_BARS * 4)) };
     const b = Math.floor(u);
     const beat = u - b;
     // 段から段へ動くのは、ふつうに1マス歩くときと同じ長さ（world の slide と同じ）

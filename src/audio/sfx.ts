@@ -449,21 +449,40 @@ export class Sfx {
 
   /**
    * 家に帰ってくる（ending.ts の HOMECOMING。restore は戻り始める秒と戻りきる秒）。
-   * 家の部分が戻っていくあいだは、ウィンドチャイムのような金属の響きが不規則に鳴る。
+   * 家の部分が戻っていくあいだは、ウィンドチャイムのような金属の響きが、決まった音程やリズムなしに鳴る。
    * 戻りきって明かりがともるところは、ノイズをフィルタに通しただけの、ふわりと開いて閉じる音
    */
   homecoming(restore: readonly number[]): void {
     const [r0, r1] = restore;
-    this.sceneSound('sfx/homecoming', 0.18, (_ctx, out, now) => {
-      // ウィンドチャイム：高い五音音階の棒を、間隔をゆらしながら打つ。棒ごとに少しずれた倍音（2.76 倍）を重ねて金属らしく
-      const bars = [2093, 2349.32, 2637.02, 3135.96, 3520];
-      let at = now + r0;
-      for (let i = 0; at < now + r1 - 0.2; i++) {
-        const f = bars[(i * 7 + 3) % bars.length];
-        const lv = 0.25 + 0.15 * ((i * 5) % 3) / 2;
-        this.note(at, f, 1.4, 'sine', lv, out);
-        this.note(at, f * 2.76, 0.5, 'sine', lv * 0.3, out);
-        at += 0.09 + 0.16 * (((i * 11) % 7) / 6);
+    this.sceneSound('sfx/homecoming', 0.18, (ctx, out, now) => {
+      // ウィンドチャイム：風に揺れる金属の管がでたらめに触れ合う。旋律やリズムに聞こえないよう、高さは音階から選ばず
+      // 高い帯域の中で毎回ばらばらにし、管らしい整数倍でない倍音（1・2.76・5.40・8.93 倍）を重ねて音程をぼかす。
+      // 打つ間隔もでたらめにして、風が強まる真ん中ほど密にする（毎回ちがう鳴り方になる。効果音なので Math.random でよい）
+      const strike = (at: number, f: number, level: number, decay: number) => {
+        for (const [ratio, lv, len] of [[1, 1, 1], [2.756, 0.45, 0.6], [5.404, 0.25, 0.35], [8.933, 0.12, 0.2]] as const) {
+          // 同じ倍音を少しずらして2本重ね、ゆらぎ（うなり）を出す
+          for (const detune of [-4, 4]) {
+            const osc = ctx.createOscillator();
+            const env = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = f * ratio;
+            osc.detune.value = detune + (Math.random() - 0.5) * 6;
+            env.gain.setValueAtTime(0, at);
+            env.gain.linearRampToValueAtTime(level * lv * 0.5, at + 0.002);
+            env.gain.exponentialRampToValueAtTime(0.0005, at + decay * len);
+            osc.connect(env).connect(out);
+            osc.start(at);
+            osc.stop(at + decay * len + 0.05);
+          }
+        }
+      };
+      let at = now + r0 + Math.random() * 0.1;
+      while (at < now + r1 - 0.15) {
+        const u = (at - now - r0) / (r1 - r0);
+        const gust = Math.sin(Math.PI * u);
+        strike(at, 1800 * 2 ** (Math.random() * 1.4), (0.12 + 0.28 * Math.random()) * (0.5 + 0.5 * gust), 1.2 + Math.random() * 1.4);
+        // 平均の間隔は、風の弱い端で 0.3 秒、強い真ん中で 0.08 秒ほど（指数分布でばらつかせる）
+        at += -Math.log(1 - Math.random() * 0.95) * (0.3 - 0.22 * gust);
       }
       // 明かりがともる：ノイズを、こもった所から明るい所へ開いて、また閉じるフィルタに通す
       const open = 0.5;
