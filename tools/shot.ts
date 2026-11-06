@@ -106,7 +106,7 @@ const SCENES: [string, string][] = args.view
       ['s5-roof', 'stage=STAGE5&view=25,15,180'],
       ['s5-goal', 'stage=STAGE5&view=19,6,200'],
       ['hub-stairs', 'stage=HUB&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4,STAGE5&view=4,10,0'],
-      ...[1, 2.7, 3.3, 4, 6, 9.5, 12, 14.6, 16.3, 17.5, 18, 19.3, 20.5, 22.7, 24.7, 26.3, 32, 38].map((t): [string, string] => [`ending-${t}`, `ending=${t}&total=48210`]),
+      ...[1, 2.7, 3.3, 4.05, 6, 9.5, 12, 13.3, 14.6, 16.3, 17.5, 18, 19.3, 20.5, 22.7, 24.7, 26.3, 32, 38].map((t): [string, string] => [`ending-${t}`, `ending=${t}&total=48210`]),
       ['ending-38-en', 'ending=38&total=48210&lang=en'],
       ...[1, 3.5, 6, 9, 11, 13, 16, 20].map((t): [string, string] => [`ending-calm-${t}`, `ending=${t}&total=0`]),
       ['ending-calm-20-en', 'ending=20&total=0&lang=en'],

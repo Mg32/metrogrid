@@ -4,11 +4,13 @@ import { fillDiamond, fillEllipse, fillPrismSides, fillQuad, plotLine } from './
 
 /**
  * エンディング（企画書 第4.6節）。外から見た家が闇に浮かんでいる。
- * 少女が二階のベランダに出てきて手を挙げると、青い光をともないはじめ、画面が揺れる。これまでに溜めた得点がみるみる減っていき、
- * その光の粒が少女の手へ流れ込む（得点は「減っている」ではなく、少女の行為に「使われている」ように見せる。光の強さ・揺れの大きさ・
- * 家の窓という窓から漏れる同じ青い光（第4.5節）は、使われた割合に連動する）。
- * 得点を使い切っても響きはさらに高くまで上がっていき、ふっと止む。少女は手を下ろし、何気なく家の中へ戻って戸を閉める
- * （悲壮な決意には見せない。第4.7節）。そのあと何かが発動する音がして家全体が青白く光り、音が鳴りやむと光も家の中の明かりも消える。
+ * 少女が二階のベランダに出てきて手を挙げると、空から光線が降ってきて挙げた手に届き、青い光をともないはじめ、画面が揺れる。
+ * これまでに溜めた得点がみるみる減っていき、その光の粒が少女の手へ流れ込む（得点は「減っている」ではなく、少女の行為に
+ * 「使われている」ように見せる）。使われるにつれて、少女は青白い光彩を帯びていく（少女の姿が光り、まわりに光をまとう。
+ * 光の強さ・揺れの大きさ・光彩・家の窓という窓から漏れる同じ青い光（第4.5節）は、使われた割合に連動する）。
+ * 得点を使い切っても響きはさらに高くまで上がっていき、ふっと止む。空からの光線も止み、少女は手を下ろし、何気なく家の中へ戻って
+ * 戸を閉める（悲壮な決意には見せない。第4.7節）。少女のまとう光は家の中に入ったあとも壁ごしに見えていて、すっと消える。
+ * そのあと何かが発動する音がして家全体が青白く光り、音が鳴りやむと光も家の中の明かりも消える。
  * 2 秒ほど静まったあとで轟音が聞こえはじめ、家は少しずつひしゃげ、
  * いろいろな場所から砂埃を上げて潰れていく。轟音と揺れが収まる頃には、ガレキだけが残る。
  * 得点の総計は、はじめは拠点と同じ位置・大きさで出しておき（何の数字か分かるように）、画面の上の真ん中へ動いて大きくなってから減っていく。
@@ -24,15 +26,21 @@ export const ENDING = {
   walkOut: [2.1, 3.1],
   /** 手を挙げる */
   raise: 3.8,
+  /** 空から光線が降ってきて、挙げた手に届く（降りはじめ、届く。届いたところで得点が使われはじめる） */
+  beamIn: [3.95, 4.2],
   /** 得点が使われていく（光が強まり、響きが上がっていく） */
   light: [4.2, 10.2],
   /** 得点を使い切ったあとも響きはさらに高くまで上がり、ここで止む（揺れも止む） */
   climax: 13.2,
+  /** 響きが止むと、空からの光線が止む（光線の上の端が手まで降りてきて消える） */
+  beamOut: [13.2, 13.45],
   /** 手を下ろす／家の中へ戻る／戸を閉める（光は少女と一緒に引いていく） */
   lower: 13.7,
   walkIn: [14.1, 15.1],
   doorClose: [15.1, 15.6],
-  /** 少女が家に入ったあと、何かが発動する音（エコーが尾を引く） */
+  /** 戸を閉めたあと、少女のまとう光（光彩）が消える（消えはじめ、消えきる） */
+  auraOut: [15.6, 16.0],
+  /** 少女が家に入って光彩が消えたあと、何かが発動する音（エコーが尾を引く） */
   trigger: 16.2,
   /** 発動の音が鳴りやむと、家の中の明かり（窓から漏れる青い光）がふっと消える（消えはじめ、消えきる） */
   lightsOut: [18.9, 19.1],
@@ -338,6 +346,18 @@ function triggerGlow(t: number): number {
   return Math.ceil((1 - u) ** 2 * 16) / 16;
 }
 
+/**
+ * 少女のまとう光（光彩。0〜1、16段階）。得点が使われるにつれて強まり、使い切ったあとは家に入っても残っていて、
+ * 戸を閉めたあと（auraOut）すっと消える
+ */
+function auraAt(t: number): number {
+  const [a] = ENDING.light;
+  const [o0, o1] = ENDING.auraOut;
+  if (t < a || t >= o1) return 0;
+  const g = t < o0 ? usedAt(t) : 1 - (t - o0) / (o1 - o0);
+  return Math.ceil(g * 16) / 16;
+}
+
 /** 光る家を描くための、家だけを描いておくバッファ（家の形・家の形のぬりつぶし） */
 let houseLayer: HTMLCanvasElement | null = null;
 let shapeLayer: HTMLCanvasElement | null = null;
@@ -518,10 +538,11 @@ export function drawEnding(ctx: CanvasRenderingContext2D, t: number, total: numb
   dust(ctx, t);
   if (c > 0 && c < 0.97) fallingTiles(ctx, t);
 
-  // 少女の光：手から立ちのぼる光の柱と、少女を包む光
-  if (L > 0 && t < ENDING.walkIn[0] + 0.3) {
-    const g = P(GIRL_X, GIRL_OUT, BALCONY_H);
-    girlLight(ctx, g.x, g.y, L, t);
+  // 少女の光：空から挙げた手へ降りてくる光線と、少女のまとう光（家に入ったあとも、少女のいる所に壁ごしに見えている）
+  if (t >= ENDING.beamIn[0] && t < ENDING.auraOut[1]) {
+    const hand = P(GIRL_X, GIRL_OUT, BALCONY_H);
+    const at = P(GIRL_X, girlY(t), BALCONY_H);
+    girlLight(ctx, hand, at, L, auraAt(t), t);
   }
   ctx.restore();
 
@@ -970,7 +991,7 @@ function house(
   // 少女（ベランダ）。床の上、手すりより奥に描く。屋根のあとに描くのは、少女が軒より背が高く、軒の下で頭が欠けないように
   // （戸口より奥にいるあいだは見えないので、二階の壁や軒の前に出ることはない）
   const pose = girlPose(t, sprites, !!look.calm);
-  if (pose) drawGirl(ctx, pose, P);
+  if (pose) drawGirl(ctx, pose, P, look.calm ? 0 : auraAt(t));
 
   // ベランダの手すり
   for (let i = 0; i <= 8; i++) {
@@ -990,6 +1011,16 @@ function house(
   plotLine(ctx, r0.x, r0.y, r1.x, r1.y, C.rail);
   plotLine(ctx, r1.x, r1.y, r2.x, r2.y, C.rail);
 
+}
+
+/** ベランダの少女の奥行きの位置（グリッド）。家に入ったあとは戸口の奥 */
+function girlY(t: number): number {
+  const [o0, o1] = ENDING.walkOut;
+  const [i0, i1] = ENDING.walkIn;
+  if (t < o0) return GIRL_IN;
+  if (t < o1) return GIRL_IN + (GIRL_OUT - GIRL_IN) * ((t - o0) / (o1 - o0));
+  if (t < i0) return GIRL_OUT;
+  return GIRL_OUT + (GIRL_IN - GIRL_OUT) * clamp01((t - i0) / (i1 - i0));
 }
 
 /** ベランダの少女：戸口から出てきて、手を挙げ、手を下ろして、家の中へ戻る。いないときは null */
@@ -1020,27 +1051,81 @@ function girlPose(t: number, sprites: EndingSprites, stay = false): { gy: number
   return { gy, img, alpha };
 }
 
-function drawGirl(ctx: CanvasRenderingContext2D, pose: { gy: number; img: HTMLCanvasElement; alpha: number }, P: (gx: number, gy: number, h: number) => P): void {
+/** 光る少女を描くための、少女のコマを写しておくバッファ */
+let girlLayer: HTMLCanvasElement | null = null;
+
+/** 少女を描く。aura（0〜1）があれば、姿を青白く光らせ、まわりに 1 ドット、淡い光をにじませる */
+function drawGirl(ctx: CanvasRenderingContext2D, pose: { gy: number; img: HTMLCanvasElement; alpha: number }, P: (gx: number, gy: number, h: number) => P, aura = 0): void {
   const p = P(GIRL_X, pose.gy, BALCONY_H);
+  let img = pose.img;
+  const x = p.x - GIRL_FOOT_X;
+  const y = p.y - GIRL_FOOT_Y;
+  if (aura > 0) {
+    girlLayer ??= document.createElement('canvas');
+    girlLayer.width = img.width;
+    girlLayer.height = img.height;
+    const g = girlLayer.getContext('2d')!;
+    g.drawImage(img, 0, 0);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = C.light;
+    g.fillRect(0, 0, img.width, img.height);
+    // にじみ（少女の形の光を上下左右に 1 ドットずらして）
+    ctx.globalAlpha = pose.alpha * 0.6 * aura;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) ctx.drawImage(girlLayer, x + dx, y + dy);
+    // 姿に光を重ねる
+    g.globalCompositeOperation = 'source-over';
+    g.clearRect(0, 0, img.width, img.height);
+    g.drawImage(img, 0, 0);
+    g.globalCompositeOperation = 'source-atop';
+    g.globalAlpha = 0.6 * aura;
+    g.fillStyle = C.lightCore;
+    g.fillRect(0, 0, img.width, img.height);
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
+    img = girlLayer;
+  }
   ctx.globalAlpha = pose.alpha;
-  ctx.drawImage(pose.img, p.x - GIRL_FOOT_X, p.y - GIRL_FOOT_Y);
+  ctx.drawImage(img, x, y);
   ctx.globalAlpha = 1;
 }
 
-/** 少女を包む青い光と、挙げた手から立ちのぼる光の柱 */
-function girlLight(ctx: CanvasRenderingContext2D, x: number, y: number, L: number, t: number): void {
-  const cy = y - 12;
-  for (let r = 3; r <= 3 + Math.round(L * 5); r++) {
-    ctx.globalAlpha = 0.16 * L;
-    fillEllipse(ctx, x, cy, r * 4, r * 3, C.light);
+/**
+ * 少女を包む青い光と、空から挙げた手へ降りてくる光線。光線は beamIn のあいだに上から降りてきて手に届き、
+ * 届いているあいだは光の粒が光線の中を手へ流れ落ちる。beamOut のあいだに上の端が手まで降りてきて消える
+ */
+function girlLight(ctx: CanvasRenderingContext2D, stand: P, at: P, L: number, aura: number, t: number): void {
+  // まとう光：少女のいる所（家に入っていくと、その奥）を中心に
+  for (let r = 3; aura > 0 && r <= 3 + Math.round(aura * 5); r++) {
+    ctx.globalAlpha = 0.16 * aura;
+    fillEllipse(ctx, at.x, at.y - 12, r * 4, r * 3, C.light);
   }
-  ctx.globalAlpha = 0.4 + L * 0.5;
-  const w = 1 + Math.round(L * 3);
-  ctx.fillStyle = C.light;
+  const { x, y } = stand;
   const hand = { x: x + 7, y: y - 20 };
-  if (t < ENDING.lower) ctx.fillRect(hand.x - Math.floor(w / 2), 0, w, hand.y);
-  ctx.fillStyle = C.lightCore;
-  if (t < ENDING.lower) ctx.fillRect(hand.x, 0, 1, hand.y);
+  // 画面の揺れのぶん、上の端は画面の外から
+  const sky = -8;
+  const [i0, i1] = ENDING.beamIn;
+  const [o0, o1] = ENDING.beamOut;
+  const bottom = Math.round(sky + (hand.y - sky) * clamp01((t - i0) / (i1 - i0)));
+  const top = Math.round(sky + (hand.y - sky) * clamp01((t - o0) / (o1 - o0)));
+  if (bottom > top) {
+    const w = 1 + Math.round(L * 3);
+    ctx.globalAlpha = 0.4 + L * 0.5;
+    ctx.fillStyle = C.light;
+    ctx.fillRect(hand.x - Math.floor(w / 2), top, w, bottom - top);
+    ctx.fillStyle = C.lightCore;
+    ctx.fillRect(hand.x, top, 1, bottom - top);
+    // 降りてくる先端は明るく
+    ctx.globalAlpha = 1;
+    if (t < i1) ctx.fillRect(hand.x - 1, bottom - 2, 3, 2);
+    // 光線の中を流れ落ちる光の粒（降ってくる向きが分かるように）
+    ctx.fillStyle = C.lightCore;
+    for (let i = 0; i < 6; i++) {
+      const py = Math.round(sky + (((t * 1.6 + i / 6) % 1) * (hand.y - sky)));
+      if (py < top || py >= bottom - 2) continue;
+      ctx.globalAlpha = 0.5 + L * 0.5;
+      ctx.fillRect(hand.x - Math.floor(w / 2) - (i % 2), py, w + 1, 3);
+    }
+  }
   ctx.globalAlpha = 1;
 }
 
