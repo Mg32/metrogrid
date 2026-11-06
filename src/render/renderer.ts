@@ -1387,7 +1387,8 @@ export class Renderer {
           },
         });
       }
-      if (climb && climb.appear >= 1) {
+      // 現れたあと前奏までそのまま待つあいだは光らせない（昇りはじめてから）
+      if (climb && climb.climbing) {
         const c = { x: stage.start.x + stairs.back.x * climb.to, y: stage.start.y + stairs.back.y * climb.to };
         const { sx, sy } = iso(c.x, c.y);
         sprites.push({
@@ -2765,19 +2766,20 @@ export class Renderer {
   /**
    * 曲の頭まで（songTime < 0）の、階段での様子。k は補間した段（0 がスタート）、to は昇っていく先の段、
    * walk は歩きのコマの進み、beat は拍の中の進み（0〜1）、appear は現れる演出の進み（0 はまだいない、1 で現れ終わる）。
+   * climbing は前奏で昇っているあいだ（現れるあいだと、現れてから前奏までそのまま待つあいだは false）。
    * 現れるあいだは階段のいちばん下に立ち、そのあと拍の頭で1段ずつ、歩くときと同じ速さで昇る。
    * songTime が -Infinity（曲を読み込んでいるあいだ）なら、まだいない。スタートから動いていないときだけ。それ以外は null
    */
-  private climbAt(sim: Sim, songTime: number, tickSec: number): { k: number; to: number; walk: number; beat: number; appear: number } | null {
+  private climbAt(sim: Sim, songTime: number, tickSec: number): { k: number; to: number; walk: number; beat: number; appear: number; climbing: boolean } | null {
     const n = sim.stage.def.stairs ?? 0;
     if (!n || songTime >= 0 || sim.x !== sim.stage.start.x || sim.y !== sim.stage.start.y) return null;
     const u = songTime / (tickSec * TICKS_PER_BEAT);
-    if (u < -n) return { k: n, to: n, walk: 1, beat: 0, appear: clamp01((u + n + APPEAR_BARS * 4 + APPEAR_REST_BEATS) / (APPEAR_BARS * 4)) };
+    if (u < -n) return { k: n, to: n, walk: 1, beat: 0, appear: clamp01((u + n + APPEAR_BARS * 4 + APPEAR_REST_BEATS) / (APPEAR_BARS * 4)), climbing: false };
     const b = Math.floor(u);
     const beat = u - b;
     // 段から段へ動くのは、ふつうに1マス歩くときと同じ長さ（world の slide と同じ）
     const slide = (Math.min(ZONE_INTERVAL[0], 2) * 0.6) / TICKS_PER_BEAT;
-    return { k: lerp(-b, -b - 1, clamp01(beat / slide)), to: -b - 1, walk: beat, beat, appear: 1 };
+    return { k: lerp(-b, -b - 1, clamp01(beat / slide)), to: -b - 1, walk: beat, beat, appear: 1, climbing: true };
   }
 
   /** 拍の表示：4つの点のうち今の拍が光る */
