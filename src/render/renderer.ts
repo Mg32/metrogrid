@@ -661,6 +661,8 @@ export class Renderer {
   portalNote: (stage: string) => string | null = () => null;
   /** 二階へ昇ると決めてからの秒（拠点が闇に沈んでいくあいだ。少女が階段を昇っていく）。それ以外は null。main.ts が設定する */
   upstairsSec: number | null = null;
+  /** 開発用（?labels）：闇に浮かぶ物・小物・家具の塊に、番号と種類の札を出す（絵の直しを頼むときに物を指すため）。main.ts が設定する */
+  devLabels = false;
   private lot: HTMLCanvasElement;
   /** ステージごとの、各マスの街灯の明るさ */
   private lightMaps = new WeakMap<Stage, Uint8Array>();
@@ -670,6 +672,7 @@ export class Renderer {
   private slabs = new Map<number, HTMLCanvasElement>();
   private elevations = new WeakMap<Stage, (x: number, y: number) => number>();
   private thingMaps = new WeakMap<Stage, Map<number, string>>();
+  private devLabelLists = new WeakMap<Stage, { x: number; y: number; text: string; height: number }[]>();
 
   constructor(main: HTMLCanvasElement) {
     this.main = main;
@@ -774,24 +777,28 @@ export class Renderer {
 
   /**
    * タップできるボタン（バッファ上の矩形）。selected は選んでいる状態（確認の YES など）。
-   * keyLabel は同じことができるキーの名前で、四角で囲んでラベルの左に添える。hover はマウスが上にある（下地と枠を明るくする）
+   * keyLabel は同じことができるキーの名前で、四角で囲んでラベルの左に添える。hover はマウスが上にある（下地と枠を明るくする）。
+   * fade（0〜1）は現れる・消えるときの濃さ（確認の画面と一緒に、4段階で濃くなる）
    */
-  buttons(list: { label: string; keyLabel: string; x: number; y: number; w: number; h: number; selected?: boolean; hover?: boolean }[]): void {
+  buttons(list: { label: string; keyLabel: string; x: number; y: number; w: number; h: number; selected?: boolean; hover?: boolean }[], fade = 1): void {
     const ctx = this.lctx;
+    const a = Math.ceil(clamp01(fade) * 4) / 4;
+    if (a <= 0) return;
     for (const b of list) {
+      ctx.globalAlpha = a;
       const color = b.selected ? COLORS.gem : COLORS.text;
       const capW = textWidth(b.keyLabel, 1) + 4;
       // ラベルのないボタンは、もとからある文字を枠で囲むだけ（下地を塗らない）。キーの名前は枠の下に
       if (b.label) {
-        ctx.globalAlpha = 0.7;
+        ctx.globalAlpha = 0.7 * a;
         ctx.fillStyle = COLORS.bg;
         ctx.fillRect(b.x, b.y, b.w, b.h);
         if (b.hover) {
-          ctx.globalAlpha = 0.8;
+          ctx.globalAlpha = 0.8 * a;
           ctx.fillStyle = COLORS.dot;
           ctx.fillRect(b.x + 1, b.y + 1, b.w - 2, b.h - 2);
         }
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = a;
       }
       strokeRect(ctx, b.x, b.y, b.w, b.h, b.selected ? COLORS.gem : b.hover ? COLORS.text : COLORS.dot);
       if (b.label) {
@@ -802,6 +809,7 @@ export class Renderer {
         this.keycap(b.keyLabel, Math.round(b.x + b.w / 2 - capW / 2), b.y + b.h + 7, color);
       }
     }
+    ctx.globalAlpha = 1;
   }
 
   /** 四角で囲んだキーの名前。left は枠の左端、cy は文字の縦中央 */
@@ -1083,11 +1091,13 @@ export class Renderer {
         if (thing && THINGS[thing]) {
           const info = THINGS[thing];
           const hides = x + y > px + py && Math.abs(sx - p.sx) < TW && sy - info.height < feet && sy + TH + FLOOR_THICK > feet - PLAYER_H;
+          // 戸や窓は道のある側の面に描く：手前左（+y）に道がなく、手前右（+x）にあれば右の面
+          const face = stage.cell(x, y + 1)?.terrain !== 'floor' && stage.cell(x + 1, y)?.terrain === 'floor' ? 'R' : 'L';
           sprites.push({
             depth: x + y + 0.1,
             draw: () => {
               ctx.globalAlpha = (hides ? 0.4 : 1) * f.alpha;
-              info.draw(ctx, sx, sy + TH / 2, tickF);
+              info.draw(ctx, sx, sy + TH / 2, tickF, face);
               ctx.globalAlpha = 1;
             },
           });
@@ -1295,8 +1305,8 @@ export class Renderer {
           continue;
         }
         if (h.look === 'snow') {
-          const depth = Math.max(...h.cells.map((c) => c.x + c.y)) + 0.4;
-          sprites.push({ depth, draw: () => this.snow(h, tickF, soon, now % 2 === 0) });
+          // 部品ごとに、乗っているマスの奥行きで描く（まとめて手前の順番で描くと、奥の雪煙や塊が手前の物に重なる）
+          sprites.push(...this.snow(h, tickF, soon, now % 2 === 0));
           continue;
         }
         for (const c of h.cells) {
@@ -1447,6 +1457,17 @@ export class Renderer {
       }
     }
     for (const l of labels) this.text(l.text, l.x, l.y, 1, l.color, 'center');
+    if (this.devLabels) {
+      for (const l of this.devLabelList(stage)) {
+        const { sx, sy } = iso(l.x, l.y);
+        const y = sy + TH / 2 - l.height - 6;
+        if (!onScreen(sx, y, 40, 8)) continue;
+        const w = textWidth(l.text, 1);
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx.fillRect(Math.round(sx - w / 2) - 2, y - 4, w + 4, 8);
+        this.text(l.text, sx, y, 1, '#ffd84a', 'center');
+      }
+    }
 
     ctx.restore();
     elevation = () => 0;
@@ -1675,6 +1696,44 @@ export class Renderer {
       this.elevations.set(stage, f);
     }
     return f;
+  }
+
+  /**
+   * 開発用の札（?labels）の一覧。マスを奥の行から順に見て、闇に浮かぶ物（things）・小物（prop）・家具の塊（scenery。
+   * 平らな面は除く）に 1 から番号を振る。同じ種類が隣り合って並ぶ物（戸、障子、家具の塊など）は、奥の端の1マスにだけ札を付ける。札の字は 3x5 のフォントで描けるように大文字にし、'_' は '-' にする
+   */
+  private devLabelList(stage: Stage): { x: number; y: number; text: string; height: number }[] {
+    let list = this.devLabelLists.get(stage);
+    if (list) return list;
+    list = [];
+    const things = this.thingMap(stage);
+    const name = (kind: string) => kind.toUpperCase().replace(/_/g, '-');
+    for (let y = 0; y < stage.height; y++) {
+      for (let x = 0; x < stage.width; x++) {
+        const cell = stage.cell(x, y)!;
+        // 奥の隣（x-1 か y-1）が同じ種類なら、並びの続きとして札を付けない
+        const kindAt = (cx: number, cy: number): string | undefined => {
+          const c = stage.cell(cx, cy);
+          if (!c || c.terrain !== 'wall') return undefined;
+          return things.get(stage.index(cx, cy)) ?? (c.obj?.type === 'prop' ? c.obj.kind : undefined);
+        };
+        const continues = (kind: string) => kindAt(x - 1, y) === kind || kindAt(x, y - 1) === kind;
+        const th = things.get(stage.index(x, y));
+        if (th && !continues(th)) list.push({ x, y, text: `${list.length + 1} ${name(th)}`, height: THINGS[th]?.height ?? 8 });
+        const obj = cell.obj;
+        if (cell.terrain === 'wall' && obj?.type === 'prop' && !continues(obj.kind)) {
+          const height = BLOCK_PROPS.has(obj.kind) ? FACADE_H : TALL_PROPS.has(obj.kind) ? POLE_H + 6 : 16;
+          list.push({ x, y, text: `${list.length + 1} ${name(obj.kind)}`, height });
+        }
+        // 平らな面（水面・屋根など）は札を付けない（広くて札が並ぶだけなので）
+        const sc = cell.terrain === 'wall' && cell.scenery && !SURFACES.has(cell.scenery) ? cell.scenery : undefined;
+        if (sc && stage.cell(x - 1, y)?.scenery !== sc && stage.cell(x, y - 1)?.scenery !== sc) {
+          list.push({ x, y, text: `${list.length + 1} ${name(sc)}`, height: Math.round(cell.height * PX_PER_UNIT) });
+        }
+      }
+    }
+    this.devLabelLists.set(stage, list);
+    return list;
   }
 
   /** 闇に浮かぶ物：マスの番号 → 種類 */
@@ -2192,53 +2251,74 @@ export class Renderer {
 
   /**
    * 屋根から滑り落ちる雪：周期の [from, to) の間に、雪の塊が cells の先頭から末尾へ滑り落ちて闇へ消える（その間は cells のすべてが危険）。
-   * pivot があれば、その屋根の軒（闇に浮かぶ瓦の端）から落ちてくる。ふだんは雪が少しずつ積もっていき、落ちる1拍前に震える
+   * pivot があれば、その屋根の軒（闇に浮かぶ瓦の端）から落ちてくる。ふだんは雪が少しずつ積もっていき、落ちる1拍前に震える。
+   * 軒と積もる雪は軒のマス、雪煙と警告の枠は通り道のマスごと（その列の道のすぐあと）、塊はいる所のマスの奥行きで描く
    */
-  private snow(h: PeriodicHazard, tickF: number, soon: boolean, blinkOn: boolean): void {
+  private snow(h: PeriodicHazard, tickF: number, soon: boolean, blinkOn: boolean): { depth: number; draw: () => void }[] {
     const ctx = this.lctx;
+    const parts: { depth: number; draw: () => void }[] = [];
     const path = [...(h.pivot ? [h.pivot] : []), ...h.cells];
     const point = (g: { x: number; y: number }, lift: number) => {
       const q = iso(g.x, g.y);
       return { x: q.sx, y: q.sy + TH / 2 - lift };
     };
     const EAVE = 9;
-    if (h.pivot) {
-      // 軒：上の屋根の瓦の端が、闇に少しだけのぞいている
-      const e = point(h.pivot, EAVE);
-      fillPrismSides(ctx, e.x, e.y - 3, 14, 6, 3, COLORS.slabMidL, COLORS.slabMidR);
-      fillDiamond(ctx, e.x, e.y - 3, 14, 6, FLOOR_LIGHT.roof[0].road[0]);
-    }
-    if (soon && blinkOn) for (const c of h.cells) strokeDiamond(ctx, iso(c.x, c.y).sx, iso(c.x, c.y).sy + 2, TW - 8, TH - 4, COLORS.warn);
+    const head = path[0];
     const phase = mod(tickF, h.period);
     const dur = h.to - h.from;
-    if (phase < h.from || phase >= h.to) {
-      // 積もっていく雪
-      const grow = mod(phase - h.to, h.period) / (h.period - dur);
-      const r = 2 + Math.round(grow * 3);
-      const shake = soon ? (Math.floor(tickF * 2) % 2 === 0 ? 1 : -1) : 0;
-      const p0 = point(path[0], h.pivot ? EAVE + 1 : 0);
-      fillEllipse(ctx, p0.x + shake, p0.y - 1, r + 1, Math.max(1, Math.round(r / 2)), COLORS.snowShade);
-      fillEllipse(ctx, p0.x + shake, p0.y - 2, r, Math.max(1, Math.round(r / 2) - 1), COLORS.snow);
-      return;
-    }
-    // 滑り落ちている間：通り道に雪煙が立ち、塊が先頭から末尾の先の闇へ滑っていく
-    const u = (phase - h.from) / dur;
+    const falling = phase >= h.from && phase < h.to;
+    parts.push({
+      depth: head.x + head.y + 0.4,
+      draw: () => {
+        if (h.pivot) {
+          // 軒：上の屋根の瓦の端が、闇に少しだけのぞいている
+          const e = point(h.pivot, EAVE);
+          fillPrismSides(ctx, e.x, e.y - 3, 14, 6, 3, COLORS.slabMidL, COLORS.slabMidR);
+          fillDiamond(ctx, e.x, e.y - 3, 14, 6, FLOOR_LIGHT.roof[0].road[0]);
+        }
+        if (falling) return;
+        // 積もっていく雪
+        const grow = mod(phase - h.to, h.period) / (h.period - dur);
+        const r = 2 + Math.round(grow * 3);
+        const shake = soon ? (Math.floor(tickF * 2) % 2 === 0 ? 1 : -1) : 0;
+        const p0 = point(head, h.pivot ? EAVE + 1 : 0);
+        fillEllipse(ctx, p0.x + shake, p0.y - 1, r + 1, Math.max(1, Math.round(r / 2)), COLORS.snowShade);
+        fillEllipse(ctx, p0.x + shake, p0.y - 2, r, Math.max(1, Math.round(r / 2) - 1), COLORS.snow);
+      },
+    });
     for (const c of h.cells) {
       const q = iso(c.x, c.y);
-      ditherDiamond(ctx, q.sx, q.sy + 1, TW - 4, TH - 2, COLORS.snow, (x, y) => (x * 3 + y * 5 + Math.floor(tickF * 3)) % 7 === 0);
+      parts.push({
+        depth: c.x + c.y + 0.05,
+        draw: () => {
+          if (soon && blinkOn) strokeDiamond(ctx, q.sx, q.sy + 2, TW - 8, TH - 4, COLORS.warn);
+          // 滑り落ちている間：通り道に雪煙が立つ
+          if (falling) ditherDiamond(ctx, q.sx, q.sy + 1, TW - 4, TH - 2, COLORS.snow, (x, y) => (x * 3 + y * 5 + Math.floor(tickF * 3)) % 7 === 0);
+        },
+      });
     }
+    if (!falling) return parts;
+    // 塊：先頭から末尾の先の闇へ滑っていく
+    const u = (phase - h.from) / dur;
     const pos = u * path.length;
     const i = Math.min(Math.floor(pos), path.length - 1);
     const a = path[i];
     const b = path[i + 1] ?? { x: a.x * 2 - (path[i - 1]?.x ?? a.x), y: a.y * 2 - (path[i - 1]?.y ?? a.y) };
     const k = pos - i;
     const lift = h.pivot && i === 0 ? EAVE * (1 - k) : 0;
-    const q = point({ x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k) }, lift);
-    ctx.globalAlpha = 0.4;
-    fillEllipse(ctx, q.x, q.y + lift, 5, 1, '#000');
-    ctx.globalAlpha = 1;
-    fillEllipse(ctx, q.x, q.y - 3, 6, 4, COLORS.snowShade);
-    fillEllipse(ctx, q.x - 1, q.y - 4, 5, 3, COLORS.snow);
+    const at = { x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k) };
+    const q = point(at, lift);
+    parts.push({
+      depth: Math.round(at.x + at.y) + 0.4,
+      draw: () => {
+        ctx.globalAlpha = 0.4;
+        fillEllipse(ctx, q.x, q.y + lift, 5, 1, '#000');
+        ctx.globalAlpha = 1;
+        fillEllipse(ctx, q.x, q.y - 3, 6, 4, COLORS.snowShade);
+        fillEllipse(ctx, q.x - 1, q.y - 4, 5, 3, COLORS.snow);
+      },
+    });
+    return parts;
   }
 
   /** ザリガニ：浸かった道を横切る。dir は進む向き（グリッド） */
@@ -2888,18 +2968,22 @@ export class Renderer {
   /**
    * はい・いいえの確認（二階へ昇るか、記録を消すか）。はじめは「いいえ」が選ばれている。
    * 二階へ昇るとき（企画書 第2.3節）は、取り返しのつかないことが起きると意図的に予告する（問いの一文だけで、説明は足さない）。
-   * 操作の案内も出さない：左右で選んで Enter。クリック・タップは YES を選んでから、もう一度で決まる（選んだほうに > が付く）
+   * 操作の案内も出さない：左右で選んで Enter。クリック・タップは YES を選んでから、もう一度で決まる（選んだほうに > が付く）。
+   * fade（0〜1）で現れる・消えるときの濃さ。背景の暗さはなめらかに、文字は4段階で濃くなる
    */
-  confirm(question: string, note: string | null, yes: boolean): void {
+  confirm(question: string, note: string | null, yes: boolean, fade = 1): void {
     const ctx = this.lctx;
-    ctx.globalAlpha = 0.8;
+    const k = clamp01(fade);
+    if (k <= 0) return;
+    ctx.globalAlpha = 0.8 * k;
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, LW, LH);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = Math.ceil(k * 4) / 4;
     this.text(question, LW / 2, LH / 2 - (note ? 30 : 16), 2, COLORS.text, 'center');
     if (note) this.text(note, LW / 2, LH / 2 - 10, 1, COLORS.textDim, 'center');
     this.text(msg().yes(yes), LW / 2 - 30, LH / 2 + 20, 2, yes ? COLORS.gem : COLORS.textDim, 'center');
     this.text(msg().no(!yes), LW / 2 + 34, LH / 2 + 20, 2, !yes ? COLORS.gem : COLORS.textDim, 'center');
+    ctx.globalAlpha = 1;
   }
 
   overlay(lines: { text: string; scale?: number; color?: string }[]): void {

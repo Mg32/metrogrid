@@ -1,5 +1,5 @@
 import { drawText, GLYPH_H, textWidth } from './font.ts';
-import { drawLogo, logoHeight, logoWidth } from './logo.ts';
+import { logoGlyphs, logoHeight, type LogoGlyph } from './logo.ts';
 import { GIRL_FOOT_X, GIRL_FOOT_Y } from './girl.ts';
 import { fillDiamond, fillEllipse, fillPrismSides, fillQuad, plotLine } from './pixel.ts';
 
@@ -13,7 +13,7 @@ import { fillDiamond, fillEllipse, fillPrismSides, fillQuad, plotLine } from './
  * 戸を閉める（悲壮な決意には見せない。第4.7節）。少女のまとう光は家の中に入ったあとも壁ごしに見えていて、すっと消える。
  * そのあと何かが発動する音がして家全体が青白く光り、音が鳴りやむと光も家の中の明かりも消える。
  * 2 秒ほど静まったあとで轟音が聞こえはじめ、家は少しずつひしゃげ、
- * いろいろな場所から砂埃を上げて潰れていく。轟音と揺れが収まる頃には、ガレキだけが残る。
+ * いろいろな場所から砂埃を上げて潰れていく。画面は揺らさない（地震を思わせないように）。轟音が収まる頃には、ガレキだけが残る。
  * 得点の総計は、はじめは拠点と同じ位置・大きさで出しておき（何の数字か分かるように）、画面の上の真ん中へ動いて大きくなってから減っていく。
  * 少女が潰れる瞬間は映さない（戸を閉めたあとは、少女の姿はどこにも出ない）。
  *
@@ -33,7 +33,7 @@ export const ENDING = {
   light: [4.2, 10.2],
   /** 得点を使い切ったあとも響きはさらに高くまで上がり、ここで止む（揺れも止む） */
   climax: 13.2,
-  /** 響きが止むと、空からの光線が止む（光線の上の端が手まで降りてきて消える） */
+  /** 響きが止むと、空からの光線が止む（手もとから空へ向かって消えていく） */
   beamOut: [13.2, 13.45],
   /** 手を下ろす／家の中へ戻る／戸を閉める（光は少女と一緒に引いていく） */
   lower: 13.7,
@@ -45,12 +45,12 @@ export const ENDING = {
   trigger: 16.2,
   /** 発動の音が鳴りやむと、家の中の明かり（窓から漏れる青い光）がふっと消える（消えはじめ、消えきる） */
   lightsOut: [18.9, 19.1],
-  /** 青白い光と明かりが消えて 2 秒ほど静まったあと、轟音が聞こえはじめ（揺れも始まる）、家が崩れていく */
+  /** 青白い光と明かりが消えて 2 秒ほど静まったあと、轟音が聞こえはじめ、家が崩れていく（画面は揺らさない） */
   rumble: 21.1,
   collapse: [21.3, 28.0],
   /** 崩れ方が急に進む時刻（二階が潰れる、全体が潰れる、最後のひと崩れ）。砂埃と崩れる音が出る */
   jerks: [22.5, 24.5, 26.1],
-  /** 揺れと砂埃が収まる */
+  /** 砂埃が収まる */
   settle: 31.5,
   /** ここから先はガレキだけが残った静止画 */
   end: 34.5,
@@ -123,6 +123,10 @@ interface HouseLook {
   lit: boolean;
   /** 得点の総計が 0 のときのエンディング（ENDING_CALM）：少女はベランダに出たまま戻らず、ガラス戸も開いたまま */
   calm?: boolean;
+  /** エンディングで崩れていくときの崩れ具合（0〜1）。ガラスが割れ、壁にひびが走り、漆喰が落ち、アンテナが倒れる */
+  collapse?: number;
+  /** タイトルで始めたとき、玄関の引き戸にともる明かりの濃さ（0〜1） */
+  doorLight?: number;
 }
 
 /** エンディング：すべての部分が戻っていて、明かりはついていない */
@@ -227,12 +231,56 @@ interface P {
   y: number;
 }
 
-/** 崩れ具合 c（0〜1）。高い所ほど縮み、真ん中がたわみ、+x 側へ傾いてひしゃげる */
+/**
+ * 崩れ具合 c（0〜1）を、崩れの段階に分ける。木造の家が地震で倒れるときのように、まず一階が潰れて（p1）、
+ * 二階と屋根はほぼ形を保ったまま落ちてくる。続いて二階が潰れ（p2）、最後に屋根が折れてガレキの上に伏せる（p3）
+ */
+function stagesOf(c: number): { p1: number; p2: number; p3: number } {
+  const ease = (u: number) => u * u * (3 - 2 * u);
+  return { p1: ease(clamp01((c - 0.03) / 0.36)), p2: ease(clamp01((c - 0.44) / 0.36)), p3: ease(clamp01((c - 0.82) / 0.18)) };
+}
+
+/**
+ * 崩れ具合 c の家の形。高さは階ごとに縮む（一階は柱が折れて平たく、二階はその上に落ちてから潰れる）。
+ * 一階の柱が倒れるぶん、上の階は手前（窓と玄関の多い、弱い面）へずれて、壁は平行四辺形にひしゃげる。
+ * 屋根は最後にまん中で折れて沈む
+ */
 function deform(gx: number, gy: number, h: number, c: number): { gx: number; gy: number; h: number } {
   if (c <= 0) return { gx, gy, h };
-  const k = h / RIDGE;
-  const sag = c * c * 12 * Math.sin((Math.PI * Math.min(Math.max(gx, 0), 6)) / 6) * k;
-  return { gx: gx + c * 0.7 * k, gy: gy - c * 0.25 * k, h: Math.max(0, h * (1 - 0.9 * c) - sag) };
+  const { p1, p2, p3 } = stagesOf(c);
+  const h1 = F1 * (1 - 0.82 * p1 - 0.1 * p2);
+  const h2 = (F2 - F1) * (1 - 0.78 * p2 - 0.08 * p3);
+  const hr = 1 - 0.2 * p3;
+  const nh = h <= F1 ? (h / F1) * h1 : h <= F2 ? h1 + ((h - F1) / (F2 - F1)) * h2 : h1 + h2 + (h - F2) * hr;
+  // 柱が倒れたぶんのずれ（一階の柱で d1、二階の柱で d2）
+  const d1 = 0.55 * p1 + 0.05 * p3;
+  const d2 = 0.3 * p2;
+  const shift = d1 * Math.min(h / F1, 1) + d2 * clamp01((h - F1) / (F2 - F1));
+  // 屋根が折れる：まん中（棟の中ほど）ほど深く沈む
+  const fold = h > F2 ? (4 * p2 + 9 * p3) * Math.sin((Math.PI * Math.min(Math.max(gx + 0.4, 0), 6.8)) / 6.8) * clamp01((h - F2) / (RIDGE - F2)) : 0;
+  return { gx: gx + shift * 0.25, gy: gy + shift, h: Math.max(0, nh - fold) };
+}
+
+/**
+ * 四角形 [p0, p1, p2, p3]（グリッドの座標と高さ）を、どの辺もおよそ 1 マス・高さ 8 ドット以内になるまで二つに分けていく。
+ * 向かい合う辺の中点で分けるので、分けた面どうしは隙間なくつながる
+ */
+function splitQuad(pts: [number, number, number][], draw: (q: [number, number, number][]) => void, depth = 0): void {
+  const size = (a: [number, number, number], b: [number, number, number]) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]) / 8);
+  const [p0, p1, p2, p3] = pts;
+  const a = Math.max(size(p0, p1), size(p3, p2));
+  const b = Math.max(size(p1, p2), size(p0, p3));
+  if (depth >= 6 || Math.max(a, b) <= 1) return draw(pts);
+  const mid = (u: [number, number, number], v: [number, number, number]): [number, number, number] => [(u[0] + v[0]) / 2, (u[1] + v[1]) / 2, (u[2] + v[2]) / 2];
+  if (a >= b) {
+    const [m, n] = [mid(p0, p1), mid(p3, p2)];
+    splitQuad([p0, m, n, p3], draw, depth + 1);
+    splitQuad([m, p1, p2, n], draw, depth + 1);
+  } else {
+    const [m, n] = [mid(p1, p2), mid(p0, p3)];
+    splitQuad([p0, p1, m, n], draw, depth + 1);
+    splitQuad([n, m, p2, p3], draw, depth + 1);
+  }
 }
 
 /** 崩れ具合の時間変化：きしんでたわみ、二階が潰れ、全体が潰れる。急に進むところで砂埃が上がる */
@@ -400,15 +448,12 @@ function glowingHouse(ctx: CanvasRenderingContext2D, glow: number, draw: (g: Can
   ctx.drawImage(houseLayer, 0, 0);
 }
 
-/** 画面の揺れの大きさ（ドット） */
+/**
+ * 画面の揺れの大きさ（ドット）。揺れるのは光が強まっているあいだだけで、響きが止むと止む。
+ * 家が崩れるあいだは揺らさない（地震を思わせないように）
+ */
 function shakeAt(t: number): number {
-  // 光の揺れは響きが止むと止み、轟音が聞こえはじめると轟音の揺れ
-  let a = t < ENDING.climax ? lightAt(t) * 2 : 0;
-  if (t >= ENDING.rumble) a = Math.max(a, 1 + clamp01((t - ENDING.rumble) / 2.5) * 2);
-  for (const j of JERKS) if (t >= j) a = Math.max(a, 5 * Math.exp(-(t - j) * 2.2));
-  const [, c1] = ENDING.collapse;
-  if (t > c1) a = Math.min(a, 3 * (1 - clamp01((t - c1) / (ENDING.settle - 1 - c1))));
-  return t > ENDING.settle ? 0 : a;
+  return t < ENDING.climax ? lightAt(t) * 2 : 0;
 }
 
 /** 砂埃のひとかたまり */
@@ -431,12 +476,13 @@ const PUFFS: Puff[] = (() => {
   for (let i = 0; i < 6; i++) add(ENDING.collapse[0] + 0.2 + i * 0.18, hash(i + 10) * 6, 3.6 + hash(i + 20) * 1.4, 30 + hash(i + 30) * 30, 2.2, 3);
   // 潰れるたびに、家のいろいろな場所から
   JERKS.forEach((j, k) => {
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 12; i++) {
       const s = k * 100 + i;
       const onFront = hash(s) < 0.6;
       const gx = onFront ? hash(s + 1) * 6 : 6;
       const gy = onFront ? 5 : hash(s + 2) * 5;
-      add(j + hash(s + 3) * 0.4, gx, gy, (1 - k * 0.35) * hash(s + 4) * 50, 3.5 + hash(s + 5) * 1.5, 7 + hash(s + 6) * 7);
+      // 潰れた階の高さから吹き出す（一階が潰れるときは軒の下から、二階のときはその上から）
+      add(j + hash(s + 3) * 0.4, gx, gy + (onFront ? 0.6 : 0), [4, 10, 3][k] + hash(s + 4) * [14, 14, 6][k], 3.5 + hash(s + 5) * 1.5, 7 + hash(s + 6) * 7);
     }
   });
   // 最後に地面すれすれに広がる大きな砂埃
@@ -444,25 +490,7 @@ const PUFFS: Puff[] = (() => {
   return puffs;
 })();
 
-/**
- * ガレキの山：一階の跡に、段々に盛り上がる（層 k の高さは k × MOUND_STEP）。
- * 層ごとの広がりは中心から外へ狭まっていく
- */
-const MOUND_STEP = 5;
-const MOUND_LAYERS = 5;
-const MOUND_C = { x: 3, y: 2.6 };
-const moundSize = (k: number) => ({ rx: 3.6 * (1 - k / (MOUND_LAYERS + 1)), ry: 3.0 * (1 - k / (MOUND_LAYERS + 1)) });
-/** その場所のガレキの山の高さ */
-function moundHeight(gx: number, gy: number): number {
-  let h = 0;
-  for (let k = 0; k < MOUND_LAYERS; k++) {
-    const { rx, ry } = moundSize(k);
-    if (Math.abs(gx - MOUND_C.x) + Math.abs(gy - MOUND_C.y) * (rx / ry) <= rx) h = (k + 1) * MOUND_STEP;
-  }
-  return h;
-}
-
-/** ガレキのひとかけ（山の上に積み重なる） */
+/** ガレキのひとかけ（家のまわりの土の上にこぼれる） */
 interface Piece {
   kind: 'tile' | 'plank' | 'beam' | 'chunk';
   gx: number;
@@ -471,27 +499,30 @@ interface Piece {
   axis: 'x' | 'y';
   len: number;
   tilt: number;
-  /** この崩れ具合を過ぎると見えてくる */
+  /** どの段階（stagesOf の p1・p2・p3）の進み具合が appear を過ぎると見えてくるか */
+  stage: 0 | 1 | 2;
   appear: number;
 }
 
 const RUBBLE: Piece[] = (() => {
   const pieces: Piece[] = [];
-  for (let i = 0; pieces.length < 130 && i < 1000; i++) {
-    const gx = MOUND_C.x - 3.8 + hash(i * 7 + 1) * 7.6;
-    const gy = MOUND_C.y - 3.2 + hash(i * 7 + 2) * 6.4;
-    const h = moundHeight(gx, gy);
-    if (h === 0) continue;
-    const r = hash(i * 7 + 3);
+  for (let i = 0; i < 110; i++) {
+    const r = (k: number) => hash(i * 9 + k + 3000);
+    // 手前の面の前（潰れた一階が手前へずれるので、少し前まで）、右の面の前、奥の面の後ろ
+    const where = r(0);
+    const [gx, gy] =
+      where < 0.55 ? [-0.6 + r(1) * 7.2, 5.4 + r(2) * 1.0] : where < 0.85 ? [6.1 + r(1) * 1.0, -0.4 + r(2) * 6] : [-0.6 + r(1) * 7, -0.9 + r(2) * 0.6];
+    const k = r(3);
     pieces.push({
-      kind: r < 0.4 ? 'tile' : r < 0.65 ? 'plank' : r < 0.82 ? 'beam' : 'chunk',
+      kind: k < 0.3 ? 'tile' : k < 0.58 ? 'plank' : k < 0.78 ? 'beam' : 'chunk',
       gx,
       gy,
-      h,
-      axis: hash(i * 7 + 5) < 0.5 ? 'x' : 'y',
-      len: 0.4 + hash(i * 7 + 6) * 1.1,
-      tilt: Math.round((hash(i * 7 + 7) - 0.5) * 12),
-      appear: 0.55 + hash(i * 7 + 8) * 0.4,
+      h: Math.round(r(4) * 3),
+      axis: r(5) < 0.5 ? 'x' : 'y',
+      len: 0.3 + r(6) * 0.8,
+      tilt: Math.round((r(7) - 0.5) * 8),
+      stage: r(8) < 0.45 ? 0 : r(8) < 0.8 ? 1 : 2,
+      appear: 0.3 + r(9) * 0.6,
     });
   }
   return pieces.sort((a, b) => a.gx + a.gy - (b.gx + b.gy));
@@ -527,19 +558,23 @@ export function drawEnding(ctx: CanvasRenderingContext2D, t: number, total: numb
     const d = deform(gx, gy, h, c);
     return { x: Math.round(OX + (d.gx - d.gy) * 12), y: Math.round(OY + (d.gx + d.gy) * 6 - d.h) };
   };
-  const quad = (pts: [number, number, number][], color: string) => fillQuad(ctx, pts.map(([x, y, h]) => P(x, y, h)), color);
+  // 崩れているあいだは、大きな面を細かく分けてから変形する（4つの角だけでは、折れた屋根やひしゃげた壁が平らなままになる）
+  const quadOn = (g: CanvasRenderingContext2D) => (pts: [number, number, number][], color: string) =>
+    c > 0 ? splitQuad(pts, (q) => fillQuad(g, q.map(([x, y, h]) => P(x, y, h)), color)) : fillQuad(g, pts.map(([x, y, h]) => P(x, y, h)), color);
+  const quad = quadOn(ctx);
 
   // 家の建っていた土地（闇に浮かぶ板）
   lot(ctx);
 
-  if (c < 0.97) {
-    const glow = triggerGlow(t);
-    if (glow > 0) glowingHouse(ctx, glow, (g) => house(g, t, L, (pts, color) => fillQuad(g, pts.map(([x, y, h]) => P(x, y, h)), color), P, sprites, ENDING_LOOK));
-    else house(ctx, t, L, quad, P, sprites, ENDING_LOOK);
-  }
-  rubble(ctx, c);
+  // 潰れていく家（最後は、折れた屋根が一階と二階のガレキの上に伏せる）。そのまわりにこぼれたガレキと、滑り落ちた瓦
+  const look = c > 0 ? { ...ENDING_LOOK, collapse: c } : ENDING_LOOK;
+  rubble(ctx, c, 'back');
+  const glow = triggerGlow(t);
+  if (glow > 0) glowingHouse(ctx, glow, (g) => house(g, t, L, quadOn(g), P, sprites, look));
+  else house(ctx, t, L, quad, P, sprites, look);
+  rubble(ctx, c, 'front');
+  fallingTiles(ctx, t);
   dust(ctx, t);
-  if (c > 0 && c < 0.97) fallingTiles(ctx, t);
 
   // 少女の光：空から挙げた手へ降りてくる光線と、少女のまとう光（家に入ったあとも、少女のいる所に壁ごしに見えている）
   if (t >= ENDING.beamIn[0] && t < ENDING.auraOut[1]) {
@@ -600,34 +635,38 @@ export function drawTitle(ctx: CanvasRenderingContext2D, t: number, opts: TitleO
   const P = (gx: number, gy: number, h: number): P => ({ x: Math.round(OX + (gx - gy) * 12), y: Math.round(OY + (gx + gy) * 6 - h) });
   const quad = (pts: [number, number, number][], color: string) => fillQuad(ctx, pts.map(([x, y, h]) => P(x, y, h)), color);
   lot(ctx);
-  house(ctx, 0, 0, quad, P, sprites, { restored, lit: true });
+  // 玄関の引き戸に明かりがともる（家の中で待っているものがある）。足もとの土の明かりは、家より先に
+  const doorLight = exit === null ? 0 : Math.ceil(clamp01((exit - TITLE_OUT.door[0]) / (TITLE_OUT.door[1] - TITLE_OUT.door[0])) * 4) / 4;
+  if (doorLight > 0) {
+    const q = P((ENTRANCE.u0 + ENTRANCE.u1) / 2, 5.6, 0);
+    ctx.globalAlpha = 0.12 * doorLight;
+    fillEllipse(ctx, q.x, q.y, 9, 3, C.warm);
+    ctx.globalAlpha = 1;
+  }
+  house(ctx, 0, 0, quad, P, sprites, { restored, lit: true, doorLight });
   // 明かりのともった窓と門灯の下の土に、うっすら光が落ちる
   const glows = [
     ...WINDOWS.filter((w) => w.h0 < F1).map((w) => ({ part: w.part, q: w.face === 'y' ? P((w.u0 + w.u1) / 2, 5.6, 0) : P(6.6, (w.u0 + w.u1) / 2, 0) })),
-    { part: 'STAGE1', q: P(PORCH_LAMP.u, 5.5, 0) },
   ];
   for (const { part, q } of glows) {
-    ctx.globalAlpha = (Math.ceil(restored(part) * 4) / 4) * 0.1;
+    ctx.globalAlpha = (Math.ceil(restored(part) * 4) / 4) * 0.07;
     if (ctx.globalAlpha > 0) fillEllipse(ctx, q.x, q.y, 7, 2, C.warm);
+    ctx.globalAlpha = 1;
+  }
+  // 玄関の前：門灯とガラス戸の明かりが、ポーチの先の土に広く落ちる
+  {
+    const k = Math.ceil(restored('STAGE1') * 4) / 4;
+    const q = P(1.3, 6.1, 0);
+    for (const [r, a] of [[16, 0.08], [10, 0.1]]) {
+      ctx.globalAlpha = k * a;
+      if (ctx.globalAlpha > 0) fillEllipse(ctx, q.x, q.y, r, Math.round(r / 2.5), C.warm);
+    }
     ctx.globalAlpha = 1;
   }
   // 敷石と壁の根もとに伸びた草（玄関が戻ると消える）
   weeds(ctx, P, Math.ceil((1 - restored('STAGE1')) * 4) / 4);
   // 戻っていく部分から、埃が舞い上がって消える
   if (home && restoring > 0 && restoring < 1) restoreMotes(ctx, P, home.part, restoring);
-  if (exit !== null) {
-    // 玄関の引き戸に明かりがともる（家の中で待っているものがある）
-    const u0 = ENTRANCE.u0;
-    const u1 = ENTRANCE.u1;
-    const mid = (u0 + u1) / 2;
-    ctx.globalAlpha = Math.ceil(clamp01((exit - TITLE_OUT.door[0]) / (TITLE_OUT.door[1] - TITLE_OUT.door[0])) * 4) / 4;
-    quad([[u0, 5, 5], [u1, 5, 5], [u1, 5, ENTRANCE.h1], [u0, 5, ENTRANCE.h1]], C.warm);
-    ctx.globalAlpha = 1;
-    quad([[mid - 0.05, 5, 0], [mid + 0.05, 5, 0], [mid + 0.05, 5, ENTRANCE.h1], [mid - 0.05, 5, ENTRANCE.h1]], C.wood);
-    ctx.globalAlpha = 0.12;
-    fillEllipse(ctx, P(mid, 5.6, 0).x, P(mid, 5.6, 0).y, 9, 3, C.warm);
-    ctx.globalAlpha = 1;
-  }
   if (exit !== null && exit >= TITLE_OUT.turn) {
     // 振り返って戸口へ歩き、戸口をくぐると家の中の明かりに見えなくなる
     const [w0, w1] = TITLE_OUT.walk;
@@ -646,7 +685,7 @@ export function drawTitle(ctx: CanvasRenderingContext2D, t: number, opts: TitleO
     ctx.globalAlpha = 1;
     ctx.restore();
     ctx.globalAlpha = home ? 0 : 1 - Math.ceil(clamp01(exit / TITLE_OUT.logo) * 4) / 4;
-    if (ctx.globalAlpha > 0) logo(ctx, t, opts.logo);
+    if (ctx.globalAlpha > 0) logo(ctx, opts.logo);
     ctx.globalAlpha = Math.ceil(clamp01((exit - TITLE_OUT.fade[0]) / (TITLE_OUT.fade[1] - TITLE_OUT.fade[0])) * 4) / 4;
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, W, H);
@@ -674,7 +713,7 @@ export function drawTitle(ctx: CanvasRenderingContext2D, t: number, opts: TitleO
     ctx.globalAlpha = 1;
     return;
   }
-  logo(ctx, t, opts.logo);
+  logo(ctx, opts.logo);
   if (opts.prompt && exit === null && Math.floor(t * 1.6) % 2 === 0) {
     const scale = 1;
     const tw = textWidth(opts.prompt, scale);
@@ -684,24 +723,65 @@ export function drawTitle(ctx: CanvasRenderingContext2D, t: number, opts: TitleO
 }
 
 /** タイトルのロゴ。大きな文字の下に、細い線を一本。その下に小さく副題 */
-function logo(ctx: CanvasRenderingContext2D, t: number, { title: text, subtitle }: TitleOpts['logo']): void {
+function logo(ctx: CanvasRenderingContext2D, { title: text, subtitle }: TitleOpts['logo']): void {
   // ロゴの字（logo.ts）を2倍で
   const scale = 2;
-  const tw = logoWidth(text, scale);
   const th = logoHeight(text, scale);
   const y = 28;
-  drawLogo(ctx, text, W / 2 + 2, y + 2, scale, '#000');
-  drawLogo(ctx, text, W / 2, y, scale, C.text);
-  // 線は、ゆっくり左右へ伸び縮みする（呼吸のように）
-  const half = Math.round(tw / 2 - 6 - Math.sin(t * 0.8) * 4);
-  ctx.fillStyle = C.textDim;
-  ctx.fillRect(W / 2 - half, y + th + 6, half * 2, 1);
+  const glyphs = logoGlyphs(text, W / 2, y, scale);
+  // どの字も古びて角が欠けている。1語目（こわれた）は、字がわずかにずれている
+  const shifted = (g: LogoGlyph) => g.word === 0 && glyphs.some((o) => o.word > 0);
+  const DROP = [0, 1, 0, 2];
+  const dy = (g: LogoGlyph, i: number) => (shifted(g) ? DROP[i % DROP.length] : 0);
+  // 影（右下へ 2 ドット）
+  ctx.fillStyle = '#000';
+  glyphs.forEach((g, i) => eachDot(g, (c, r) => ctx.fillRect(g.x + c * scale + 2, g.y + dy(g, i) + r * scale + 2, scale, scale)));
+  glyphs.forEach((g, i) => {
+    const on = (c: number, r: number) => g.rows[r]?.[c] === '#';
+    const gy = g.y + dy(g, i);
+    eachDot(g, (c, r) => {
+      const x = g.x + c * scale;
+      const yy = gy + r * scale;
+      // 字の本体。線の上の縁は明るく、下の縁は少し暗く（浮き彫りのように）
+      ctx.fillStyle = C.text;
+      ctx.fillRect(x, yy, scale, scale);
+      if (!on(c, r - 1)) {
+        ctx.fillStyle = LOGO.light;
+        ctx.fillRect(x, yy, scale, 1);
+      }
+      if (!on(c, r + 1)) {
+        ctx.fillStyle = LOGO.shade;
+        ctx.fillRect(x, yy + scale - 1, scale, 1);
+      }
+      // 古びて欠けた角：外へ突き出た角のドットを、ところどころ1つ欠く
+      const k = hash(i * 131 + c * 17 + r * 7 + 4000);
+      const corner = (!on(c, r - 1) || !on(c, r + 1)) && (!on(c - 1, r) || !on(c + 1, r));
+      if (corner && k < 0.3) {
+        ctx.fillStyle = C.bg;
+        ctx.fillRect(x + (on(c - 1, r) ? scale - 1 : 0), yy + (on(c, r - 1) ? scale - 1 : 0), 1, 1);
+      } else if (k > 0.985) {
+        // 表面のすり傷
+        ctx.fillStyle = LOGO.shade;
+        ctx.fillRect(x, yy + 1, 1, 1);
+      }
+    });
+  });
   if (subtitle) {
     const sw = textWidth(subtitle, 1);
-    const sy = y + th + 12;
+    const sy = y + th + 10;
     drawText(ctx, subtitle, Math.round(W / 2 - sw / 2) + 1, sy + 1, 1, '#000');
     drawText(ctx, subtitle, Math.round(W / 2 - sw / 2), sy, 1, C.textDim);
   }
+}
+
+/** ロゴの色：字の線の明るい縁と暗い縁 */
+const LOGO = { light: '#fffaf0', shade: '#b8b0a2' };
+
+/** 字の形のドットごとに */
+function eachDot(g: LogoGlyph, f: (c: number, r: number) => void): void {
+  g.rows.forEach((row, r) => {
+    for (let c = 0; c < row.length; c++) if (row[c] === '#') f(c, r);
+  });
 }
 
 /** 闇に漂う細かな塵：ゆっくり上へ流れ、ときどき瞬く */
@@ -743,39 +823,103 @@ const WINDOWS: { face: 'x' | 'y'; u0: number; u1: number; h0: number; h1: number
 /** 玄関の脇の門灯（一階の手前の壁。u は壁に沿った位置） */
 const PORCH_LAMP = { u: 2.2, h0: 9, h1: 14 };
 
-/** 割れたガラス（窓の中の位置の割合 [u0, u1, h0, h1]）。窓ごとに少しずらす */
-const BROKEN_PANES = [
-  [0.08, 0.3, 0.45, 0.85],
-  [0.6, 0.82, 0.1, 0.4],
-  [0.62, 0.9, 0.55, 0.8],
-];
-
-/** 一階の屋根（下屋）と二階の屋根の、傷んでいるあいだだけ欠けている瓦 [gx, 斜面に沿った位置 0〜1]。苔は [gx, 位置, 幅] */
+/** 一階の屋根（下屋）と二階の屋根の、傷んでいるあいだだけ欠けている瓦 [gx, 斜面に沿った位置 0〜1] */
 const LOWER_HOLES = [[2.0, 0.2], [3.2, 0.55], [4.5, 0.25], [5.4, 0.62], [1.5, 0.72]];
-const LOWER_MOSS = [[0.2, 0.75, 0.9], [2.6, 0.8, 1.2], [4.0, 0.7, 0.8]];
 const UPPER_HOLES = [[0.9, 0.3], [2.2, 0.62], [3.3, 0.22], [5.7, 0.5], [1.6, 0.8], [4.2, 0.7]];
-const UPPER_MOSS = [[0.0, 0.1, 1.4], [3.0, 0.08, 1.0], [5.0, 0.15, 1.2]];
+
+/**
+ * 家の細かな色：瓦、アルミのサッシ、基礎、雨どい、苔。
+ * 明るさの順は、玄関（ガラス戸・門灯・ポーチ）がいちばん、ベランダの手すりの笠木が次。
+ * サッシ・雨どい・室外機・ひびなどの脇役は、壁から浮かないように暗くしてある
+ */
+const HC = {
+  tileB: '#373c45',
+  tileC: '#454b56',
+  tileRib: '#4b515c',
+  tileGroove: '#2b2f37',
+  eaveTile: '#22252b',
+  eaveDot: '#5a606b',
+  ridgeTop: '#5e6470',
+  oni: '#2e3238',
+  alu: '#62666c',
+  aluDark: '#45484e',
+  railTop: '#7e8288',
+  doorFrame: '#6e6050',
+  doorFrameDark: '#3e352d',
+  frosted: '#767b7e',
+  frostedLine: '#565b60',
+  doorLit: '#e6c890',
+  doorLitLine: '#b0905e',
+  porch: '#78746b',
+  porchEdge: '#8e897e',
+  porchFront: '#4a4742',
+  lampLit: '#f6e2aa',
+  winLit: '#a08050',
+  winCurtain: '#6c5438',
+  base: '#5a5650',
+  baseR: '#46433e',
+  baseDark: '#2a2826',
+  gutter: '#585c62',
+  gutterDark: '#3c4046',
+  board: '#4b3d32',
+  boardDark: '#3a2e25',
+  mossA: '#3c4630',
+  mossB: '#4c5834',
+  mossC: '#66723f',
+  rust: '#6a4030',
+  floor: '#5a5650',
+  shard: '#3c464f',
+  crack: '#3e474f',
+  curtain: '#3e3a36',
+  unit: '#77746c',
+  unitShade: '#5c5953',
+  unitTop: '#7f7c73',
+  unitLine: '#625f58',
+  fanRing: '#5a5750',
+  fanHole: '#24221e',
+  fanHub: '#6c6961',
+  unitStand: '#2e2c29',
+  pipeCover: '#6a665e',
+  pipeCoverDark: '#54514b',
+};
 
 /** 草の生えている所 [gx, gy]（敷石のまわりと、壁の根もと） */
 const WEEDS: [number, number][] = (() => {
   const out: [number, number][] = [];
-  for (let i = 0; i < 10; i++) out.push([0.6 + hash(i + 700) * 1.3, 5.45 + hash(i + 710) * 1.0]);
+  for (let i = 0; i < 10; i++) out.push([0.6 + hash(i + 700) * 1.3, 5.6 + hash(i + 710) * 0.9]);
   for (let i = 0; i < 12; i++) out.push([hash(i + 720) * 6, 5.08 + hash(i + 730) * 0.15]);
   for (let i = 0; i < 9; i++) out.push([6.08 + hash(i + 740) * 0.15, hash(i + 750) * 5]);
   for (let i = 0; i < 6; i++) out.push([-1.2 + hash(i + 760) * 8.4, 6.0 + hash(i + 770) * 0.5]);
   return out;
 })();
 
-/** 敷石と壁の根もとに伸びた草。a は濃さ（0 なら描かない） */
+/** 草の色：緑、濃い緑、黄みの緑、枯れ色 */
+const WEED_COLORS = ['#46552f', '#323e24', '#5e6a3a', '#7a7044'];
+
+/**
+ * 敷石と壁の根もとに伸びた草。a は濃さ（0 なら描かない）。株ごとに、長さもしなりも色も違う葉を4〜6本。
+ * 葉は途中から先がしなり（2本の線）、ところどころ穂や小さな花がつく
+ */
 function weeds(ctx: CanvasRenderingContext2D, P: (gx: number, gy: number, h: number) => P, a: number): void {
   if (a <= 0) return;
   ctx.globalAlpha = a;
   for (const [i, [gx, gy]] of WEEDS.entries()) {
     const q = P(gx, gy, 0);
-    for (let b = 0; b < 3; b++) {
-      const h = 2 + Math.floor(hash(i * 3 + b + 800) * 5);
-      ctx.fillStyle = b === 1 ? C.weed : C.weedDark;
-      ctx.fillRect(q.x - 1 + b, q.y - h, 1, h);
+    const n = 4 + Math.floor(hash(i + 790) * 3);
+    for (let b = 0; b < n; b++) {
+      const r = (k: number) => hash(i * 11 + b * 3 + k + 800);
+      const h = 2 + Math.floor(r(0) * 6);
+      const dx = b - Math.floor(n / 2);
+      const bend = Math.round((r(1) - 0.5) * 4 + dx * 0.6);
+      const color = WEED_COLORS[Math.floor(r(2) * WEED_COLORS.length)];
+      const mx = q.x + dx + Math.round(bend * 0.3);
+      const my = q.y - Math.round(h * 0.6);
+      plotLine(ctx, q.x + dx, q.y, mx, my, color);
+      plotLine(ctx, mx, my, q.x + dx + bend, q.y - h, color);
+      if (r(3) < 0.12) {
+        ctx.fillStyle = r(4) < 0.5 ? '#a09a60' : '#d8d0a0';
+        ctx.fillRect(q.x + dx + bend, q.y - h - 1, 1, 1);
+      }
     }
   }
   ctx.globalAlpha = 1;
@@ -822,6 +966,14 @@ function house(
     face === 'y'
       ? quad([[u0, plane, h0], [u1, plane, h0], [u1, plane, h1], [u0, plane, h1]], color)
       : quad([[plane, u1, h0], [plane, u0, h0], [plane, u0, h1], [plane, u1, h1]], color);
+  const line = (a: [number, number, number], b: [number, number, number], color: string) => {
+    const p = P(a[0], a[1], a[2]);
+    const q = P(b[0], b[1], b[2]);
+    plotLine(ctx, p.x, p.y, q.x, q.y, color);
+  };
+  /** 面の上の線（u0, h0 から u1, h1 へ） */
+  const faceLine = (face: 'x' | 'y', u0: number, u1: number, h0: number, h1: number, plane: number, color: string) =>
+    face === 'y' ? line([u0, plane, h0], [u1, plane, h1], color) : line([plane, u0, h0], [plane, u1, h1], color);
   /** 部分の傷み（四分の一ずつ。0 なら戻っている）と、その濃さで重ねて描く */
   const worn = (part: string) => Math.ceil((1 - look.restored(part)) * 4) / 4;
   const overlay = (a: number, draw: () => void) => {
@@ -830,104 +982,371 @@ function house(
     draw();
     ctx.globalAlpha = 1;
   };
-  /** 屋根の斜面の上の四角（v は斜面に沿った位置 0〜1） */
-  const lowerRoof = (g0: number, g1: number, v0: number, v1: number, color: string) => {
-    const at = (v: number): [number, number] => [F2_FRONT + (5.4 - F2_FRONT) * v, F1 + 4 - 7 * v];
-    const [a, b] = [at(v0), at(v1)];
-    quad([[g0, a[0], a[1]], [g1, a[0], a[1]], [g1, b[0], b[1]], [g0, b[0], b[1]]], color);
-  };
-  const upperRoof = (g0: number, g1: number, v0: number, v1: number, color: string) => {
-    const at = (v: number): [number, number] => [4.0 - 2.2 * v, F2 - 1 + (RIDGE - F2 + 1) * v];
-    const [a, b] = [at(v0), at(v1)];
-    quad([[g0, a[0], a[1]], [g1, a[0], a[1]], [g1, b[0], b[1]], [g0, b[0], b[1]]], color);
+
+  /**
+   * 割れたガラス：窓の中の一点（打たれた所）から、とがった星形に割れて闇がのぞき、縁には割れ残った破片が光る。
+   * 割れ目から枠の角と辺へひびが走る。hole なら穴の奥にちぎれたカーテン。size は穴の大きさの倍率
+   */
+  const shatter = (face: 'x' | 'y', u0: number, u1: number, h0: number, h1: number, plane: number, seed: number, hole = true, size = 1) => {
+    const du = u1 - u0;
+    const dh = h1 - h0;
+    const cu = 0.3 + hash(seed) * 0.4;
+    const ch = 0.35 + hash(seed + 1) * 0.35;
+    for (const [eu, eh] of [[0, 0], [1, 0.25], [0.15, 1], [1, 1], [0, 0.6], [0.7, 0]]) {
+      faceLine(face, u0 + du * cu, u0 + du * eu, h0 + dh * ch, h0 + dh * eh, plane, HC.crack);
+    }
+    if (!hole) return;
+    const NU = 8;
+    const NH = Math.max(4, Math.round(dh / 1.5));
+    for (let a = 0; a < NU; a++) {
+      for (let b = 0; b < NH; b++) {
+        const uc = (a + 0.5) / NU;
+        const hc = (b + 0.5) / NH;
+        const ang = Math.atan2(hc - ch, uc - cu);
+        const r = size * (0.2 + 0.17 * Math.abs(Math.sin(ang * 2.5 + seed)) + 0.07 * hash(seed * 31 + a * 7 + b));
+        const d = Math.hypot(uc - cu, (hc - ch) * 0.8);
+        const color = d < r ? C.bg : d < r + 0.08 ? HC.shard : null;
+        if (color) faceQuad(face, u0 + (du * a) / NU, u0 + (du * (a + 1)) / NU, h0 + (dh * b) / NH, h0 + (dh * (b + 1)) / NH, plane, color);
+      }
+    }
+    // 割れ目の奥に、ちぎれて垂れたカーテン
+    faceQuad(face, u0 + du * Math.max(0, cu - 0.14), u0 + du * Math.max(0.02, cu - 0.06), h0 + dh * (ch - 0.05), h0 + dh * Math.min(1, ch + 0.25), plane, HC.curtain);
   };
 
-  // 一階：古い下見板の壁
+  /**
+   * 瓦の斜面：at(v) は斜面に沿った位置 v（0〜1）の [gy, h]、eaveV は軒先の v（0 か 1）。cols × rows の桟瓦を並べる。
+   * 列ごとに明るい山と暗い谷、段ごとに重なりの影、ところどころ色の違う瓦、軒先に瓦の列と巴の点。
+   * fixed は戻っても残る欠け（列, 段）。傷みの濃さ wornA で、軒先ほど多い苔と、欠けた瓦（垂木がのぞき、ずり落ちた瓦が下に残る）
+   */
+  const tiles = (at: (v: number) => [number, number], g0: number, g1: number, eaveV: number, cols: number, rows: number, seed: number,
+    holes: number[][], fixed: [number, number], wornA: number) => {
+    const dg = (g1 - g0) / cols;
+    const dv = 1 / rows;
+    const cell = (ga: number, gb: number, va: number, vb: number, color: string) => {
+      const [a, b] = [at(va), at(vb)];
+      quad([[ga, a[0], a[1]], [gb, a[0], a[1]], [gb, b[0], b[1]], [ga, b[0], b[1]]], color);
+    };
+    const tileAt = (k: number, r: number): [number, number, number, number] => {
+      // r は軒先から数えた段
+      const va = eaveV === 0 ? r * dv : 1 - (r + 1) * dv;
+      return [g0 + k * dg, g0 + (k + 1) * dg, va, va + dv];
+    };
+    cell(g0, g1, 0, 1, C.roof);
+    for (let k = 0; k < cols; k++) {
+      for (let r = 0; r < rows; r++) {
+        const hv = hash(seed + k * 31 + r * 7);
+        if (hv < 0.12 || hv > 0.9) {
+          const [ga, gb, va, vb] = tileAt(k, r);
+          cell(ga, gb, va, vb, hv < 0.12 ? HC.tileB : HC.tileC);
+        }
+      }
+    }
+    for (let k = 0; k < cols; k++) {
+      const ga = g0 + k * dg;
+      cell(ga, ga + dg * 0.38, 0, 1, HC.tileRib);
+      const [a, b] = [at(0), at(1)];
+      line([ga + dg, a[0], a[1]], [ga + dg, b[0], b[1]], HC.tileGroove);
+    }
+    for (let r = 1; r < rows; r++) {
+      const [gy, h] = at(r * dv);
+      line([g0, gy, h], [g1, gy, h], HC.tileGroove);
+    }
+    // 軒先の瓦の列と、巴の点
+    const e = eaveV === 0 ? 0.06 : 0.94;
+    cell(g0, g1, Math.min(eaveV, e), Math.max(eaveV, e), HC.eaveTile);
+    for (let k = 0; k < cols; k++) {
+      const [gy, h] = at(eaveV === 0 ? 0.03 : 0.97);
+      const q = P(g0 + (k + 0.3) * dg, gy, h);
+      ctx.fillStyle = HC.eaveDot;
+      ctx.fillRect(q.x, q.y, 1, 1);
+    }
+    const hole = (k: number, r: number) => {
+      const [ga, gb, va, vb] = tileAt(k, r);
+      cell(ga, gb, va, vb, C.bg);
+      // 奥にのぞく垂木と、割れた瓦の縁
+      const mid = (ga + gb) / 2;
+      const [a, b] = [at(va), at(vb)];
+      line([mid, a[0], a[1]], [mid, b[0], b[1]], C.woodDark);
+      const up = eaveV === 0 ? b : a;
+      line([ga, up[0], up[1]], [gb, up[0], up[1]], HC.eaveDot);
+      // ずり落ちた瓦：一段下（軒先の側）に、少しずれて
+      if (r > 0) {
+        const [sa, sb, sva, svb] = tileAt(k, r - 1);
+        cell(sa + dg * 0.3, sb + dg * 0.3, sva + dv * 0.2, svb + dv * 0.2, HC.tileC);
+      }
+    };
+    hole(fixed[0], fixed[1]);
+    // 崩れていくと、瓦がずれて抜けていく
+    const crush = stagesOf(look.collapse ?? 0);
+    for (let i = 0; i < 14; i++) {
+      if (crush.p1 * 0.5 + crush.p2 * 0.5 + crush.p3 * 0.5 < 0.2 + hash(seed * 5 + i) * 1.1) continue;
+      hole(Math.floor(hash(seed * 7 + i) * cols), Math.floor(hash(seed * 11 + i) * rows));
+    }
+    overlay(wornA, () => {
+      for (let k = 0; k < cols; k++) {
+        for (let r = 0; r < rows; r++) {
+          // 苔：軒先の段ほど多い。瓦の下のほう（軒先の側）に、谷へ寄って生える
+          const m = hash(seed * 3 + k * 13 + r * 29);
+          if (m > 0.34 * (1 - r / rows) ** 2) continue;
+          const [ga, gb, va, vb] = tileAt(k, r);
+          const [ma, mb] = eaveV === 0 ? [va, va + dv * 0.55] : [vb - dv * 0.55, vb];
+          cell(ga + dg * 0.3, gb, ma, mb, m < 0.1 ? HC.mossB : HC.mossA);
+          if (m < 0.05) cell(ga + dg * 0.5, gb, ma + (mb - ma) * 0.3, mb - (mb - ma) * 0.3, HC.mossC);
+        }
+      }
+      for (const [g, v] of holes) {
+        const k = Math.min(cols - 1, Math.max(0, Math.floor((g - g0) / dg)));
+        const r = Math.min(rows - 1, Math.floor((eaveV === 0 ? v : 1 - v) * rows));
+        hole(k, r);
+      }
+    });
+  };
+
+  // ---- 一階：基礎と、古い下見板の壁
   quad([[0, 5, 0], [6, 5, 0], [6, 5, F1], [0, 5, F1]], C.sidingL);
   quad([[6, 5, 0], [6, 0, 0], [6, 0, F1], [6, 5, F1]], C.sidingR);
-  for (let h = 4; h < F1; h += 4) {
-    const a = P(0, 5, h);
-    const b = P(6, 5, h);
-    const d = P(6, 0, h);
-    plotLine(ctx, a.x, a.y, b.x, b.y, C.sidingLine);
-    plotLine(ctx, b.x, b.y, d.x, d.y, C.sidingLine);
+  // 張り替えた明るい板と、黒ずんだ板が、ところどころ
+  for (let k = 0; k < 14; k++) {
+    const face = k % 2 ? 'x' : 'y';
+    const u = hash(k + 300) * (face === 'y' ? 5.2 : 4.2);
+    const h = 3 + 3 * Math.floor(hash(k + 310) * 7);
+    faceQuad(face, u, u + 0.5 + hash(k + 320), h, h + 3, face === 'y' ? 5 : 6, hash(k + 330) < 0.5 ? HC.board : HC.boardDark);
   }
-  // 二階：日に焼けて染みの浮いた漆喰の壁
+  for (let h = 3; h < F1; h += 3) {
+    faceLine('y', 0, 6, h, h, 5, C.sidingLine);
+    faceLine('x', 0, 5, h, h, 6, C.sidingLine);
+  }
+  // 軒下から垂れた雨の筋
+  for (let k = 0; k < 6; k++) {
+    const u = 0.3 + hash(k + 340) * 5.4;
+    faceQuad('y', u, u + 0.1, F1 - 9 - Math.floor(hash(k + 350) * 6), F1, 5, C.stain);
+  }
+  // 基礎（コンクリート）と床下の換気口、上の水切り
+  faceQuad('y', 0, 6, 0, 3, 5, HC.base);
+  faceQuad('x', 0, 5, 0, 3, 6, HC.baseR);
+  for (const u of [2.6, 4.6]) faceQuad('y', u, u + 0.4, 0.8, 2.2, 5, HC.baseDark);
+  for (const u of [1.2, 3.9]) faceQuad('x', u, u + 0.4, 0.8, 2.2, 6, HC.baseDark);
+  faceLine('y', 0, 6, 3, 3, 5, HC.gutter);
+  faceLine('x', 0, 5, 3, 3, 6, HC.gutterDark);
+  line([6, 5, 3], [6, 5, F1], C.woodDark);
+  overlay(0.4, () => faceQuad('y', 0, 6, F1 - 9, F1, 5, C.bg));
+
+  // ---- 二階：日に焼けて染みの浮いた漆喰の壁。一階とのさかいに胴差し、角に柱
   quad([[0, F2_FRONT, F1], [6, F2_FRONT, F1], [6, F2_FRONT, F2], [0, F2_FRONT, F2]], C.plasterL);
   quad([[6, F2_FRONT, F1], [6, 0, F1], [6, 0, F2], [6, F2_FRONT, F2]], C.plasterR);
   faceQuad('y', 5.0, 5.6, F1 + 2, F1 + 12, F2_FRONT, C.stain);
   faceQuad('x', 2.8, 3.3, F1 + 4, F1 + 16, 6, C.stain);
+  faceQuad('x', 0, F2_FRONT, F1, F1 + 2, 6, C.wood);
+  line([6, F2_FRONT, F1], [6, F2_FRONT, F2], C.woodDark);
+  // 二階の窓の下に垂れた雨垂れの筋
+  for (const w of WINDOWS) {
+    if (w.h0 < F1) continue;
+    const plane = w.face === 'y' ? F2_FRONT : 6;
+    const du = w.u1 - w.u0;
+    faceQuad(w.face, w.u0 + du * 0.15, w.u0 + du * 0.25, w.h0 - 8, w.h0 - 1, plane, C.stain);
+    faceQuad(w.face, w.u0 + du * 0.7, w.u0 + du * 0.78, w.h0 - 5, w.h0 - 1, plane, C.stain);
+  }
   // 二階が戻るまで：雨の筋の染みが増え、漆喰がはがれて下地の小舞がのぞく
   overlay(worn('STAGE5'), () => {
     faceQuad('y', 3.0, 3.4, F1 + 2, F2 - 2, F2_FRONT, C.stain);
     faceQuad('y', 0.2, 0.5, F1 + 1, F1 + 14, F2_FRONT, C.stain);
     faceQuad('x', 3.6, 4.0, F1 + 1, F2 - 3, 6, C.stain);
     for (const [face, u0, u1, h0, h1, plane] of [['y', 1.95, 2.55, F1 + 5, F1 + 12, F2_FRONT], ['x', 0.2, 0.75, F1 + 13, F1 + 20, 6]] as const) {
-      faceQuad(face, u0, u1, h0, h1, plane, C.lath);
-      for (let h = h0 + 1; h < h1; h += 2) faceQuad(face, u0, u1, h, h + 0.6, plane, C.woodDark);
-    }
-    // 右の壁を這い上がる蔦
-    for (let k = 0; k < 40; k++) {
-      const q = P(6, 2.3 + hash(k + 600) * 1.3, F1 + hash(k + 610) ** 2 * 22);
-      ctx.fillStyle = hash(k + 620) < 0.4 ? C.ivyLight : C.ivy;
-      ctx.fillRect(q.x, q.y, 2, 1);
+      // はがれた縁はぎざぎざに（段ごとに幅を変える）
+      for (let h = h0; h < h1; h++) {
+        const j = hash(h * 7 + u0 * 100) * 0.12;
+        faceQuad(face, u0 + j, u1 - j * 0.5, h, h + 1, plane, C.lath);
+      }
+      for (let h = h0 + 1; h < h1; h += 2) faceQuad(face, u0 + 0.1, u1 - 0.08, h, h + 0.6, plane, C.woodDark);
     }
   });
 
-  // 窓：ふだんは暗い（タイトルでは、戻った部分の窓に暖かい明かりがともる）。傷んでいるあいだは、ガラスが割れているか雨戸が閉まっている。
+  // ---- エアコンの室外機（右の壁の前）と、二階へ上がる配管カバー。台所の換気扇のフード
+  {
+    const [x0, x1] = [6.06, 6.32];
+    const [y0, y1] = [2.5, 3.16];
+    const [h0, h1] = [1, 7];
+    // 配管カバー：室外機の右の端から壁を二階まで上がる（継ぎ目の帯つき）
+    faceQuad('x', 2.38, 2.52, 3, F1 + 14, 6, HC.pipeCover);
+    faceLine('x', 2.52, 2.52, 3, F1 + 14, 6, HC.pipeCoverDark);
+    for (const h of [9, 18, F1 + 6]) faceQuad('x', 2.36, 2.54, h, h + 1, 6, HC.pipeCoverDark);
+    quad([[6, 2.38, 3], [x0, 2.38, 3], [x0, 2.52, 3], [6, 2.52, 3]], HC.pipeCoverDark);
+    // 樹脂の置き台（両端の2本の脚）
+    for (const y of [y0 + 0.04, y1 - 0.1]) {
+      quad([[x0, y + 0.06, 0], [x1 + 0.02, y + 0.06, 0], [x1 + 0.02, y + 0.06, h0], [x0, y + 0.06, h0]], HC.unitStand);
+      quad([[x1 + 0.02, y + 0.06, 0], [x1 + 0.02, y, 0], [x1 + 0.02, y, h0], [x1 + 0.02, y + 0.06, h0]], HC.unitStand);
+    }
+    // 箱：手前（+x）の面、左（+y）の面、上の面
+    quad([[x0, y1, h0], [x1, y1, h0], [x1, y1, h1], [x0, y1, h1]], HC.unitShade);
+    quad([[x1, y1, h0], [x1, y0, h0], [x1, y0, h1], [x1, y1, h1]], HC.unit);
+    quad([[x0, y0, h1], [x1, y0, h1], [x1, y1, h1], [x0, y1, h1]], HC.unitTop);
+    line([x1, y1, h1], [x1, y0, h1], HC.unitTop);
+    line([x1, y1, h0], [x1, y0, h0], HC.unitLine);
+    // 右の三分の一は配管のふた（縦の継ぎ目と、小さなねじ）
+    const seam = y0 + (y1 - y0) * 0.3;
+    line([x1, seam, h0 + 0.5], [x1, seam, h1 - 0.5], HC.unitLine);
+    const v = P(x1, y0 + 0.08, h0 + 2);
+    ctx.fillStyle = HC.unitLine;
+    ctx.fillRect(v.x, v.y, 1, 1);
+    // 左の三分の二は、格子の付いた丸いファンの吹き出し口（面に沿って斜めに見える円。1 マスは高さ 15 ドットほど）
+    const fc = { gy: y0 + (y1 - y0) * 0.64, h: (h0 + h1) / 2 };
+    const c = P(x1, fc.gy, fc.h);
+    const R = 3.1;
+    for (let py = -5; py <= 5; py++) {
+      for (let px = -4; px <= 4; px++) {
+        const dgy = -px / 12;
+        const dh = 6 * dgy - py;
+        const r = Math.hypot(dgy * 15, dh);
+        if (r > R) continue;
+        // 外の輪とまん中の軸。奥の暗がりには、1段おきに横の格子が細く光る
+        ctx.fillStyle = r > R - 0.9 ? HC.fanRing : r < 0.8 ? HC.fanHub : py % 2 === 0 ? '#3a3833' : HC.fanHole;
+        ctx.fillRect(c.x + px, c.y + py, 1, 1);
+      }
+    }
+    // 水抜きのホース：底から土へ
+    const d0 = P(x1 - 0.05, y1 - 0.1, h0);
+    ctx.fillStyle = HC.unitStand;
+    ctx.fillRect(d0.x, d0.y, 1, 2);
+    ctx.fillRect(d0.x - 2, d0.y + 2, 3, 1);
+  }
+  faceQuad('x', 0.15, 0.5, 16, 19, 6, HC.gutter);
+  faceLine('x', 0.15, 0.5, 16, 16, 6, HC.gutterDark);
+
+  // ---- 窓：アルミの引き違いのサッシ。ふだんは暗い（タイトルでは、戻った部分の窓に暖かい明かりがともる）。
+  // 一階の窓の上に小さな庇、雨戸のある窓の横に戸袋、台所の窓に面格子。傷んでいるあいだは、ガラスが割れているか雨戸が閉まっている。
   // 光が強まると、家の窓という窓から少女と同じ青い光が漏れる
   for (const [i, w] of WINDOWS.entries()) {
-    const plane = w.face === 'y' ? (w.h0 >= F1 ? F2_FRONT : 5) : 6;
-    faceQuad(w.face, w.u0 - 0.08, w.u1 + 0.08, w.h0 - 1, w.h1 + 1, plane, C.woodDark);
+    const upper = w.h0 >= F1;
+    const plane = w.face === 'y' ? (upper ? F2_FRONT : 5) : 6;
+    const du = w.u1 - w.u0;
+    const mid = (w.u0 + w.u1) / 2;
+    if (w.shutter) {
+      // 戸袋：雨戸をしまう箱（縦の板張り）
+      faceQuad(w.face, w.u1 + 0.08, w.u1 + 0.55, w.h0 - 1, w.h1 + 1, plane, '#4a4038');
+      for (const k of [0.24, 0.4]) faceLine(w.face, w.u1 + k, w.u1 + k, w.h0 - 1, w.h1 + 1, plane, C.woodDark);
+    }
+    faceQuad(w.face, w.u0 - 0.07, w.u1 + 0.07, w.h0 - 1, w.h1 + 1, plane, HC.alu);
     const glow = clamp01((L - w.at) / 0.2);
-    faceQuad(w.face, w.u0, w.u1, w.h0, w.h1, plane, glow > 0 ? C.lightDeep : look.lit && look.restored(w.part) > 0 ? C.warm : C.glass);
+    const lit = look.lit && look.restored(w.part) > 0;
+    faceQuad(w.face, w.u0, w.u1, w.h0, w.h1, plane, glow > 0 ? C.lightDeep : lit ? HC.winLit : C.glass);
     if (glow > 0) {
       ctx.globalAlpha = glow;
       faceQuad(w.face, w.u0, w.u1, w.h0, w.h1, plane, C.light);
       ctx.globalAlpha = 1;
+    } else if (lit) {
+      // 明かりのついた窓：両わきに寄せたカーテン
+      faceQuad(w.face, w.u0, w.u0 + du * 0.16, w.h0, w.h1, plane, HC.winCurtain);
+      faceQuad(w.face, w.u1 - du * 0.16, w.u1, w.h0, w.h1, plane, HC.winCurtain);
+    } else {
+      // 暗いガラスに映る斜めの光
+      faceLine(w.face, w.u0 + du * 0.08, w.u0 + du * 0.3, w.h1 - 1, w.h0 + 2, plane, '#252c33');
     }
-    // 格子
-    const mid = (w.u0 + w.u1) / 2;
-    faceQuad(w.face, mid - 0.04, mid + 0.04, w.h0, w.h1, plane, C.woodDark);
+    // 引き違いの召し合わせ（2枚の戸が重なる所）と、窓台
+    faceQuad(w.face, mid - 0.05, mid + 0.05, w.h0, w.h1, plane, HC.alu);
+    faceQuad(w.face, mid + 0.05, mid + 0.08, w.h0, w.h1, plane, HC.aluDark);
+    faceQuad(w.face, w.u0 - 0.1, w.u1 + 0.1, w.h0 - 2, w.h0 - 1, plane, HC.aluDark);
+    if (!upper && w.face === 'x') {
+      // 霧除けの小さな庇（手前の面の一階の窓は、下屋の軒の下なので要らない）
+      const out = 0.3;
+      quad([[plane, w.u1 + 0.15, w.h1 + 3], [plane, w.u0 - 0.15, w.h1 + 3], [plane + out, w.u0 - 0.15, w.h1 + 1.5], [plane + out, w.u1 + 0.15, w.h1 + 1.5]], '#3a3e46');
+      line([plane + out, w.u0 - 0.15, w.h1 + 1.5], [plane + out, w.u1 + 0.15, w.h1 + 1.5], HC.aluDark);
+    }
     overlay(glow > 0 ? 0 : worn(w.part), () => {
-      const du = w.u1 - w.u0;
-      const dh = w.h1 - w.h0;
       if (w.shutter) {
-        // 閉まったままの雨戸：縦の板。一枚だけ板の継ぎ目が開いている
+        // 閉まったままの雨戸：縦の板。一枚だけ板の継ぎ目が開き、釘から錆が垂れる
         faceQuad(w.face, w.u0, w.u1, w.h0, w.h1, plane, C.amado);
         for (let k = 1; k < 5; k++) faceQuad(w.face, w.u0 + (du * k) / 5 - 0.02, w.u0 + (du * k) / 5 + 0.02, w.h0, w.h1, plane, C.woodDark);
         faceQuad(w.face, w.u0 + (du * 3) / 5 - 0.04, w.u0 + (du * 3) / 5 + 0.04, w.h0 + 2, w.h1 - 3, plane, C.bg);
+        faceQuad(w.face, w.u0 + du * 0.2, w.u0 + du * 0.26, w.h0 + 2, w.h1 - 1, plane, HC.rust);
       } else {
         faceQuad(w.face, w.u0, w.u1, w.h0, w.h1, plane, C.glass);
-        for (const [k, [a0, a1, b0, b1]] of BROKEN_PANES.entries()) {
-          if ((i + k) % 3 === 2) continue;
-          faceQuad(w.face, w.u0 + du * a0, w.u0 + du * a1, w.h0 + dh * b0, w.h0 + dh * b1, plane, C.bg);
-        }
-        faceQuad(w.face, mid - 0.04, mid + 0.04, w.h0, w.h1, plane, C.woodDark);
+        shatter(w.face, w.u0, w.u1, w.h0, w.h1, plane, i * 17 + 3, i % 3 !== 2);
+        faceQuad(w.face, mid - 0.05, mid + 0.05, w.h0, w.h1, plane, HC.alu);
       }
     });
+    if (w.part === 'STAGE4') {
+      // 台所の窓の面格子（割れたガラスや明かりの上に）
+      for (let k = 1; k < 5; k++) faceLine(w.face, w.u0 + (du * k) / 5, w.u0 + (du * k) / 5, w.h0, w.h1 - 1, plane, HC.aluDark);
+      faceLine(w.face, w.u0, w.u1, w.h0 + 1, w.h0 + 1, plane, HC.aluDark);
+      faceLine(w.face, w.u0, w.u1, w.h1 - 2, w.h1 - 2, plane, HC.aluDark);
+    }
   }
-  // 割れた窓ガラスがひとつ（家は最初からどこかボロボロ）
-  faceQuad('y', 4.5, 4.75, 15, 19, 5, C.bg);
+  // 崩れはじめると：壁に斜めのひびが走り、一階が潰れるとガラスが次々に割れ、二階の漆喰がはがれ落ちる
+  const col = look.collapse ?? 0;
+  if (col > 0) {
+    const { p1, p2 } = stagesOf(col);
+    for (const [face, u0, u1, h0, h1, plane, at] of [
+      ['y', 2.0, 3.3, 3, F1 - 2, 5, 0.02], ['y', 5.2, 6, 3, F1 - 2, 5, 0.05], ['x', 2.3, 3.2, 3, F1 - 2, 6, 0.03], ['x', 4.5, 5, 3, F1 - 2, 6, 0.06],
+      ['y', 1.7, 4.3, F1 + 1, F1 + 9, F2_FRONT, 0.2], ['x', 2.6, 4.0, F1 + 2, F2 - 2, 6, 0.3], ['y', 5.5, 6, F1 + 2, F2 - 3, F2_FRONT, 0.4],
+    ] as const) {
+      if (col < at) continue;
+      faceLine(face, u0, u1, h0, h1, plane, C.woodDark);
+      faceLine(face, u0, u1, h1, h0, plane, C.woodDark);
+    }
+    for (const [i, w] of WINDOWS.entries()) {
+      if (p1 < 0.15 + (i % 3) * 0.12) continue;
+      const plane = w.face === 'y' ? (w.h0 >= F1 ? F2_FRONT : 5) : 6;
+      shatter(w.face, w.u0, w.u1, w.h0, w.h1, plane, i * 23 + 7, true, 1.2);
+    }
+    if (p1 > 0.2) shatter('y', ENTRANCE.u0 + 0.1, ENTRANCE.u1 - 0.1, 3, ENTRANCE.h1 - 1, 5, 53, true, 1.1);
+    if (p2 > 0.1) {
+      for (const [face, u0, u1, h0, h1, plane] of [['y', 0.1, 0.6, F1 + 3, F1 + 12, F2_FRONT], ['x', 0.2, 0.9, F1 + 4, F1 + 14, 6], ['x', 4.6, 5.2, F1 + 6, F1 + 15, 6]] as const) {
+        for (let h = h0; h < h1; h++) {
+          const j = hash(h * 5 + u0 * 70) * 0.15;
+          faceQuad(face, u0 + j, u1 - j, h, h + 1, plane, C.lath);
+        }
+      }
+    }
+  }
 
-  // 玄関の引き戸
-  faceQuad('y', ENTRANCE.u0 - 0.1, ENTRANCE.u1 + 0.1, ENTRANCE.h0, ENTRANCE.h1 + 2, 5, C.woodDark);
-  faceQuad('y', ENTRANCE.u0, ENTRANCE.u1, 5, ENTRANCE.h1, 5, L > 0.1 ? C.lightDeep : C.glassDim);
-  faceQuad('y', (ENTRANCE.u0 + ENTRANCE.u1) / 2 - 0.05, (ENTRANCE.u0 + ENTRANCE.u1) / 2 + 0.05, 0, ENTRANCE.h1, 5, C.wood);
-  // 門灯（タイトルでは、玄関が戻るとともる）
+  // 割れた窓ガラスがひとつ（家は最初からどこかボロボロ）
+  shatter('y', 4.3, 5.2, 12, 20, 5, 91, true, 0.7);
+
+  // ---- 玄関：下屋の軒の下の、格子の入ったすりガラスの引き戸。前にポーチ、わきに門灯・表札・インターホン・郵便受け。
+  // 家でいちばん目を引く所なので、枠もガラスもポーチも、まわりの壁よりはっきり明るい
+  const entranceLit = look.lit && look.restored('STAGE1') > 0 && L <= 0.1;
+  quad([[0.35, 5, 1], [2.05, 5, 1], [2.05, 5.6, 1], [0.35, 5.6, 1]], HC.porch);
+  line([0.35, 5.6, 1], [2.05, 5.6, 1], HC.porchEdge);
+  quad([[0.35, 5.6, 0], [2.05, 5.6, 0], [2.05, 5.6, 1], [0.35, 5.6, 1]], HC.porchFront);
+  faceQuad('y', ENTRANCE.u0 - 0.12, ENTRANCE.u1 + 0.12, ENTRANCE.h0, ENTRANCE.h1 + 2, 5, HC.doorFrameDark);
+  faceQuad('y', ENTRANCE.u0 - 0.08, ENTRANCE.u1 + 0.08, ENTRANCE.h0, ENTRANCE.h1 + 1.5, 5, HC.doorFrame);
+  const em = (ENTRANCE.u0 + ENTRANCE.u1) / 2;
+  const doorGlass = L > 0.1 ? C.lightDeep : entranceLit ? HC.doorLit : HC.frosted;
+  const doorLine = L > 0.1 ? C.lightDeep : entranceLit ? HC.doorLitLine : HC.frostedLine;
+  for (const [a, b] of [[ENTRANCE.u0, em], [em, ENTRANCE.u1]]) {
+    faceQuad('y', a + 0.1, b - 0.1, 3, ENTRANCE.h1 - 1, 5, doorGlass);
+    for (let h = 6; h < ENTRANCE.h1 - 1; h += 4) faceLine('y', a + 0.1, b - 0.1, h, h, 5, doorLine);
+  }
+  faceQuad('y', em - 0.05, em + 0.05, 0, ENTRANCE.h1, 5, HC.doorFrameDark);
+  for (const u of [em - 0.12, em + 0.08]) faceQuad('y', u, u + 0.04, 8, 11, 5, HC.porchEdge);
+  // 門灯（タイトルでは、玄関が戻るとともる）、表札、インターホン、郵便受け
   const lamp = PORCH_LAMP;
-  faceQuad('y', lamp.u - 0.2, lamp.u + 0.2, lamp.h0 - 1, lamp.h1 + 1, 5, C.woodDark);
-  faceQuad('y', lamp.u - 0.14, lamp.u + 0.14, lamp.h0, lamp.h1, 5, look.lit && look.restored('STAGE1') > 0 && L <= 0.1 ? C.warm : C.glassDim);
+  // 門灯：小さな黒い器具に、縦長の明かり（ガラス戸より小さく、窓に見えないように）
+  faceQuad('y', lamp.u - 0.13, lamp.u + 0.13, lamp.h0, lamp.h1, 5, C.woodDark);
+  faceQuad('y', lamp.u - 0.16, lamp.u + 0.16, lamp.h1 - 1, lamp.h1, 5, C.woodDark);
+  faceQuad('y', lamp.u - 0.06, lamp.u + 0.06, lamp.h0 + 1, lamp.h1 - 1, 5, entranceLit ? HC.lampLit : HC.frostedLine);
+  faceQuad('y', 2.5, 2.85, 10, 12, 5, '#a8a090');
+  faceQuad('y', 2.55, 2.75, 6, 8.5, 5, HC.baseDark);
+  faceQuad('y', 2.62, 2.68, 7.5, 8, 5, C.warm);
+  faceQuad('y', 2.95, 3.3, 7, 11, 5, '#5a5048');
+  faceQuad('y', 3.0, 3.25, 9.5, 10, 5, HC.baseDark);
   // 玄関が戻るまで：引き戸のガラスが割れ、下のほうは泥はねで汚れ、門灯のガラスも割れている
   overlay(worn('STAGE1'), () => {
-    faceQuad('y', ENTRANCE.u0, ENTRANCE.u1, 5, 8, 5, C.stain);
-    faceQuad('y', ENTRANCE.u0 + 0.1, ENTRANCE.u0 + 0.42, 11, 16, 5, C.bg);
-    faceQuad('y', ENTRANCE.u1 - 0.4, ENTRANCE.u1 - 0.12, 7, 10, 5, C.bg);
-    faceQuad('y', lamp.u - 0.14, lamp.u + 0.14, lamp.h0, lamp.h1, 5, C.glass);
-    faceQuad('y', lamp.u - 0.02, lamp.u + 0.14, lamp.h0, lamp.h0 + 3, 5, C.bg);
+    faceQuad('y', ENTRANCE.u0 + 0.1, ENTRANCE.u1 - 0.1, 3, 5, 5, C.stain);
+    shatter('y', ENTRANCE.u0 + 0.1, em - 0.1, 3, ENTRANCE.h1 - 1, 5, 41, true, 0.6);
+    shatter('y', em + 0.1, ENTRANCE.u1 - 0.1, 3, ENTRANCE.h1 - 1, 5, 47, false);
+    faceQuad('y', lamp.u - 0.06, lamp.u + 0.06, lamp.h0 + 1, lamp.h1 - 1, 5, C.glass);
+    faceQuad('y', lamp.u, lamp.u + 0.06, lamp.h0 + 1, lamp.h0 + 3, 5, C.bg);
+  });
+  // タイトルで始めたとき：引き戸のガラスに、家の中の明かりがともる（枠と格子は残す。この後に描く下屋の軒より奥に）
+  overlay(look.doorLight ?? 0, () => {
+    for (const [a, b] of [[ENTRANCE.u0, em], [em, ENTRANCE.u1]]) {
+      faceQuad('y', a + 0.1, b - 0.1, 3, ENTRANCE.h1 - 1, 5, HC.lampLit);
+      for (let h = 6; h < ENTRANCE.h1 - 1; h += 4) faceLine('y', a + 0.1, b - 0.1, h, h, 5, HC.doorLitLine);
+    }
   });
 
-  // ベランダのガラス戸：右の戸が開いて、中は暗い
+  // ---- ベランダのガラス戸：アルミの枠。右の戸が開いて、中は暗い
   const open =
     t < ENDING.doorOpen[0]
       ? 0
@@ -938,88 +1357,182 @@ function house(
           : 1 - clamp01((t - ENDING.doorClose[0]) / (ENDING.doorClose[1] - ENDING.doorClose[0]));
   const d = BALCONY_DOOR;
   const half = (d.u1 - d.u0) / 2;
-  faceQuad('y', d.u0 - 0.1, d.u1 + 0.1, d.h0, d.h1 + 2, F2_FRONT, C.woodDark);
+  faceQuad('y', d.u0 - 0.1, d.u1 + 0.1, d.h0, d.h1 + 2, F2_FRONT, HC.alu);
   faceQuad('y', d.u0, d.u1, d.h0, d.h1, F2_FRONT, C.bg);
-  const doorGlass = L > 0.3 ? C.lightDeep : C.glassDim;
-  faceQuad('y', d.u0, d.u0 + half, d.h0, d.h1, F2_FRONT, doorGlass);
+  const balconyGlass = L > 0.3 ? C.lightDeep : C.glassDim;
+  faceQuad('y', d.u0, d.u0 + half, d.h0, d.h1, F2_FRONT, balconyGlass);
+  faceLine('y', d.u0 + 0.1, d.u0 + half * 0.6, d.h1 - 1, d.h0 + 4, F2_FRONT, '#3a4652');
   const slide = open * half;
-  faceQuad('y', d.u0 + half + slide - 0.05, Math.min(d.u1 + slide, d.u1 + half), d.h0, d.h1, F2_FRONT, doorGlass);
-  faceQuad('y', d.u0 + half + slide - 0.05, d.u0 + half + slide + 0.03, d.h0, d.h1, F2_FRONT, C.wood);
+  faceQuad('y', d.u0 + half + slide - 0.05, Math.min(d.u1 + slide, d.u1 + half), d.h0, d.h1, F2_FRONT, balconyGlass);
+  faceQuad('y', d.u0 + half + slide - 0.05, d.u0 + half + slide + 0.03, d.h0, d.h1, F2_FRONT, HC.alu);
 
-  // 一階の屋根（下屋）：二階の手前に張り出す瓦屋根。いくつか瓦が欠けている
-  quad([[-0.3, F2_FRONT, F1 + 4], [6.3, F2_FRONT, F1 + 4], [6.3, 5.4, F1 - 3], [-0.3, 5.4, F1 - 3]], C.roof);
+  // ---- 一階の屋根（下屋）：二階の手前に張り出す瓦屋根。軒先に軒どい、右の端から縦どいが地面へ
+  const lowerAt = (v: number): [number, number] => [F2_FRONT + (5.4 - F2_FRONT) * v, F1 + 4 - 7 * v];
+  tiles(lowerAt, -0.3, 6.3, 1, 30, 5, 11, LOWER_HOLES, [4, 1], worn('STAGE4'));
   quad([[6.3, 5.4, F1 - 3], [6.3, F2_FRONT, F1 + 4], [6.3, F2_FRONT, F1 + 2], [6.3, 5.4, F1 - 5]], C.roofEdge);
-  for (const g of [-0.3, 1, 2.3, 3.6, 4.9, 6.2]) {
-    const a = P(g, F2_FRONT, F1 + 4);
-    const b = P(g, 5.4, F1 - 3);
-    plotLine(ctx, a.x, a.y, b.x, b.y, C.roofLine);
+  // 軒どい：傷んでいるあいだは、まん中が外れて垂れ下がる
+  const gutterLow = (g0: number, g1: number) => {
+    quad([[g0, 5.45, F1 - 3.2], [g1, 5.45, F1 - 3.2], [g1, 5.45, F1 - 4.6], [g0, 5.45, F1 - 4.6]], HC.gutter);
+    line([g0, 5.45, F1 - 4.6], [g1, 5.45, F1 - 4.6], HC.gutterDark);
+  };
+  if (look.restored('STAGE4') >= 0.5) gutterLow(-0.3, 6.3);
+  else {
+    gutterLow(-0.3, 2.0);
+    gutterLow(2.9, 6.3);
+    line([2.9, 5.45, F1 - 4], [2.4, 5.6, F1 - 9], HC.gutter);
+    line([2.9, 5.45, F1 - 4.6], [2.4, 5.6, F1 - 10], HC.rust);
   }
-  quad([[0.6, 4.3, F1 + 1], [1.0, 4.3, F1 + 1], [1.0, 4.7, F1 - 1], [0.6, 4.7, F1 - 1]], C.bg);
-  // 一階の屋根が戻るまで：欠けた瓦が増え、苔がついている
-  overlay(worn('STAGE4'), () => {
-    for (const [g, v, w] of LOWER_MOSS) lowerRoof(g, g + w, v, Math.min(1, v + 0.18), C.moss);
-    for (const [g, v] of LOWER_HOLES) lowerRoof(g, g + 0.38, v, v + 0.2, C.bg);
-  });
+  line([6.25, 5.45, F1 - 4], [6.25, 5.45, 0], HC.gutter);
+  line([6.3, 5.45, F1 - 4], [6.3, 5.45, 0], HC.gutterDark);
+  for (const h of [6, 14]) line([6.15, 5.45, h], [6.4, 5.45, h], HC.gutterDark);
 
-  // ベランダの床
-  quad([[1.7, F2_FRONT, BALCONY_H], [4.3, F2_FRONT, BALCONY_H], [4.3, BALCONY_FRONT, BALCONY_H], [1.7, BALCONY_FRONT, BALCONY_H]], C.wood);
-  quad([[1.7, BALCONY_FRONT, BALCONY_H], [4.3, BALCONY_FRONT, BALCONY_H], [4.3, BALCONY_FRONT, BALCONY_H - 2], [1.7, BALCONY_FRONT, BALCONY_H - 2]], C.woodDark);
+  // ---- ベランダの床（灰色の防水の床と、手前の縁）。左の手すりは少女より奥に
+  quad([[1.7, F2_FRONT, BALCONY_H], [4.3, F2_FRONT, BALCONY_H], [4.3, BALCONY_FRONT, BALCONY_H], [1.7, BALCONY_FRONT, BALCONY_H]], HC.floor);
+  line([1.75, F2_FRONT + 0.1, BALCONY_H], [4.25, F2_FRONT + 0.1, BALCONY_H], HC.baseDark);
+  quad([[1.7, BALCONY_FRONT, BALCONY_H], [4.3, BALCONY_FRONT, BALCONY_H], [4.3, BALCONY_FRONT, BALCONY_H - 2], [1.7, BALCONY_FRONT, BALCONY_H - 2]], '#3e3b37');
+  quad([[4.3, BALCONY_FRONT, BALCONY_H], [4.3, F2_FRONT, BALCONY_H], [4.3, F2_FRONT, BALCONY_H - 2], [4.3, BALCONY_FRONT, BALCONY_H - 2]], '#2e2c29');
+  line([1.7, BALCONY_FRONT, BALCONY_H], [4.3, BALCONY_FRONT, BALCONY_H], '#77726a');
+  for (let k = 0; k <= 8; k++) {
+    const gy = F2_FRONT + ((BALCONY_FRONT - F2_FRONT) * k) / 8;
+    line([1.7, gy, BALCONY_H + 1], [1.7, gy, BALCONY_H + 8], HC.aluDark);
+  }
+  line([1.7, F2_FRONT, BALCONY_H + 9], [1.7, BALCONY_FRONT, BALCONY_H + 9], HC.aluDark);
+  // 物干しの金物と竿（壁から張り出した2本の腕に、竿を渡す）
+  for (const g of [1.95, 4.05]) line([g, F2_FRONT, BALCONY_H + 17], [g, 3.95, BALCONY_H + 16], HC.aluDark);
+  line([1.8, 3.95, BALCONY_H + 16], [4.2, 3.95, BALCONY_H + 16], HC.alu);
+  // 鉢植え：戻っていれば緑の葉、傷んでいるあいだは枯れた茎と、床の落ち葉（崩れて二階が潰れはじめたら、ガレキの中）
+  if ((look.collapse ?? 0) < 0.45) {
+    const q = P(2.0, 4.6, BALCONY_H);
+    ctx.fillStyle = '#8a4a30';
+    ctx.fillRect(q.x - 2, q.y - 3, 5, 3);
+    ctx.fillStyle = '#a85a38';
+    ctx.fillRect(q.x - 3, q.y - 4, 7, 1);
+    const dead = look.restored('STAGE5') < 0.5;
+    for (const [dx, h] of [[-2, 4], [0, 6], [2, 5]]) {
+      ctx.fillStyle = dead ? '#6a5a3a' : C.ivyLight;
+      ctx.fillRect(q.x + dx, q.y - 4 - h, 1, h);
+      if (!dead) ctx.fillRect(q.x + dx - 1, q.y - 4 - h, 3, 1);
+    }
+    if (dead) {
+      for (const [gx, gy] of [[2.6, 4.3], [3.9, 4.7], [3.1, 4.8], [2.3, 4.0]]) {
+        const l = P(gx, gy, BALCONY_H);
+        ctx.fillStyle = '#7a5a30';
+        ctx.fillRect(l.x, l.y - 1, 2, 1);
+      }
+    }
+  }
 
-  // 二階の屋根：棟は x 方向。奥の斜面（少しだけ見える）、手前の斜面、+x 側の妻
+  // ---- 二階の屋根：棟は x 方向。奥の斜面（少しだけ見える）、手前の斜面、+x 側の妻
   quad([[-0.4, 1.8, RIDGE], [6.4, 1.8, RIDGE], [6.4, -0.4, F2 - 1], [-0.4, -0.4, F2 - 1]], C.roofLine);
   quad([[6, F2_FRONT, F2], [6, 0, F2], [6, 1.8, RIDGE - 2], [6, 1.8, RIDGE - 2]], C.plasterR);
-  quad([[-0.4, 4.0, F2 - 1], [6.4, 4.0, F2 - 1], [6.4, 1.8, RIDGE], [-0.4, 1.8, RIDGE]], C.roof);
-  for (let i = 1; i < 6; i++) {
-    const g = -0.4 + (6.8 * i) / 6;
-    const a = P(g, 4.0, F2 - 1);
-    const b = P(g, 1.8, RIDGE);
-    plotLine(ctx, a.x, a.y, b.x, b.y, C.roofLine);
-  }
-  for (const k of [0.33, 0.66]) {
-    const a = P(-0.4, 4.0 - 2.2 * k, F2 - 1 + (RIDGE - F2 + 1) * k);
-    const b = P(6.4, 4.0 - 2.2 * k, F2 - 1 + (RIDGE - F2 + 1) * k);
-    plotLine(ctx, a.x, a.y, b.x, b.y, C.roofLine);
-  }
-  // 破風と棟
+  // 妻の換気口
+  faceQuad('x', 1.55, 2.05, F2 + 5, F2 + 9, 6, HC.baseDark);
+  for (const h of [F2 + 6, F2 + 7.5]) faceLine('x', 1.55, 2.05, h, h, 6, HC.aluDark);
+  const upperAt = (v: number): [number, number] => [4.0 - 2.2 * v, F2 - 1 + (RIDGE - F2 + 1) * v];
+  tiles(upperAt, -0.4, 6.4, 0, 31, 7, 23, UPPER_HOLES, [22, 3], worn('STAGE5'));
+  // 破風板と棟、両端の鬼瓦
   const e0 = P(6.4, 4.0, F2 - 1);
   const e1 = P(6.4, 1.8, RIDGE);
   const e2 = P(6.4, -0.4, F2 - 1);
-  plotLine(ctx, e0.x, e0.y, e1.x, e1.y, C.roofEdge);
-  plotLine(ctx, e1.x, e1.y, e2.x, e2.y, C.roofEdge);
+  for (const k of [0, 1]) {
+    plotLine(ctx, e0.x + k, e0.y, e1.x + k, e1.y, C.roofEdge);
+    plotLine(ctx, e1.x + k, e1.y, e2.x + k, e2.y, C.roofEdge);
+  }
   const g0 = P(-0.4, 1.8, RIDGE);
-  plotLine(ctx, g0.x, g0.y, e1.x, e1.y, C.roofRidge);
-  plotLine(ctx, g0.x, g0.y - 1, e1.x, e1.y - 1, C.roofRidge);
-  // 欠けた瓦
-  quad([[4.6, 3.1, F2 + 6], [5.0, 3.1, F2 + 6], [5.0, 2.8, F2 + 9], [4.6, 2.8, F2 + 9]], C.bg);
-  // 二階の屋根が戻るまで：欠けた瓦が増え、軒先に苔がついている
-  overlay(worn('STAGE5'), () => {
-    for (const [g, v, w] of UPPER_MOSS) upperRoof(g, g + w, v, v + 0.12, C.moss);
-    for (const [g, v] of UPPER_HOLES) upperRoof(g, g + 0.4, v, v + 0.12, C.bg);
-  });
+  // 棟は区切って描く（崩れて屋根が折れると、棟もいっしょに折れる）
+  for (let k = 0; k < 8; k++) {
+    const a = P(-0.4 + (6.8 * k) / 8, 1.8, RIDGE);
+    const b = P(-0.4 + (6.8 * (k + 1)) / 8, 1.8, RIDGE);
+    for (const [dy, color] of [[1, C.roofEdge], [0, C.roofRidge], [-1, C.roofRidge], [-2, HC.ridgeTop]] as const) plotLine(ctx, a.x, a.y + dy, b.x, b.y + dy, color);
+  }
+  for (const e of [g0, e1]) {
+    ctx.fillStyle = HC.oni;
+    ctx.fillRect(e.x - 2, e.y - 5, 5, 5);
+    ctx.fillStyle = HC.ridgeTop;
+    ctx.fillRect(e.x - 2, e.y - 5, 5, 1);
+    ctx.fillRect(e.x - 2, e.y - 4, 1, 3);
+  }
+  // テレビの八木アンテナ（崩れて二階が潰れはじめたら、倒れてガレキの中。rubble が描く）：棟に立つ柱の上に、手前へ向けた横棒（ブーム）を渡し、横向きの素子を並べる。
+  // 奥の端に長い反射器（2本）、まん中に給電部の箱、手前へいくほど短い導波器。柱は支線で棟に留める。二階が戻るまでは傾いている
+  if ((look.collapse ?? 0) < 0.42) {
+    const lean = worn('STAGE5') > 0.5 ? 0.35 : (look.collapse ?? 0) * 1.4;
+    const MAST = 15;
+    const foot: [number, number, number] = [1.2, 1.8, RIDGE];
+    const top: [number, number, number] = [1.2 + lean, 1.8, RIDGE + MAST + 2];
+    for (const g of [0.6, 1.8]) line([g, 1.8, RIDGE], [1.2 + lean * 0.5, 1.8, RIDGE + 8], HC.gutterDark);
+    line(foot, top, HC.aluDark);
+    const at = (gy: number): [number, number, number] => [1.2 + lean, gy, RIDGE + MAST - (gy - 1.8) * 1.2 * (lean > 0 ? 1 : 0)];
+    const [b0, b1] = [1.0, 2.7];
+    line(at(b0), at(b1), HC.aluDark);
+    for (let i = 0; i < 7; i++) {
+      const gy = b0 + ((b1 - b0) * i) / 6;
+      const w = i === 0 ? 0.5 : i === 1 ? 0.42 : 0.34 - i * 0.02;
+      const c = at(gy);
+      line([c[0] - w, c[1], c[2]], [c[0] + w, c[1], c[2]], HC.alu);
+      if (i === 0) line([c[0] - w, c[1], c[2] + 1.5], [c[0] + w, c[1], c[2] + 1.5], HC.alu);
+      if (i === 1) {
+        const q = P(c[0], c[1], c[2]);
+        ctx.fillStyle = HC.baseDark;
+        ctx.fillRect(q.x - 1, q.y, 2, 2);
+      }
+    }
+  }
+  // 二階の軒どいと、下屋へ落とす縦どい
+  quad([[-0.4, 4.05, F2 - 2], [6.4, 4.05, F2 - 2], [6.4, 4.05, F2 - 3.4], [-0.4, 4.05, F2 - 3.4]], HC.gutter);
+  line([-0.4, 4.05, F2 - 3.4], [6.4, 4.05, F2 - 3.4], HC.gutterDark);
+  line([6.35, 4.05, F2 - 3], [6.35, 4.05, 28], HC.gutter);
 
   // 少女（ベランダ）。床の上、手すりより奥に描く。屋根のあとに描くのは、少女が軒より背が高く、軒の下で頭が欠けないように
   // （戸口より奥にいるあいだは見えないので、二階の壁や軒の前に出ることはない）
   const pose = girlPose(t, sprites, !!look.calm);
   if (pose) drawGirl(ctx, pose, P, look.calm ? 0 : auraAt(t));
 
-  // ベランダの手すり
-  for (let i = 0; i <= 8; i++) {
-    const g = 1.7 + (2.6 * i) / 8;
-    const a = P(g, BALCONY_FRONT, BALCONY_H);
-    const b = P(g, BALCONY_FRONT, BALCONY_H + 8);
-    plotLine(ctx, a.x, a.y, b.x, b.y, C.rail);
+  // ---- ベランダの手すり（アルミ）：太い笠木、細い縦の格子、柱。傷んでいるあいだは錆が浮き、格子が一本抜けている
+  const wornB = worn('STAGE5');
+  for (let i = 0; i <= 16; i++) {
+    if (wornB > 0.5 && i === 11) continue;
+    const g = 1.7 + (2.6 * i) / 16;
+    line([g, BALCONY_FRONT, BALCONY_H + 1], [g, BALCONY_FRONT, BALCONY_H + 8], i % 8 === 0 ? HC.alu : HC.aluDark);
   }
-  for (const g of [F2_FRONT + 0.4, F2_FRONT + 0.8]) {
-    const a = P(4.3, g, BALCONY_H);
-    const b = P(4.3, g, BALCONY_H + 8);
-    plotLine(ctx, a.x, a.y, b.x, b.y, C.rail);
+  for (let k = 1; k < 8; k++) {
+    const gy = F2_FRONT + ((BALCONY_FRONT - F2_FRONT) * k) / 8;
+    line([4.3, gy, BALCONY_H + 1], [4.3, gy, BALCONY_H + 8], HC.aluDark);
   }
-  const r0 = P(1.7, BALCONY_FRONT, BALCONY_H + 9);
-  const r1 = P(4.3, BALCONY_FRONT, BALCONY_H + 9);
-  const r2 = P(4.3, F2_FRONT, BALCONY_H + 9);
-  plotLine(ctx, r0.x, r0.y, r1.x, r1.y, C.rail);
-  plotLine(ctx, r1.x, r1.y, r2.x, r2.y, C.rail);
+  line([1.7, BALCONY_FRONT, BALCONY_H + 1], [4.3, BALCONY_FRONT, BALCONY_H + 1], HC.aluDark);
+  line([1.7, BALCONY_FRONT, BALCONY_H + 8], [4.3, BALCONY_FRONT, BALCONY_H + 8], HC.aluDark);
+  line([1.7, BALCONY_FRONT, BALCONY_H + 9], [4.3, BALCONY_FRONT, BALCONY_H + 9], HC.railTop);
+  line([4.3, BALCONY_FRONT, BALCONY_H + 8], [4.3, F2_FRONT, BALCONY_H + 8], HC.aluDark);
+  line([4.3, BALCONY_FRONT, BALCONY_H + 9], [4.3, F2_FRONT, BALCONY_H + 9], HC.railTop);
+  overlay(wornB, () => {
+    for (const [g, h] of [[2.1, 9], [3.4, 9], [4.0, 5], [2.8, 3]]) {
+      const q = P(g, BALCONY_FRONT, BALCONY_H + h);
+      ctx.fillStyle = HC.rust;
+      ctx.fillRect(q.x, q.y, 2, 1);
+    }
+  });
 
+  // ---- 右の壁を這い上がる蔦（二階が戻るまで）：地面から何本ものつるが、窓のあいだを上る。葉の房は下ほど密
+  overlay(worn('STAGE5'), () => {
+    for (let v = 0; v < 6; v++) {
+      let gy = 2.4 + v * 0.16;
+      const top = 18 + hash(v + 640) * 28;
+      for (let h = 0; h < top; h += 2) {
+        // 上へいくほど横へ広がる
+        const spread = 0.12 + h / 120;
+        gy = Math.min(3.15 + spread, Math.max(2.35 - spread * 0.5, gy + (hash(v * 50 + h + 650) - 0.5) * 0.22));
+        const q = P(6, gy, h);
+        ctx.fillStyle = C.woodDark;
+        ctx.fillRect(q.x, q.y, 1, 2);
+        if (hash(v * 70 + h + 660) < 0.75 - h / 80) {
+          const k = hash(v * 90 + h + 670);
+          ctx.fillStyle = k < 0.35 ? C.ivyLight : k < 0.75 ? C.ivy : '#5a7a3a';
+          const side = hash(v + h + 680) < 0.5 ? -2 : 1;
+          ctx.fillRect(q.x + side, q.y, 2, 1);
+          ctx.fillRect(q.x + side + (side < 0 ? 0 : 1), q.y - 1, 1, 1);
+        }
+      }
+    }
+  });
 }
 
 /** ベランダの少女の奥行きの位置（グリッド）。家に入ったあとは戸口の奥 */
@@ -1100,7 +1613,7 @@ function drawGirl(ctx: CanvasRenderingContext2D, pose: { gy: number; img: HTMLCa
 
 /**
  * 少女を包む青い光と、空から挙げた手へ降りてくる光線。光線は beamIn のあいだに上から降りてきて手に届き、
- * 届いているあいだは光の粒が光線の中を手へ流れ落ちる。beamOut のあいだに上の端が手まで降りてきて消える
+ * 届いているあいだは光の粒が光線の中を手へ流れ落ちる。beamOut のあいだに、下の端が手もとから空へ昇っていって消える
  */
 function girlLight(ctx: CanvasRenderingContext2D, stand: P, at: P, L: number, aura: number, t: number): void {
   // まとう光：少女のいる所（家に入っていくと、その奥）を中心に
@@ -1114,8 +1627,10 @@ function girlLight(ctx: CanvasRenderingContext2D, stand: P, at: P, L: number, au
   const sky = -8;
   const [i0, i1] = ENDING.beamIn;
   const [o0, o1] = ENDING.beamOut;
-  const bottom = Math.round(sky + (hand.y - sky) * clamp01((t - i0) / (i1 - i0)));
-  const top = Math.round(sky + (hand.y - sky) * clamp01((t - o0) / (o1 - o0)));
+  // 下の端：降りてきて手に届き、止むときは手もとから空へ昇っていく
+  const out = clamp01((t - o0) / (o1 - o0));
+  const bottom = Math.round(sky + (hand.y - sky) * Math.min(clamp01((t - i0) / (i1 - i0)), 1 - out));
+  const top = sky;
   if (bottom > top) {
     const w = 1 + Math.round(L * 3);
     ctx.globalAlpha = 0.4 + L * 0.5;
@@ -1123,9 +1638,9 @@ function girlLight(ctx: CanvasRenderingContext2D, stand: P, at: P, L: number, au
     ctx.fillRect(hand.x - Math.floor(w / 2), top, w, bottom - top);
     ctx.fillStyle = C.lightCore;
     ctx.fillRect(hand.x, top, 1, bottom - top);
-    // 降りてくる先端は明るく
+    // 降りてくる先端と、昇っていく下の端は明るく
     ctx.globalAlpha = 1;
-    if (t < i1) ctx.fillRect(hand.x - 1, bottom - 2, 3, 2);
+    if (t < i1 || out > 0) ctx.fillRect(hand.x - 1, bottom - 2, 3, 2);
     // 光線の中を流れ落ちる光の粒（降ってくる向きが分かるように）
     ctx.fillStyle = C.lightCore;
     for (let i = 0; i < 6; i++) {
@@ -1215,7 +1730,7 @@ function dust(ctx: CanvasRenderingContext2D, t: number): void {
       for (let dx = -rx; dx <= rx; dx++) {
         const d = (dx / rx) ** 2 + (dy / ry) ** 2;
         if (d > 1) continue;
-        const density = (1 - d) * (1 - k) * 1.6;
+        const density = (1 - d) * (1 - k) * 0.9;
         if (hash((dx + 97) * 131 + (dy + 53) * 17 + seed) >= density) continue;
         ctx.fillStyle = dy < -ry / 3 ? C.dustLight : C.dust;
         ctx.fillRect(cx + dx, cy + dy, 1, 1);
@@ -1224,74 +1739,127 @@ function dust(ctx: CanvasRenderingContext2D, t: number): void {
   }
 }
 
-/** 崩れる間に屋根から落ちていく瓦のかけら */
+/** 滑り落ちる瓦：いつ（落ちはじめ）、どの軒から（gx、下屋か二階か）、どこに落ちるか（lx, ly） */
+const SLIDING: { t0: number; gx: number; upper: boolean; lx: number; ly: number }[] = (() => {
+  const out: { t0: number; gx: number; upper: boolean; lx: number; ly: number }[] = [];
+  // きしみはじめに数枚、潰れるたびに軒からまとめて
+  [ENDING.collapse[0] + 0.3, ...JERKS].forEach((j, k) => {
+    for (let i = 0; i < (k === 0 ? 5 : 14); i++) {
+      const s = k * 60 + i + 2000;
+      const gx = -0.3 + hash(s) * 6.6;
+      out.push({ t0: j + hash(s + 1) * (k === 0 ? 1 : 0.5), gx, upper: hash(s + 2) < 0.35, lx: gx + (hash(s + 3) - 0.5) * 0.8, ly: 6.15 + hash(s + 4) * 0.35 });
+    }
+  });
+  return out;
+})();
+const SLIDE_SEC = 0.45;
+
+/** 崩れる間に軒から滑り落ちる瓦。落ちた瓦は、手前の土に割れて散らばったまま残る */
 function fallingTiles(ctx: CanvasRenderingContext2D, t: number): void {
-  for (let j = 0; j < JERKS.length; j++) {
-    for (let i = 0; i < 10; i++) {
-      const s = j * 50 + i;
-      const age = t - JERKS[j] - hash(s) * 0.3;
-      if (age < 0 || age > 1.2) continue;
-      const gx = hash(s + 1) * 7 - 0.5;
-      const gy = 4 + hash(s + 2) * 1.5;
-      const x = Math.round(OX + (gx - gy) * 12 + (hash(s + 3) - 0.5) * 20 * age);
-      const y = Math.round(OY + (gx + gy) * 6 - 40 * (1 - j * 0.3) + 80 * age * age);
+  const pt = (gx: number, gy: number, h: number) => {
+    const d = deform(gx, gy, h, collapseAt(t));
+    return { x: Math.round(OX + (d.gx - d.gy) * 12), y: Math.round(OY + (d.gx + d.gy) * 6 - d.h) };
+  };
+  const ground = (gx: number, gy: number) => ({ x: Math.round(OX + (gx - gy) * 12), y: Math.round(OY + (gx + gy) * 6) });
+  for (const [i, f] of SLIDING.entries()) {
+    const age = t - f.t0;
+    if (age < 0) continue;
+    const end = ground(f.lx, f.ly);
+    if (age < SLIDE_SEC) {
+      // 軒の先から、放物線を描いて落ちる
+      const a = f.upper ? pt(f.gx, 4.05, F2 - 2) : pt(f.gx, 5.45, F1 - 3);
+      const u = age / SLIDE_SEC;
+      const x = Math.round(a.x + (end.x - a.x) * u);
+      const y = Math.round(a.y + (end.y - a.y) * u * u);
+      const [w, h] = i % 2 ? [4, 2] : [2, 3];
       ctx.fillStyle = C.rubbleTile;
-      ctx.fillRect(x, y, 3, 2);
+      ctx.fillRect(x - 1, y - 1, w, h);
+      ctx.fillStyle = C.roofRidge;
+      ctx.fillRect(x - 1, y - 1, w, 1);
+    } else {
+      // 割れて土の上に
+      fillDiamond(ctx, end.x, end.y - 1, 6, 3, C.rubbleTile);
+      ctx.fillStyle = C.roofRidge;
+      ctx.fillRect(end.x - 2, end.y - 2, 2, 1);
+      if (i % 3 === 0) {
+        ctx.fillStyle = C.rubbleTile;
+        ctx.fillRect(end.x + 3, end.y, 2, 1);
+      }
     }
   }
 }
 
-/** ガレキ：家が潰れていくにつれて現れ、最後はガレキの山だけが残る */
-function rubble(ctx: CanvasRenderingContext2D, c: number): void {
-  if (c < 0.5) return;
+/**
+ * ガレキ：家が潰れていくにつれて、潰れた階のまわりへこぼれ出る（板、梁、漆喰の塊、瓦）。
+ * 'back' は家より奥（家の前に描くと手前の壁にかぶる所）、'front' は手前と右の土の上。
+ * 最後は手前に、折れた柱が突き出し、倒れたアンテナやベランダの手すりの切れ端がのぞく
+ */
+function rubble(ctx: CanvasRenderingContext2D, c: number, side: 'back' | 'front'): void {
+  if (c <= 0) return;
   const pt = (gx: number, gy: number, h: number): P => ({ x: Math.round(OX + (gx - gy) * 12), y: Math.round(OY + (gx + gy) * 6 - h) });
-  // 山：下の層から。層ごとに手前の2面と上面
-  const grow = clamp01((c - 0.5) / 0.45);
-  for (let k = 0; k < MOUND_LAYERS; k++) {
-    if (grow < k / MOUND_LAYERS) break;
-    const { rx, ry } = moundSize(k);
-    const h0 = k * MOUND_STEP;
-    const h1 = h0 + MOUND_STEP;
-    const [n, e, s, w] = [
-      { x: MOUND_C.x, y: MOUND_C.y - ry },
-      { x: MOUND_C.x + rx, y: MOUND_C.y },
-      { x: MOUND_C.x, y: MOUND_C.y + ry },
-      { x: MOUND_C.x - rx, y: MOUND_C.y },
-    ];
-    const at = (q: { x: number; y: number }, h: number) => pt(q.x, q.y, h);
-    fillQuad(ctx, [at(w, h1), at(s, h1), at(s, h0), at(w, h0)], k % 2 ? C.rubblePlasterDark : C.rubbleWoodDark);
-    fillQuad(ctx, [at(s, h1), at(e, h1), at(e, h0), at(s, h0)], C.lotR);
-    fillQuad(ctx, [at(n, h1), at(e, h1), at(s, h1), at(w, h1)], k % 2 ? C.rubbleWoodDark : C.rubblePlasterDark);
-  }
+  const stages = stagesOf(c);
+  const progress = [stages.p1, stages.p2, stages.p3];
   for (const p of RUBBLE) {
-    if (c < p.appear) continue;
+    const front = p.gy > 5 || p.gx > 6;
+    if ((side === 'front') !== front) continue;
+    if (progress[p.stage] < p.appear) continue;
     const ax = p.axis === 'x' ? 1 : 0;
     const ay = 1 - ax;
     const a = pt(p.gx, p.gy, p.h);
     const b = pt(p.gx + ax * p.len, p.gy + ay * p.len, p.h + p.tilt);
     switch (p.kind) {
       case 'tile':
-        fillDiamond(ctx, a.x, a.y - 2, 8, 4, C.rubbleTile);
-        fillDiamond(ctx, a.x, a.y - 3, 6, 3, C.roofRidge);
+        fillDiamond(ctx, a.x, a.y - 2, 7, 3, C.rubbleTile);
+        ctx.fillStyle = C.roofRidge;
+        ctx.fillRect(a.x - 2, a.y - 3, 3, 1);
         break;
       case 'plank':
         fillQuad(ctx, [a, b, { x: b.x, y: b.y + 2 }, { x: a.x, y: a.y + 2 }], C.rubbleWood);
+        plotLine(ctx, a.x, a.y + 2, b.x, b.y + 2, C.rubbleWoodDark);
         break;
       case 'beam':
         fillQuad(ctx, [a, b, { x: b.x, y: b.y + 3 }, { x: a.x, y: a.y + 3 }], C.rubbleWoodDark);
         plotLine(ctx, a.x, a.y, b.x, b.y, C.rubbleWood);
+        // 折れた端のささくれ
+        ctx.fillStyle = C.dustLight;
+        ctx.fillRect(b.x, b.y, 1, 2);
         break;
       case 'chunk':
-        fillPrismSides(ctx, a.x, a.y - 6, 10, 5, 4, C.rubblePlaster, C.rubblePlasterDark);
-        fillDiamond(ctx, a.x, a.y - 6, 10, 5, C.rubblePlaster);
+        fillPrismSides(ctx, a.x, a.y - 4, 8, 4, 3, C.rubblePlaster, C.rubblePlasterDark);
+        fillDiamond(ctx, a.x, a.y - 4, 8, 4, C.rubblePlaster);
+        ctx.fillStyle = C.lath;
+        ctx.fillRect(a.x - 1, a.y - 5, 3, 1);
         break;
     }
   }
-  // 山から突き出した柱が数本
-  if (c < 0.9) return;
-  for (const [gx, gy, len, lean] of [[2.2, 2.4, 22, 9], [4.0, 1.9, 18, -7], [3.4, 3.6, 14, 11]] as const) {
-    const base = pt(gx, gy, moundHeight(gx, gy));
+  if (side === 'back' || stages.p3 < 0.5) return;
+  // 屋根の下から手前へ突き出した、折れた柱と梁
+  for (const [gx, gy, len, lean] of [[0.4, 5.9, 12, -8], [3.0, 6.0, 9, 7], [5.6, 6.0, 13, 9], [6.6, 2.0, 10, 6], [6.5, 4.4, 8, -5]] as const) {
+    const base = pt(gx, gy, 0);
     plotLine(ctx, base.x, base.y, base.x + lean, base.y - len, C.rubbleWoodDark);
     plotLine(ctx, base.x + 1, base.y, base.x + lean + 1, base.y - len, C.rubbleWood);
+    ctx.fillStyle = C.dustLight;
+    ctx.fillRect(base.x + lean, base.y - len - 1, 2, 1);
+  }
+  // 倒れた八木アンテナ（棟から落ちて、右の土の上に）
+  const a0 = pt(6.9, 0.6, 1);
+  const a1 = pt(7.2, 2.4, 1);
+  plotLine(ctx, a0.x, a0.y, a1.x, a1.y, HC.aluDark);
+  for (let i = 0; i < 6; i++) {
+    const q = pt(6.9 + 0.05 * i, 0.6 + 0.3 * i, 1);
+    plotLine(ctx, q.x - 3, q.y - 2, q.x + 3, q.y + 1, HC.alu);
+  }
+  // ベランダの手すりの切れ端（手前の土に、くの字に折れて）
+  const r0 = pt(2.2, 6.45, 1);
+  const r1 = pt(3.2, 6.45, 4);
+  const r2 = pt(3.9, 6.45, 1);
+  plotLine(ctx, r0.x, r0.y, r1.x, r1.y, HC.railTop);
+  plotLine(ctx, r1.x, r1.y, r2.x, r2.y, HC.railTop);
+  for (let i = 1; i < 8; i++) {
+    const u = i / 8;
+    const [qa, qb, k] = u < 0.55 ? [r0, r1, u / 0.55] : [r1, r2, (u - 0.55) / 0.45];
+    const x = Math.round(qa.x + (qb.x - qa.x) * k);
+    const y = Math.round(qa.y + (qb.y - qa.y) * k);
+    plotLine(ctx, x, y, x, y + 3, HC.aluDark);
   }
 }

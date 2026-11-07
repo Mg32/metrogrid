@@ -39,7 +39,7 @@ L.score('spring', [16, 46], [19, 50], [24, 50], [9, 50]);
 L.thing('sandals', [3, 60]);
 L.thing('basket_empty', [5, 60]);
 L.thing('kitchen_dark', [6, 60]);
-L.thing('scuff', [5, 58]);
+L.thing('step', [5, 58]);
 
 // ── 夏：車庫と物置の屋根（高さ3）。物干し竿の下をくぐる近道と、崖ぎわの寄り道
 L.ramp([[32, 46], [32, 45]], 2.5, 3, '.', 'g');
@@ -82,21 +82,30 @@ for (let x = 5; x <= 23; x++) for (let y = 5; y <= 15; y++) if (!L.has(x, y)) L.
 L.seg([12, 3], [12, 3], '.', 8);
 L.put('G', [12, 3]);
 L.thing('window', [12, 2]);
-L.thing('sticker', [11, 2]);
+L.thing('height_marks', [10, 2]);
 L.thing('seat_snow', [21, 3]);
 L.thing('telescope_snow', [22, 3]);
 for (let x = 7; x <= 17; x++) for (const y of [1, 2]) if (!L.scenery.has(`${x},${y}`)) L.scenery.set(`${x},${y}`, { kind: 'p', h: 8 });
 
 // ── 粗密：生活の物が密に溜まる場所と、何もない開けた場所をはっきり分ける
 // 春：勝手口まわりと物干し台は、物がひしめく（密）
-L.thing('pot', [3, 59], [5, 59], [6, 58], [2, 57], [5, 57], [3, 55], [5, 54], [2, 54]);
-L.thing('bucket', [6, 59]);
-L.thing('ac', [7, 58], [9, 56]);
-L.thing('crate', [7, 57], [3, 58]);
+// 勝手口のすぐまわりは、種類の違う物を少しずつ（同じ植木鉢を並べすぎない）
+L.thing('pot', [2, 54], [2, 57]);
+L.thing('flower_pot', [5, 54]);
+L.thing('bucket', [6, 58]);
+L.thing('ac', [9, 56]);
+L.thing('crate', [7, 57]);
+L.thing('broom', [5, 57]);
+L.thing('umbrella_stand', [3, 56]);
+// 入り口のまわりの植物：若木、伸びた草、植え込み、雑草（同じ鉢を並べず、地面から生えた物をまぜる）
+L.thing('sapling', [1, 55]);
+L.thing('tallgrass', [0, 56]);
+L.thing('plant', [1, 58], [7, 55]);
+L.thing('weed', [5, 59]);
 L.thing('laundry', [10, 49], [16, 51]);
 L.thing('pot', [10, 52], [16, 52], [10, 48], [16, 48], [15, 53]);
-L.thing('pot', [20, 56], [24, 56], [9, 47], [26, 54]);
-L.thing('antenna', [18, 53], [25, 52]);
+L.thing('pot', [20, 56], [24, 56], [26, 54]);
+L.thing('antenna', [19, 53], [25, 52]);
 // 夏：庭木の梢が屋根に覆いかぶさる（密）
 L.thing('canopy', [9, 42], [11, 40], [8, 38], [16, 42], [19, 40], [24, 42], [27, 39], [29, 42], [17, 35], [10, 34], [30, 33], [25, 36]);
 L.thing('ac', [28, 44]);
@@ -143,7 +152,6 @@ L.score('autumn2', [28, 38], [26, 34], [28, 28]);
 roof(21, 27, 29, 41, 3.4);
 L.trimScenery(1, (kind) => kind === 's' || kind === 'p');
 L.thing('leaf', [9, 37], [19, 43], [11, 29], [21, 31], [31, 40], [31, 27]);
-L.thing('dry_persimmon', [9, 33]);
 L.thing('kite_tangled', [31, 43]);
 L.thing('antenna', [19, 25]);
 L.thing('crate', [21, 37]);
@@ -153,9 +161,8 @@ L.thing('persimmon_tree', [27, 31]);
 L.score('cliff', [25, 74]);
 L.thing('cicada', [24, 75]);
 L.thing('sudare', [31, 81]);
-L.thing('furin', [29, 81]);
-L.thing('katorisenko', [30, 80]);
-L.thing('dry_persimmon', [19, 59], [4, 28], [4, 24]);
+L.thing('furin', [29, 82]);
+L.thing('katorisenko', [31, 82]);
 L.thing('leaves_pile', [17, 59], [5, 61], [9, 60]);
 L.thing('crate', [18, 58]);
 L.thing('icicle', [30, 15]);

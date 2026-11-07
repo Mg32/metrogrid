@@ -5,8 +5,11 @@
  *   npm run shot                                 既定の場面をすべて
  *   npm run shot -- --view 12,5,40 --name foo    任意の位置と tick（?view と同じ）。--stage STAGE2 でステージを選ぶ
  *   npm run shot -- --scale 1                    等倍で撮る
+ *   npm run shot -- --query 'ending=24;total=1' --name foo   任意の URL のクエリで撮る（& の代わりに ; で区切れる。Windows のシェル用）
  *   npm run shot -- --only hub                   名前がそれで始まる場面だけ
  *   npm run shot -- --lang en                    画面の言語（既定は日本語。名前が -en で終わる場面は英語で撮る）
+ *   npm run shot -- --labels                     物に番号と種類の札を出して撮る（?labels）
+ *   npm run shot -- --only gallery               闇に浮かぶ物の一覧（gallery.html）だけ
  */
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -17,17 +20,21 @@ import { createServer } from 'vite';
 const { values: args } = parseArgs({
   options: {
     view: { type: 'string' },
+    query: { type: 'string' },
     name: { type: 'string', default: 'custom' },
     scale: { type: 'string', default: '2' },
     seed: { type: 'string', default: '1' },
     stage: { type: 'string' },
     only: { type: 'string' },
     lang: { type: 'string', default: 'ja' },
+    labels: { type: 'boolean', default: false },
   },
 });
 
 /** 場面名と URL のクエリ。view は「X,Y,TICK」 */
-const SCENES: [string, string][] = args.view
+const SCENES: [string, string][] = args.query
+  ? [[args.name, args.query.replaceAll(';', '&')]]
+  : args.view
   ? [[args.name, `view=${args.view}${args.stage ? `&stage=${args.stage}` : ''}`]]
   : [
       ['title', 'title=0.5'],
@@ -43,6 +50,8 @@ const SCENES: [string, string][] = args.view
       ['home-1', 'home=STAGE5&title=1.2&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4'],
       ['home-2', 'home=STAGE5&title=2.2&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4'],
       ['home-3', 'home=STAGE5&title=3.5&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4'],
+      ['home-4', 'home=STAGE5&title=4.3&cleared=TUTORIAL,STAGE1,STAGE2,STAGE3,STAGE4'],
+      ['home-stage1', 'home=STAGE1&title=4.75&cleared=TUTORIAL,STAGE1'],
       ['tutorial-stop', 'stage=TUTORIAL&view=11,13,60'],
       ['tutorial-stop-on', 'stage=TUTORIAL&view=11,11,60'],
       // STAGE 1：家の前の路地と公園（昼 → 午後 → 日没前）
@@ -110,6 +119,8 @@ const SCENES: [string, string][] = args.view
       ['ending-38-en', 'ending=38&total=48210&lang=en'],
       ...[1, 3.5, 6, 9, 11, 13, 16, 20].map((t): [string, string] => [`ending-calm-${t}`, `ending=${t}&total=0`]),
       ['ending-calm-20-en', 'ending=20&total=0&lang=en'],
+      // 闇に浮かぶ物の一覧（gallery.html。画面の大きさではなく一覧の大きさで撮る）
+      ['gallery', ''],
     ];
 
 const scale = Number(args.scale);
@@ -124,10 +135,16 @@ const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'msed
 try {
   const page = await browser.newPage({ viewport: { width: 288 * scale, height: 288 * scale }, deviceScaleFactor: 1 });
   for (const [name, query] of SCENES.filter(([n]) => !args.only || n.startsWith(args.only))) {
-    const lang = query.includes('lang=') ? '' : `&lang=${args.lang}`;
-    await page.goto(`${base}?seed=${args.seed}&${query}${lang}`);
-    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
     const file = path.join(outDir, `${name}.png`);
+    if (name === 'gallery') {
+      await page.goto(`${base}gallery.html?still&scale=${scale}`);
+      await page.locator('canvas').screenshot({ path: file });
+      console.log(path.relative(process.cwd(), file));
+      continue;
+    }
+    const lang = query.includes('lang=') ? '' : `&lang=${args.lang}`;
+    await page.goto(`${base}?seed=${args.seed}&${query}${lang}${args.labels ? '&labels' : ''}`);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
     await page.screenshot({ path: file });
     console.log(path.relative(process.cwd(), file));
   }

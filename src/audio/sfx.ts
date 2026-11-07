@@ -57,7 +57,7 @@ export class Sfx {
   /**
    * エンディングの音。少女の光が強まるにつれて低いうなりと高い響きが上がっていき、得点を使い切っても高い響きはさらに高くまで上がって、
    * ふっと止む（climax）。少女が家に入って戸を閉めたあと、何かが発動した音（澄んだ金属の響きと低い衝撃。エコーが尾を引く）が鳴り（trigger）、
-   * 鳴りやんで 2 秒ほど静まったあと、轟音が聞こえはじめる（rumble）。家が潰れるたびに崩れる音。轟音は揺れが収まる頃に消える。times はエンディングの時刻（ENDING）、from はいま何秒目か
+   * 鳴りやんで 2 秒ほど静まったあと、轟音が聞こえはじめる（rumble）。家が潰れるたびに崩れる音。轟音は砂埃が収まる頃（settle）に消える。times はエンディングの時刻（ENDING）、from はいま何秒目か
    */
   ending(times: { light: number[]; climax: number; trigger: number; rumble: number; jerks: number[]; settle: number }, from = 0): void {
     const file = soundNow('sfx/ending');

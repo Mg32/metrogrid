@@ -69,6 +69,7 @@ const cleared = devCleared !== null ? new Set(devCleared.split(',').filter(Boole
 const save = () => {
   if (devCleared === null) saveCleared(cleared);
 };
+renderer.devLabels = params.has('labels');
 renderer.portalNote = (name) => (cleared.has(name) ? msg().cleared : null);
 /** これまでに溜めた得点（エンディングで使われる） */
 const devTotal = params.get('total');
@@ -187,6 +188,11 @@ let fixedClearSec: number | null = null;
 let confirmYes = false;
 /** 何の確認か：二階へ昇る（エンディングへ）か、すべての記録を消して最初からやり直すか */
 let confirmKind: 'upstairs' | 'reset' = 'upstairs';
+/** 二階への確認が現れた時刻と、閉じた時刻（どちらも秒）。現れるときと閉じるときに CONFIRM_FADE 秒かけて濃く・薄くなる */
+let confirmAt = 0;
+let confirmClosedAt = -Infinity;
+const CONFIRM_FADE = 0.35;
+const nowSec = () => performance.now() / 1000;
 
 /** タイトルの RESET：記録を消すかを確かめる */
 function openReset(): void {
@@ -554,6 +560,7 @@ function update(): void {
     }
     if (confirmYes !== was) sfx.select();
     const no = esc || input.consumePressed('KeyN') || (start && !confirmYes);
+    if (confirmKind === 'upstairs' && (((start || yes) && confirmYes) || no)) confirmClosedAt = nowSec();
     if ((start || yes) && confirmYes) {
       if (confirmKind === 'upstairs') goUpstairs();
       else {
@@ -614,6 +621,7 @@ function update(): void {
       input.clearPressed();
       confirmYes = false;
       confirmKind = 'upstairs';
+      confirmAt = nowSec();
       scene = 'confirm';
     } else if (sim.status === 'portal') {
       const target = STAGES[sim.portal!];
@@ -681,8 +689,11 @@ function draw(): void {
     if (scene === 'loading') renderer.loading(performance.now() / 1000 - loadingAt);
   }
 
+  // 二階への確認を閉じたあと（昇る・昇らない）：選んだ答えのまま薄れて消える
+  const closing = (nowSec() - confirmClosedAt) / CONFIRM_FADE;
+  if (confirmKind === 'upstairs' && scene !== 'confirm' && closing < 1) renderer.confirm(msg().upstairs, null, confirmYes, 1 - closing);
   if (scene === 'confirm' && confirmKind === 'upstairs') {
-    renderer.confirm(msg().upstairs, null, confirmYes);
+    renderer.confirm(msg().upstairs, null, confirmYes, (nowSec() - confirmAt) / CONFIRM_FADE);
   } else if (scene === 'confirm') {
     drawTitle();
     renderer.confirm(msg().erase, msg().eraseNote, confirmYes);
@@ -708,7 +719,9 @@ function draw(): void {
   if (scene === 'play' && steer) renderer.stick(steer);
   // マウスが上にあるボタンは明るくし、カーソルを指の形にする（ずらして歩いているあいだは出さない）
   const hovered = hoverAt && !steer ? buttonAt(hoverAt) : undefined;
-  renderer.buttons(screenButtons().map((b) => (hovered && b.key === hovered.key ? { ...b, hover: true } : b)));
+  // 二階への確認のボタンは、確認の文と一緒に濃くなる
+  const buttonFade = scene === 'confirm' && confirmKind === 'upstairs' ? (nowSec() - confirmAt) / CONFIRM_FADE : 1;
+  renderer.buttons(screenButtons().map((b) => (hovered && b.key === hovered.key ? { ...b, hover: true } : b)), buttonFade);
   canvas.style.cursor = hovered ? 'pointer' : '';
   renderer.present();
 }

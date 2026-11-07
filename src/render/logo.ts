@@ -141,35 +141,35 @@ export function logoHeight(text: string, scale: number): number {
   return (lines.length * lineH + (lines.length - 1) * 3) * scale;
 }
 
-/** ロゴを、上端 y・左右の真ん中 cx に描く（scale 倍。整数のドットだけ） */
-export function drawLogo(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number, scale: number, color: string): void {
+/** ロゴの字ひとつ：字、左上（scale 倍したドット）、字の形、何語目か（空白で区切る） */
+export interface LogoGlyph {
+  ch: string;
+  x: number;
+  y: number;
+  rows: string[];
+  word: number;
+}
+
+/** ロゴの字の並び（上端 y・左右の真ん中 cx。scale 倍） */
+export function logoGlyphs(text: string, cx: number, y: number, scale: number): LogoGlyph[] {
   const lines = logoLines(text);
   const lineH = Math.max(...[...text].map((ch) => glyph(ch)?.length ?? 0));
-  ctx.fillStyle = color;
+  const out: LogoGlyph[] = [];
+  let word = 0;
   lines.forEach((line, i) => {
     let x = Math.round(cx - (lineWidth(line) * scale) / 2);
     const top = y + i * (lineH + 3) * scale;
     for (const ch of line) {
       if (ch === ' ') {
         x += (SPACE + GAP) * scale;
+        word++;
         continue;
       }
       const g = glyph(ch);
       if (!g) continue;
-      g.forEach((row, r) => {
-        // 横に続くドットはまとめて描く
-        for (let c = 0; c < row.length; ) {
-          if (row[c] !== '#') {
-            c++;
-            continue;
-          }
-          let e = c;
-          while (row[e] === '#') e++;
-          ctx.fillRect(x + c * scale, top + r * scale, (e - c) * scale, scale);
-          c = e;
-        }
-      });
+      out.push({ ch, x, y: top, rows: g, word });
       x += (g[0].length + GAP) * scale;
     }
   });
+  return out;
 }

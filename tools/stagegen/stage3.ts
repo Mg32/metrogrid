@@ -41,7 +41,7 @@ bars.push([10, 38], [34, 30], [30, 33], [13, 40], [30, 27]);
 L.score('mixed', [13, 40], [10, 34], [34, 31], [28, 27]);
 L.thing('midtree', [9, 29]);
 L.thing('fadedsign', [15, 30], [26, 36]);
-L.thing('post_faded', [20, 31]);
+L.thing('post_faded', [20, 30]);
 L.thing('construct', [22, 38]);
 L.thing('bike', [13, 27]); // 2組目の家族：自転車
 L.thing('girl_small', [37, 30]); // 人影①：小さな女の子（古い石畳の切れ端の上）
@@ -111,7 +111,7 @@ L.sceneryRect(36, 29, 37, 30, 'g');
 L.sceneryRect(36, 6, 37, 7, 'g');
 
 // ── モチーフ：ゴールの居間の窓の下に、そろえた小さな運動靴と門灯
-L.thing('home_window', [18, 1]);
+L.thing('home_window', [17, 1]);
 L.thing('kid_shoes', [17, 2]);
 L.thing('gate_lamp', [20, 1]);
 // 安全な道を8拍進むごとに1本ずつ通り過ぎる電柱（古い区間は木、新しい区間はコンクリート）
