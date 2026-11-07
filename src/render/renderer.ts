@@ -750,8 +750,16 @@ export class Renderer {
    */
   stick(s: { cx: number; cy: number; x: number; y: number; dir: Dir | null }): void {
     const ctx = this.lctx;
-    const cx = Math.round(s.cx);
-    const cy = Math.round(s.cy);
+    // 指（カーソル）の向きへ、枠が少しだけ寄る（手ごたえ。判定の中心 s.cx, s.cy は動かない）。つまみは枠の外へ出さない
+    const dx = s.x - s.cx;
+    const dy = s.y - s.cy;
+    const d = Math.hypot(dx, dy);
+    const k = d > 0 ? Math.min(d, STICK_RADIUS) / d : 0;
+    const lean = d > 0 ? (Math.min(d, STICK_RADIUS) / STICK_RADIUS) * 2 : 0;
+    const cx = Math.round(s.cx + (d > 0 ? (dx / d) * lean : 0));
+    const cy = Math.round(s.cy + (d > 0 ? (dy / d) * lean * 0.5 : 0));
+    const kx = s.cx + dx * k;
+    const ky = s.cy + dy * k;
     const w = STICK_RADIUS * 2 + 8;
     const h = w / 2;
     const top = cy - h / 2;
@@ -770,7 +778,7 @@ export class Renderer {
       }
     }
     ctx.globalAlpha = 0.7;
-    fillDiamond(ctx, Math.round(s.x), Math.round(s.y) - 3, 12, 6, COLORS.text);
+    fillDiamond(ctx, Math.round(kx), Math.round(ky) - 3, 12, 6, COLORS.text);
     ctx.globalAlpha = 1;
   }
 

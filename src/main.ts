@@ -495,7 +495,8 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (scene === 'play') {
     // 指を置いたところから、ずらした向きへ歩く（マウスでも、押したままずらせば同じ）
-    steer = new Stick(e.pointerId, b.x, b.y);
+    // マウスでは、判定の中心を押したところに留める（タッチでは指についてくる）
+    steer = new Stick(e.pointerId, b.x, b.y, e.pointerType !== 'mouse');
     try {
       canvas.setPointerCapture(e.pointerId);
     } catch {

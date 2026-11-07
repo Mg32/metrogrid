@@ -4,6 +4,7 @@ import type { Dir } from './game/types.ts';
  * タッチで歩く操作：指を置いたところを中心に、指をずらした向きへ歩く（画面のどこに指を置いてもよい。少女を指で隠さずにすむ）。
  * 向きはクォータービューの画面の斜めにそのまま対応する：右上へずらすと up、右下は right、左下は down、左上は left。
  * 指を中心へ戻すと止まる。指を中心から STICK_RADIUS より遠くへずらすと、中心が指についてくる（逆へ切り返しやすいように）。
+ * マウスでは中心は押したところから動かない（follow = false。カーソルが見えていて、押したところへ戻しやすいので）。
  * 座標は 288x288 のバッファのドット
  */
 export const STICK_RADIUS = 18;
@@ -24,9 +25,12 @@ export class Stick {
   y: number;
   dir: Dir | null = null;
   readonly id: number;
+  /** 指が遠くへ離れたとき、中心がついてくるか */
+  readonly follow: boolean;
 
-  constructor(id: number, x: number, y: number) {
+  constructor(id: number, x: number, y: number, follow = true) {
     this.id = id;
+    this.follow = follow;
     this.cx = this.x = x;
     this.cy = this.y = y;
   }
@@ -37,7 +41,7 @@ export class Stick {
     const dx = x - this.cx;
     const dy = y - this.cy;
     const d = Math.hypot(dx, dy);
-    if (d > STICK_RADIUS) {
+    if (this.follow && d > STICK_RADIUS) {
       this.cx = x - (dx / d) * STICK_RADIUS;
       this.cy = y - (dy / d) * STICK_RADIUS;
     }

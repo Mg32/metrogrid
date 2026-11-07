@@ -34,3 +34,14 @@ test('指を遠くへずらすと中心がついてきて、逆へ少し戻す�
   s.move(s.cx - 10, s.cy - 6);
   assert.equal(s.dir, 'left');
 });
+
+test('マウス（follow なし）では、遠くへずらしても判定の中心は押したところのまま', () => {
+  const s = new Stick(1, 100, 100, false);
+  s.move(160, 130);
+  assert.equal(s.cx, 100);
+  assert.equal(s.cy, 100);
+  assert.equal(s.dir, 'right');
+  // 押したところの近くへ戻せば止まる
+  s.move(102, 101);
+  assert.equal(s.dir, null);
+});
