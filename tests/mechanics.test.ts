@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { FLOW_JUMP, FlowHazard } from '../src/game/hazard.ts';
-import { LATE_PRESS_TICKS, Sim } from '../src/game/sim.ts';
+import { EARLY_PRESS_TICKS, LATE_PRESS_TICKS, Sim } from '../src/game/sim.ts';
 import { Stage, type StageDef } from '../src/game/stage.ts';
 import { TICKS_PER_BAR, type Dir } from '../src/game/types.ts';
 
@@ -75,6 +75,33 @@ describe('移動カウント', () => {
     assert.equal(s.x, 1);
     s.step(8, 'right');
     assert.equal(s.x, 2);
+  });
+
+  test('カウントの直前（EARLY_PRESS_TICKS 以内）に押して離しても、カウントでその向きへ1歩進む（先行入力）', () => {
+    const s = mk('#........#', ' S      G ');
+    run(s, 0, 8 - EARLY_PRESS_TICKS, null);
+    run(s, 8 - EARLY_PRESS_TICKS, 8, 'right');
+    s.step(8, null);
+    assert.equal(s.x, 2);
+    // 1回押しただけなので、次のカウントでは進まない
+    run(s, 9, 13, null);
+    assert.equal(s.x, 2);
+  });
+
+  test('先行入力より早く押して離したら進まない', () => {
+    const s = mk('#........#', ' S      G ');
+    run(s, 0, 8 - EARLY_PRESS_TICKS - 1, null);
+    s.step(8 - EARLY_PRESS_TICKS - 1, 'right');
+    run(s, 8 - EARLY_PRESS_TICKS, 9, null);
+    assert.equal(s.x, 1);
+  });
+
+  test('押しっぱなしで歩いていて、カウントの直前に離したら止まる（もう1歩進まない）', () => {
+    const s = mk('#........#', ' S      G ');
+    run(s, 0, 8 - EARLY_PRESS_TICKS, 'right'); // t0, t4 で進む
+    assert.equal(s.x, 3);
+    run(s, 8 - EARLY_PRESS_TICKS, 9, null);
+    assert.equal(s.x, 3);
   });
 
   test('押している向きが複数あれば、進める向きのうち最後に押したものへ進む', () => {

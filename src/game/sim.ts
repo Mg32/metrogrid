@@ -25,6 +25,11 @@ const STUN_TICKS = TICKS_PER_BEAT;
  * 次のカウントまで待たされずにその場で1歩進む（十六分音符1つぶん。高危険のマスはカウントが毎 tick なので関係しない）
  */
 export const LATE_PRESS_TICKS = 1;
+/**
+ * 先行入力（tick）：移動カウントの少し前に方向を押せば、カウントまでに離していても、カウントでその向きへ1歩進む。
+ * 押し始め（前の tick と違う向き）だけを覚える。押しっぱなしで歩いていて拍の少し前に離したときは、止まる（もう1歩進まない）
+ */
+export const EARLY_PRESS_TICKS = 1;
 /** 停止マスで止まっている必要がある時間（1拍） */
 const STOP_TICKS = TICKS_PER_BEAT;
 const MAX_MULTIPLIER = 4;
@@ -69,6 +74,10 @@ export class Sim {
   stillTicks = 0;
   /** 止まっていて（何も押さずに）見送った最後の移動カウントの tick（LATE_PRESS_TICKS の猶予のため） */
   private idleCount = -Infinity;
+  /** 前の tick に押されていた方向（押し始めを見分ける） */
+  private prevHeld: Dir | null = null;
+  /** 先行入力：カウントの前に押し始めた方向と、その tick */
+  private early: { dir: Dir; t: number } | null = null;
 
   score = 0;
   streak = 0;
@@ -188,13 +197,21 @@ export class Sim {
     const onStop = this.stage.cell(this.x, this.y)!.obj?.type === 'stop';
     if (onStop && !held) this.stillTicks++;
 
+    const pressed = held !== null && held !== this.prevHeld;
+    this.prevHeld = held;
     if (!this.stunned && t % this.interval === 0) {
-      if (held) this.tryMove(t, held);
+      // カウントに離していても、直前に押し始めていれば（先行入力）その向きへ
+      const dir = held ?? (this.early && t - this.early.t <= EARLY_PRESS_TICKS ? this.early.dir : null);
+      this.early = null;
+      if (dir) this.tryMove(t, dir);
       else this.idleCount = t;
     } else if (!this.stunned && held && t - this.idleCount <= LATE_PRESS_TICKS) {
       // 拍の直後に押した：見送ったカウントに間に合ったことにして、いま1歩進む
       this.idleCount = -Infinity;
+      this.early = null;
       this.tryMove(t, held);
+    } else if (!this.stunned && pressed) {
+      this.early = { dir: held, t };
     }
     if (this.status === 'playing' && !this.stunned) this.checkHazards(t, prevX, prevY);
   }
@@ -305,5 +322,6 @@ export class Sim {
     this.y = this.fromY = this.zoneEntry.y;
     this.moveTick = -Infinity;
     this.stunUntil = t + STUN_TICKS;
+    this.early = null;
   }
 }
