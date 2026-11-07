@@ -1700,7 +1700,7 @@ export class Renderer {
 
   /**
    * 開発用の札（?labels）の一覧。マスを奥の行から順に見て、闇に浮かぶ物（things）・小物（prop）・家具の塊（scenery。
-   * 平らな面は除く）に 1 から番号を振る。同じ種類が隣り合って並ぶ物（戸、障子、家具の塊など）は、奥の端の1マスにだけ札を付ける。札の字は 3x5 のフォントで描けるように大文字にし、'_' は '-' にする
+   * 平らな面は除く）に 1 から番号を振る。同じ種類が隣り合って並ぶ物（戸、障子、家具の塊など）は、奥の端の1マスにだけ札を付ける。札の字は大文字にし、'_' は '-' にする（/gallery.html の名前と同じ書き方）
    */
   private devLabelList(stage: Stage): { x: number; y: number; text: string; height: number }[] {
     let list = this.devLabelLists.get(stage);

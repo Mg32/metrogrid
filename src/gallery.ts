@@ -16,7 +16,8 @@ const scale = Number(params.get('scale') ?? 2);
 const still = params.has('still');
 
 const COLS = 12;
-const CELL_W = 84;
+// 幅は、いちばん長い名前（17 字。1字 6 ドット）が収まるように
+const CELL_W = 108;
 const CELL_H = 78;
 const HEAD = 14;
 
@@ -59,9 +60,10 @@ function draw(tickF: number): void {
     fillDiamond(ctx, sx, g - TH / 2, TW, TH, '#1e1c27');
     if (info.foot) fillDiamond(ctx, sx, g - 3, 12, 6, '#34323d');
     info.draw(ctx, sx, g, tickF, 'L');
-    const name = `${i + 1} ${kind.toUpperCase().replace(/_/g, '-')}`;
+    const name = kind.toUpperCase().replace(/_/g, '-');
     drawText(ctx, name, Math.round(sx - textWidth(name, 1) / 2), y0 + 62, 1, '#ffd84a');
-    const where = (usedIn.get(kind) ?? []).join(' ') || '-';
+    // 番号と、置いているステージ
+    const where = `${i + 1}:  ${(usedIn.get(kind) ?? []).join(' ') || '-'}`;
     drawText(ctx, where, Math.round(sx - textWidth(where, 1) / 2), y0 + 70, 1, '#8d857a');
   });
 }

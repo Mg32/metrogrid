@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { tutorial } from '../src/game/stages/index.ts';
 import { fromBrowser, GAME_SUBTITLE, GAME_TITLE, MESSAGES } from '../src/lang.ts';
-import { isMottiri, missingGlyphs, textWidth } from '../src/render/font.ts';
+import { missingGlyphs, textWidth } from '../src/render/font.ts';
 import { logoWidth, missingLogoGlyphs } from '../src/render/logo.ts';
 
 /** 文の一覧から、画面に出るすべての文を取り出す（引数のある文は、いちばん長くなりそうな値で） */
@@ -10,6 +10,7 @@ function lines(m: (typeof MESSAGES)['en']): string[] {
   const out: string[] = [];
   for (const v of Object.values(m)) {
     if (typeof v === 'string') out.push(v);
+    else if (Array.isArray(v)) out.push(...v);
   }
   out.push(m.yes(true), m.yes(false), m.no(true), m.no(false), m.beatsLeft(999));
   out.push(m.score('000000'), m.miss(99), m.total('0000000'), m.bar(80, 80));
@@ -27,10 +28,9 @@ test('タイトルのロゴの題名は、すべてロゴの字（logo.ts）で�
   assert.ok(logoWidth(GAME_TITLE, 2) <= 280, GAME_TITLE);
 });
 
-test('英語の文は、すべて 3x5 のフォントで描かれる', () => {
+test('英語の文も、すべてみにもっちりにある文字で書かれている', () => {
   const texts = [GAME_SUBTITLE, ...lines(MESSAGES.en), ...(tutorial.hints ?? []).map((h) => h.text.en)];
-  // 言語を切り替えるボタンだけは、切り替えた先の言語（日本語）で書く
-  for (const s of texts) if (s !== MESSAGES.en.otherLang) assert.equal(isMottiri(s), false, s);
+  for (const s of texts) assert.deepEqual(missingGlyphs(s), [], s);
 });
 
 test('文は画面（288 ドット）の幅に収まる', () => {

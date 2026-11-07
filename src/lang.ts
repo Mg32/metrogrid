@@ -1,7 +1,6 @@
 /**
  * 画面に出す文（日本語と英語）。タイトル画面で切り替え、このブラウザに残す（?lang=ja・?lang=en
- * で試せる。保存しない）。 日本語の文は「みにもっちり」、英語の文は 3x5
- * のドットフォントで描かれる（src/render/font.ts）。
+ * で試せる。保存しない）。どちらの言語の文も「みにもっちり」で描かれる（src/render/font.ts。1文字 6 ドット）。
  * はじめは、ブラウザの言語の設定で決まる（優先する順に見て、日本語と英語のうち先に出てくるほう。どちらもなければ英語）。
  * 一度切り替えると、そのあとはこのブラウザに残した言語になる
  */
@@ -53,10 +52,10 @@ const EN = {
   cleared: 'CLEARED',
   // 曲などを読み込むのに時間がかかっているとき、暗転した画面の左下に出す
   loading: 'LOADING...',
-  // エンディングのあと、ガレキの画面の下に出る結びの文（2行）
-  epilogue: ['FROM THEN ON, THE TSUKUMOGAMI OF THE HOUSE', 'NEVER APPEARED ANYWHERE AGAIN.'],
-  // 得点の総計が 0 のままエンディングに来たときの結びの文（2行）
-  calmEpilogue: ['THE TSUKUMOGAMI OF THE HOUSE GAZED AT THE SKY,', 'AND THEN, SLOWLY, TOOK A DEEP BREATH.'],
+  // エンディングのあと、ガレキの画面の下に出る結びの文（日本語は2行。英語は長いので3行）
+  epilogue: ['FROM THEN ON,', 'THE TSUKUMOGAMI OF THE HOUSE', 'NEVER APPEARED ANYWHERE AGAIN.'],
+  // 得点の総計が 0 のままエンディングに来たときの結びの文
+  calmEpilogue: ['THE TSUKUMOGAMI OF THE HOUSE', 'GAZED AT THE SKY, AND THEN,', 'SLOWLY, TOOK A DEEP BREATH.'],
   stage: (name: string) =>
       (name === 'UPSTAIRS' ? 'UPSTAIRS' : name.replace(/(\d+)$/, ' $1')),
 };
