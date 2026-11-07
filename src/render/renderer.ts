@@ -2816,7 +2816,7 @@ export class Renderer {
 
     const m = msg();
     this.text(m.score(String(sim.score).padStart(6, '0')), 6, 7, 1, COLORS.text);
-    this.text(`*${sim.multiplier}`, 6, 15, 1, sim.multiplier > 1 ? COLORS.gem : COLORS.textDim);
+    this.text(`×${sim.multiplier}`, 6, 15, 1, sim.multiplier > 1 ? COLORS.gem : COLORS.textDim);
     if (sim.misses > 0) this.text(m.miss(sim.misses), 6, 23, 1, COLORS.textDim);
 
     const remain = Math.max(0, sim.totalTicks * tickSec - Math.max(0, songTime));
