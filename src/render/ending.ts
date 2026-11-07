@@ -683,13 +683,13 @@ export function drawTitle(ctx: CanvasRenderingContext2D, t: number, opts: TitleO
   }
 }
 
-/** タイトルのロゴ。大きな文字の下に、細い線を一本。副題があれば線の下に小さく */
+/** タイトルのロゴ。大きな文字の下に、細い線を一本。その下に小さく副題 */
 function logo(ctx: CanvasRenderingContext2D, t: number, { title: text, subtitle }: TitleOpts['logo']): void {
-  // ロゴの字（logo.ts）を2倍で。英字の題名は2行になるので、少し上から
+  // ロゴの字（logo.ts）を2倍で
   const scale = 2;
   const tw = logoWidth(text, scale);
   const th = logoHeight(text, scale);
-  const y = th > 30 ? 20 : 28;
+  const y = 28;
   drawLogo(ctx, text, W / 2 + 2, y + 2, scale, '#000');
   drawLogo(ctx, text, W / 2, y, scale, C.text);
   // 線は、ゆっくり左右へ伸び縮みする（呼吸のように）

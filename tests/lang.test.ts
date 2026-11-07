@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { tutorial } from '../src/game/stages/index.ts';
-import { fromBrowser, GAME_TITLE, MESSAGES } from '../src/lang.ts';
+import { fromBrowser, GAME_SUBTITLE, GAME_TITLE, MESSAGES } from '../src/lang.ts';
 import { isMottiri, missingGlyphs, textWidth } from '../src/render/font.ts';
 import { logoWidth, missingLogoGlyphs } from '../src/render/logo.ts';
 
@@ -23,14 +23,12 @@ test('日本語の文は、すべてみにもっちりにある文字（かな�
 });
 
 test('タイトルのロゴの題名は、すべてロゴの字（logo.ts）で描け、2倍で画面の幅に収まる', () => {
-  for (const lang of ['ja', 'en'] as const) {
-    assert.deepEqual(missingLogoGlyphs(MESSAGES[lang].logo), [], MESSAGES[lang].logo);
-    assert.ok(logoWidth(MESSAGES[lang].logo, 2) <= 280, MESSAGES[lang].logo);
-  }
+  assert.deepEqual(missingLogoGlyphs(GAME_TITLE), [], GAME_TITLE);
+  assert.ok(logoWidth(GAME_TITLE, 2) <= 280, GAME_TITLE);
 });
 
 test('英語の文は、すべて 3x5 のフォントで描かれる', () => {
-  const texts = [...lines(MESSAGES.en), ...(tutorial.hints ?? []).map((h) => h.text.en)];
+  const texts = [GAME_SUBTITLE, ...lines(MESSAGES.en), ...(tutorial.hints ?? []).map((h) => h.text.en)];
   // 言語を切り替えるボタンだけは、切り替えた先の言語（日本語）で書く
   for (const s of texts) if (s !== MESSAGES.en.otherLang) assert.equal(isMottiri(s), false, s);
 });

@@ -10,7 +10,7 @@ import { buildHub, hubReturnCell, hubReveal, UPSTAIRS } from './game/stages/hub.
 import { STAGE_ORDER, STAGES, tutorial } from './game/stages/index.ts';
 import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
-import { lang, msg, toggleLang } from './lang.ts';
+import { GAME_SUBTITLE, GAME_TITLE, lang, msg, toggleLang } from './lang.ts';
 import { loadCleared, loadTotal, resetProgress, saveCleared, saveTotal } from './progress.ts';
 import { ENDING, endingEnd, HOMECOMING, TITLE_OUT } from './render/ending.ts';
 import { textWidth } from './render/font.ts';
@@ -638,7 +638,7 @@ function drawTitle(): void {
   const go = msg().start;
   renderer.title(scene === 'homecoming' ? performance.now() / 1000 : (fixedTitleSec ?? performance.now() / 1000), {
     restored: (part) => (cleared.has(part) ? 1 : 0),
-    logo: { title: msg().logo, subtitle: msg().subtitle },
+    logo: { title: GAME_TITLE, subtitle: GAME_SUBTITLE },
     prompt: dev ? `${go} - DEV: ${stageLabel(dev.name)}` : go,
     beatSec: 60 / 100,
     exit: scene === 'titleOut' ? titleOutSec() : null,
