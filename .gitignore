@@ -10,6 +10,9 @@ lerna-debug.log*
 node_modules
 # dist
 dist-ssr
+# itch.io に上げる版（npm run build:itch）
+dist-itch
+dist-itch.zip
 *.local
 
 # Editor directories and files

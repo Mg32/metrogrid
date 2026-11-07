@@ -22,6 +22,7 @@
 | `npm run replay` | プレイ記録を再生して一致を確かめ、プレイの傾向（いた場所、ミス、得点）を集計する |
 | `npm run e2e` | Playwright（インストール済みの Edge）。キーボードだけ（`keyboard`）・マウスだけとタッチだけ（`pointer`）で遊べるか、デスクトップとスマホで同じ画面か（`screen`）、ドットがぼやけていないか（`pixel`）、静止表示でエラーが出ないか（`smoke`）。重いので、操作や画面の組み立てを変えたときだけ回す。曲と効果音は読み込ませない（仮のメトロノームで動く。`e2e/helpers.ts` の `noSound`）。ブラウザは同時に2つまで |
 | `npm run e2e:quick` | E2E のうち軽いもの（`pixel`・`smoke`。15秒ほど） |
+| `npm run build:itch` | itch.io に上げる版を `dist-itch/` と `dist-itch.zip` に書き出す（ファイルの場所を相対パスにしたビルド。GitHub Pages 用の `dist/` は書き換えない。`tools/itch.ts`） |
 | `npm run shot` | 主要な場面のスクリーンショットを `screenshots/` に保存する |
 | `npm run sound` | `sound/` の WAV（人の手で作った曲・効果音）を `src/assets/sound/` に Opus と AAC で書き出す（FFmpeg が必要。名前の決まりは [sound/README.md](sound/README.md)） |
 | `npm run font` | `font/mini_mottiri/` の「みにもっちり」（TTF に埋め込まれた 8 ドットのビットマップ）から、ゲームで使うフォントのデータ `src/render/mottiri.ts` を書き出す |
