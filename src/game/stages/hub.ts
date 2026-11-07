@@ -1,5 +1,5 @@
 import type { StageDef } from '../stage.ts';
-import type { Vec } from '../types.ts';
+import { DIR_VEC, type Dir, type Vec } from '../types.ts';
 
 /**
  * 拠点（ハブ）：家の中。闇の中に、玄関の内側（土間と板の間）だけが浮かんでいる（企画書 第2.3節・第4.3節）。
@@ -99,17 +99,21 @@ export function buildHub(cleared: ReadonlySet<string>): StageDef {
   };
 }
 
-/** ステージから戻ったときに立つマス：そのステージの入口の隣の床（入口でないマス） */
-export function hubReturnCell(def: StageDef, stageName: string): Vec | null {
+/**
+ * ステージから戻ったときに立つマス：そのステージの入口の隣の床（入口でないマス）。
+ * facing は入口から出てきた向き（入口からそのマスへ進む向き。入口に背を向けて立つ）
+ */
+export function hubReturnCell(def: StageDef, stageName: string): (Vec & { facing: Dir }) | null {
   const key = Object.entries(def.portals ?? {}).find(([, name]) => name === stageName)?.[0];
   if (!key) return null;
   for (let y = 0; y < def.objects.length; y++) {
     const x = def.objects[y].indexOf(key);
     if (x < 0) continue;
-    for (const [dx, dy] of [[0, -1], [-1, 0], [1, 0], [0, 1]]) {
+    for (const facing of ['up', 'left', 'right', 'down'] as const) {
+      const { x: dx, y: dy } = DIR_VEC[facing];
       const t = def.terrain[y + dy]?.[x + dx];
       const o = def.objects[y + dy]?.[x + dx];
-      if (t === '.' && !/[1-9]/.test(o ?? '')) return { x: x + dx, y: y + dy };
+      if (t === '.' && !/[1-9]/.test(o ?? '')) return { x: x + dx, y: y + dy, facing };
     }
   }
   return null;

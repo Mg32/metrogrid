@@ -331,14 +331,14 @@ function setStage(def: StageDef): void {
   tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
 }
 
-function newSim(start?: Vec): Sim {
+function newSim(start?: Vec & { facing?: Dir }): Sim {
   seed = fixedSeed ?? randomSeed();
   recorder = new InputRecorder();
   return new Sim(stage, createRandom(seed), start);
 }
 
 /** def を遊び始める。start を渡すとそのマスから（拠点で、出てきた入口の前に戻すとき） */
-async function play(def: StageDef, start?: Vec): Promise<void> {
+async function play(def: StageDef, start?: Vec & { facing?: Dir }): Promise<void> {
   if (scene === 'loading') return;
   scene = 'loading';
   loadingAt = performance.now() / 1000;

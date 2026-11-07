@@ -47,6 +47,10 @@ describe('拠点', () => {
         assert.ok(seen.has(`${p.x},${p.y}`), `${p.name} の入口に行けない`);
         const back = hubReturnCell(def, p.name);
         assert.ok(back && stage.cell(back.x, back.y)?.terrain === 'floor', `${p.name} から戻る場所がない`);
+        // 戻ったときは、入口から出てきた向き（入口に背を向けて）立っている
+        const v = DIR_VEC[back.facing];
+        assert.deepEqual([back.x - v.x, back.y - v.y], [p.x, p.y], `${p.name} から戻ったときの向き`);
+        assert.equal(new Sim(stage, () => 0, back).facing, back.facing);
       }
       // 外周は壁
       for (let x = 0; x < stage.width; x++) assert.equal(stage.cell(x, 0)!.terrain, 'wall');

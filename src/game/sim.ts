@@ -75,16 +75,20 @@ export class Sim {
 
   private gateClosedUntil = new Map<number, number>();
 
-  /** start を渡すとそのマスから始める（ハブで、出てきたステージの入口の前に戻すとき） */
-  constructor(stage: Stage, random: () => number = Math.random, start: Vec = stage.start) {
+  /**
+   * start を渡すとそのマスから始める（ハブで、出てきたステージの入口の前に戻すとき）。
+   * facing があればその向きを向く（入口から出てきた向き）
+   */
+  constructor(stage: Stage, random: () => number = Math.random, start: Vec & { facing?: Dir } = stage.start) {
     this.stage = stage;
     this.hazards = createHazards(stage.def.hazards, random);
     this.totalTicks = stage.def.bars * TICKS_PER_BAR;
     this.x = this.fromX = start.x;
     this.y = this.fromY = start.y;
     this.zoneEntry = { ...start };
-    // スタートでは進む向きを向いている（出てきた入口の前に戻るときは、いままでどおり）
+    // スタートでは進む向きを、出てきた入口の前に戻るときは入口から出てきた向きを向いている
     if (start === stage.start) this.facing = stage.startFacing();
+    else if (start.facing) this.facing = start.facing;
     this.scores = [];
     const candidates = new Map<string, { x: number; y: number }[]>();
     for (let y = 0; y < stage.height; y++) {
@@ -120,9 +124,10 @@ export class Sim {
   }
 
   /** ハブで入口に入ったのを取り消し、at（入口の前）から歩き続けられるようにする（二階へ昇るかの確認で「いいえ」のとき） */
-  leavePortal(at: Vec): void {
+  leavePortal(at: Vec & { facing?: Dir }): void {
     this.status = 'playing';
     this.portal = null;
+    if (at.facing) this.facing = at.facing;
     this.x = this.fromX = at.x;
     this.y = this.fromY = at.y;
     this.zoneEntry = { ...at };
