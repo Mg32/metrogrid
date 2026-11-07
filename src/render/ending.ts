@@ -723,7 +723,29 @@ export function drawTitle(ctx: CanvasRenderingContext2D, t: number, opts: TitleO
 }
 
 /** タイトルのロゴ。大きな文字の下に、細い線を一本。その下に小さく副題 */
-function logo(ctx: CanvasRenderingContext2D, { title: text, subtitle }: TitleOpts['logo']): void {
+/** ロゴを描いておく層（題名と副題が変わったときだけ描き直す） */
+let logoLayer: { key: string; canvas: HTMLCanvasElement } | null = null;
+
+/**
+ * ロゴを描く。いまの globalAlpha で、ロゴ全体を一様に重ねる（影・縁・欠けを重ね描きしているので、
+ * そのまま半透明で描くと、重なった所ほど濃く、欠けた所は背景の色が浮いて見える）
+ */
+function logo(ctx: CanvasRenderingContext2D, opts: TitleOpts['logo']): void {
+  const key = `${opts.title}
+${opts.subtitle}`;
+  if (logoLayer?.key !== key) {
+    const canvas = logoLayer?.canvas ?? document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const g = canvas.getContext('2d')!;
+    g.clearRect(0, 0, W, H);
+    drawLogoTo(g, opts);
+    logoLayer = { key, canvas };
+  }
+  ctx.drawImage(logoLayer.canvas, 0, 0);
+}
+
+function drawLogoTo(ctx: CanvasRenderingContext2D, { title: text, subtitle }: TitleOpts['logo']): void {
   // ロゴの字（logo.ts）を2倍で
   const scale = 2;
   const th = logoHeight(text, scale);
@@ -757,8 +779,7 @@ function logo(ctx: CanvasRenderingContext2D, { title: text, subtitle }: TitleOpt
       const k = hash(i * 131 + c * 17 + r * 7 + 4000);
       const corner = (!on(c, r - 1) || !on(c, r + 1)) && (!on(c - 1, r) || !on(c + 1, r));
       if (corner && k < 0.3) {
-        ctx.fillStyle = C.bg;
-        ctx.fillRect(x + (on(c - 1, r) ? scale - 1 : 0), yy + (on(c, r - 1) ? scale - 1 : 0), 1, 1);
+        ctx.clearRect(x + (on(c - 1, r) ? scale - 1 : 0), yy + (on(c, r - 1) ? scale - 1 : 0), 1, 1);
       } else if (k > 0.985) {
         // 表面のすり傷
         ctx.fillStyle = LOGO.shade;
