@@ -20,6 +20,11 @@ export type Status = 'playing' | 'cleared' | 'timeup' | 'portal';
 
 /** ミス後の停止時間（1拍） */
 const STUN_TICKS = TICKS_PER_BEAT;
+/**
+ * 止まっていて移動カウントを見送った直後に、方向を押したときの猶予（tick）。拍ちょうどに押したつもりでわずかに遅れても、
+ * 次のカウントまで待たされずにその場で1歩進む（十六分音符1つぶん。高危険のマスはカウントが毎 tick なので関係しない）
+ */
+export const LATE_PRESS_TICKS = 1;
 /** 停止マスで止まっている必要がある時間（1拍） */
 const STOP_TICKS = TICKS_PER_BEAT;
 const MAX_MULTIPLIER = 4;
@@ -62,6 +67,8 @@ export class Sim {
   stunUntil = -Infinity;
   /** 停止マスの上でキーを離していた tick 数 */
   stillTicks = 0;
+  /** 止まっていて（何も押さずに）見送った最後の移動カウントの tick（LATE_PRESS_TICKS の猶予のため） */
+  private idleCount = -Infinity;
 
   score = 0;
   streak = 0;
@@ -181,8 +188,35 @@ export class Sim {
     const onStop = this.stage.cell(this.x, this.y)!.obj?.type === 'stop';
     if (onStop && !held) this.stillTicks++;
 
-    if (!this.stunned && held && t % this.interval === 0) this.tryMove(t, held);
+    if (!this.stunned && t % this.interval === 0) {
+      if (held) this.tryMove(t, held);
+      else this.idleCount = t;
+    } else if (!this.stunned && held && t - this.idleCount <= LATE_PRESS_TICKS) {
+      // 拍の直後に押した：見送ったカウントに間に合ったことにして、いま1歩進む
+      this.idleCount = -Infinity;
+      this.tryMove(t, held);
+    }
     if (this.status === 'playing' && !this.stunned) this.checkHazards(t, prevX, prevY);
+  }
+
+  /**
+   * 押している方向（新しく押した順）から、進む向きを選ぶ：進めるもののうち最初の向き。どれも進めなければ最初の向き
+   * （壁へ向かって押していても、ほかに押している向きが開いていればそちらへ進む）
+   */
+  choose(dirs: readonly Dir[]): Dir | null {
+    return dirs.find((d) => this.canGo(d)) ?? dirs[0] ?? null;
+  }
+
+  /** いまのマスから dir へ1歩進めるか（壁・床の高さ・閉じた小節ゲート・一方通行。欠けたマスへは進める） */
+  private canGo(dir: Dir, t = this.tick + 1): boolean {
+    const nx = this.x + DIR_VEC[dir].x;
+    const ny = this.y + DIR_VEC[dir].y;
+    const next = this.stage.cell(nx, ny);
+    if (!next || next.terrain === 'wall') return false;
+    if (!this.stage.canStep(this.x, this.y, nx, ny)) return false;
+    if (next.obj?.type === 'gate' && this.isGateClosed(nx, ny, t)) return false;
+    if (next.obj?.type === 'oneway' && next.obj.dir !== dir) return false;
+    return true;
   }
 
   private tryMove(t: number, dir: Dir): void {
@@ -196,15 +230,8 @@ export class Sim {
       return;
     }
 
-    const nx = this.x + DIR_VEC[dir].x;
-    const ny = this.y + DIR_VEC[dir].y;
-    const next = this.stage.cell(nx, ny);
-    if (!next || next.terrain === 'wall') return;
-    if (!this.stage.canStep(this.x, this.y, nx, ny)) return;
-    if (next.obj?.type === 'gate' && this.isGateClosed(nx, ny, t)) return;
-    if (next.obj?.type === 'oneway' && next.obj.dir !== dir) return;
-
-    this.moveTo(t, nx, ny);
+    if (!this.canGo(dir, t)) return;
+    this.moveTo(t, this.x + DIR_VEC[dir].x, this.y + DIR_VEC[dir].y);
   }
 
   private moveTo(t: number, nx: number, ny: number): void {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { FLOW_JUMP, FlowHazard } from '../src/game/hazard.ts';
-import { Sim } from '../src/game/sim.ts';
+import { LATE_PRESS_TICKS, Sim } from '../src/game/sim.ts';
 import { Stage, type StageDef } from '../src/game/stage.ts';
 import { TICKS_PER_BAR, type Dir } from '../src/game/types.ts';
 
@@ -55,6 +55,36 @@ describe('移動カウント', () => {
     run(s, 0, 1, 'right');
     run(s, 1, 12, null);
     assert.equal(s.x, 2);
+  });
+
+  test('止まっていて拍を見送った直後（LATE_PRESS_TICKS 以内）に押すと、その場で1歩進み、次からは拍どおり', () => {
+    const s = mk('#........#', ' S      G ');
+    run(s, 0, 5, null); // t4 のカウントを見送る
+    s.step(5, 'right');
+    assert.equal(s.x, 2);
+    run(s, 6, 8, 'right');
+    assert.equal(s.x, 2);
+    s.step(8, 'right');
+    assert.equal(s.x, 3);
+  });
+
+  test('拍の後、猶予より遅れて押したら次のカウントまで待つ', () => {
+    const s = mk('#........#', ' S      G ');
+    run(s, 0, 5 + LATE_PRESS_TICKS, null);
+    run(s, 5 + LATE_PRESS_TICKS, 8, 'right');
+    assert.equal(s.x, 1);
+    s.step(8, 'right');
+    assert.equal(s.x, 2);
+  });
+
+  test('押している向きが複数あれば、進める向きのうち最後に押したものへ進む', () => {
+    const s = mk('#........#', ' S      G ');
+    // 新しく押した順。左（壁）と上（壁）は進めないので、右へ
+    assert.equal(s.choose(['left', 'right']), 'right');
+    assert.equal(s.choose(['up', 'left', 'right']), 'right');
+    // どれも進めなければ、最後に押した向き（壁へ向かって押している）
+    assert.equal(s.choose(['up', 'left']), 'up');
+    assert.equal(s.choose([]), null);
   });
 });
 

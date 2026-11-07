@@ -611,7 +611,8 @@ function update(): void {
     const now = Math.floor(conductor.songTime() / tickSec);
     while (sim.tick < now && sim.status === 'playing') {
       // 拠点に新しい入口が現れているあいだは歩けない
-      const held = kind === 'hub' && conductor.songTime() < revealUntil ? null : (steer?.dir ?? input.current());
+      // 押している向きが複数あれば、進める向きのうち最後に押したもの（記録には選んだ向きを残すので、再生は同じになる）
+      const held = kind === 'hub' && conductor.songTime() < revealUntil ? null : steer?.dir ? steer.dir : sim.choose(input.heldDirs());
       recorder.record(sim.tick + 1, held);
       sim.step(sim.tick + 1, held);
     }
