@@ -480,9 +480,13 @@ window.addEventListener('keydown', unlockAudio);
 window.addEventListener('pointerup', unlockAudio);
 window.addEventListener('touchend', unlockAudio);
 
+// itch.io などで iframe に埋め込まれると、キーはこのページにフォーカスがあるときしか届かない。
+// 下の pointerdown の preventDefault はクリックでフォーカスが移るのも止めてしまうので、起動時と押したときに自分で移す
+window.focus();
 canvas.addEventListener('pointerdown', (e) => {
   unlockAudio();
   e.preventDefault();
+  window.focus();
   const b = renderer.toBuffer(e.clientX, e.clientY);
   const hit = buttonAt(b);
   if (hit) {
