@@ -509,7 +509,10 @@ canvas.addEventListener('pointermove', (e) => {
   const b = renderer.toBuffer(e.clientX, e.clientY);
   if (e.pointerType === 'mouse') hoverAt = b;
   if (steer?.id !== e.pointerId) return;
+  const prev = steer.dir;
   steer.move(b.x, b.y);
+  // 指をさっとずらしてすぐ離しても、次の tick で読めるように（キーを叩いたときと同じ）
+  if (steer.dir && steer.dir !== prev) input.tap(steer.dir);
 });
 canvas.addEventListener('pointerleave', () => {
   hoverAt = null;
@@ -611,8 +614,10 @@ function update(): void {
     const now = Math.floor(conductor.songTime() / tickSec);
     while (sim.tick < now && sim.status === 'playing') {
       // 拠点に新しい入口が現れているあいだは歩けない
-      // 押している向きが複数あれば、進める向きのうち最後に押したもの（記録には選んだ向きを残すので、再生は同じになる）
-      const held = kind === 'hub' && conductor.songTime() < revealUntil ? null : steer?.dir ? steer.dir : sim.choose(input.heldDirs());
+      // 押している向きが複数あれば、進める向きのうち最後に押したもの（記録には選んだ向きを残すので、再生は同じになる）。
+      // 前の tick から叩いてすぐ離した向きも押していることにする（読むのが画面の更新ごとなので、1tick に1フレームぶんの余裕を足す）
+      const dirs = input.takeDirs(tickSec * 1000 + 34);
+      const held = kind === 'hub' && conductor.songTime() < revealUntil ? null : steer?.dir ? steer.dir : sim.choose(dirs);
       recorder.record(sim.tick + 1, held);
       sim.step(sim.tick + 1, held);
     }
