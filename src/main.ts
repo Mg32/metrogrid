@@ -7,7 +7,7 @@ import { createRandom, randomSeed } from './game/random.ts';
 import { Sim } from './game/sim.ts';
 import { Stage, type StageDef } from './game/stage.ts';
 import { buildHub, hubReturnCell, hubReveal, UPSTAIRS } from './game/stages/hub.ts';
-import { STAGE_ORDER, STAGES, tutorial } from './game/stages/index.ts';
+import { GAME_STAGES, STAGE_ORDER, STAGES, tutorial } from './game/stages/index.ts';
 import { DIR_VEC, TICKS_PER_BEAT, type Dir, type Vec } from './game/types.ts';
 import { Input } from './input.ts';
 import { GAME_SUBTITLE, GAME_TITLE, lang, msg, toggleLang } from './lang.ts';
@@ -23,7 +23,7 @@ import { Stick } from './touch.ts';
  * エンディングのあとは、ガレキだけが残った画面のまま（崩壊後の画面。第2.4節で暫定合意：操作はできず、案内も出さない）。
  * クリアの記録は書き換えないので、ページを読み込み直すと階段が現れた時点（家がそろった状態）に戻る
  *
- * 開発用の URL パラメータ
+ * 開発用の URL パラメータ（開発サーバーのときだけ読む。リリースビルドでは使う所ごと消える。?lang だけはリリースでも効く）
  *   ?autostart        タイトルを飛ばして始める
  *   ?seed=N           乱数のシードを固定する（危険物の開始位置が毎回同じになる）
  *   ?stage=NAME       タイトルから、拠点を通さずにそのステージを遊ぶ（TUTORIAL、TEST、HUB も指定できる）
@@ -49,12 +49,13 @@ import { Stick } from './touch.ts';
  *         ボタンはいつでも出し、同じことができるキーを四角で囲んで添える。それ以外の場面ではタップ・クリックが Enter の代わり
  *   二階へ昇るかの確認は、YES を2回タップで決まる（取り返しがつかないので、うっかり1回では決まらないようにする）
  */
-const params = new URLSearchParams(location.search);
-const fixedSeed = params.has('seed') ? Number(params.get('seed')) : null;
-const devBpm = params.has('bpm') ? Number(params.get('bpm')) : null;
-const devBars = params.has('bars') ? Number(params.get('bars')) : null;
+// import.meta.env.DEV はビルドのときに true / false に置き換わるので、リリースでは params を読む所が分岐ごと消える
+const params = /* @__PURE__ */ new URLSearchParams(import.meta.env.DEV ? location.search : '');
+const fixedSeed = import.meta.env.DEV && params.has('seed') ? Number(params.get('seed')) : null;
+const devBpm = import.meta.env.DEV && params.has('bpm') ? Number(params.get('bpm')) : null;
+const devBars = import.meta.env.DEV && params.has('bars') ? Number(params.get('bars')) : null;
 /** ?loadwait=SEC：曲などの読み込みを SEC 秒遅らせる（読み込み中の「LOADING...」を確かめる用） */
-const devLoadWait = params.has('loadwait') ? Number(params.get('loadwait')) : 0;
+const devLoadWait = import.meta.env.DEV && params.has('loadwait') ? Number(params.get('loadwait')) : 0;
 
 const canvas = document.createElement('canvas');
 document.querySelector<HTMLDivElement>('#app')!.append(canvas);
@@ -64,26 +65,29 @@ const renderer = new Renderer(canvas);
 const conductor: Conductor = new Music();
 const sfx = new Sfx();
 /** クリアしたステージ（チュートリアルは、クリアかスキップで 'TUTORIAL' が入る） */
-const devCleared = params.get('cleared') ?? (params.has('upstairs') ? [tutorial, ...STAGE_ORDER].map((d) => d.name).join(',') : null);
+const devCleared = !import.meta.env.DEV
+  ? null
+  : (params.get('cleared') ?? (params.has('upstairs') ? [tutorial, ...STAGE_ORDER].map((d) => d.name).join(',') : null));
 const cleared = devCleared !== null ? new Set(devCleared.split(',').filter(Boolean)) : loadCleared();
 const save = () => {
   if (devCleared === null) saveCleared(cleared);
 };
-renderer.devLabels = params.has('labels');
+renderer.devLabels = import.meta.env.DEV && params.has('labels');
 renderer.portalNote = (name) => (cleared.has(name) ? msg().cleared : null);
 /** これまでに溜めた得点（エンディングで使われる） */
-const devTotal = params.get('total');
+const devTotal = import.meta.env.DEV ? params.get('total') : null;
 let total = devTotal !== null ? Number(devTotal) : loadTotal();
 renderer.totalScore = total;
 
 /** ?stage=NAME で直接遊ぶステージ */
-const devStage = params.get('stage');
-const devDef = (): StageDef | null => (devStage === 'HUB' ? buildHub(cleared) : (STAGES[devStage ?? ''] ?? null));
+const devStage = import.meta.env.DEV ? params.get('stage') : null;
+const devDef = (): StageDef | null =>
+  import.meta.env.DEV && devStage !== null ? (devStage === 'HUB' ? buildHub(cleared) : (STAGES[devStage] ?? null)) : null;
 
 let stage = new Stage(devDef() ?? STAGE_ORDER[0]);
 let tickSec = 60 / stage.def.bpm / TICKS_PER_BEAT;
 /** 初めてクリアしたステージ。次に拠点に戻ったとき、新しい入口が現れる演出をする（?reveal=NAME で試せる） */
-let pendingReveal: string | null = params.get('reveal');
+let pendingReveal: string | null = import.meta.env.DEV ? params.get('reveal') : null;
 /** 拠点の演出が終わる秒（それまでは歩けない） */
 let revealUntil = 0;
 
@@ -282,7 +286,7 @@ function goBack(to: () => void): void {
 }
 let fixedEndingSec: number | null = null;
 /** ?title=SEC：タイトルを止めて表示する秒 */
-const fixedTitleSec = params.has('title') ? Number(params.get('title')) : null;
+const fixedTitleSec = import.meta.env.DEV && params.has('title') ? Number(params.get('title')) : null;
 
 function endingSec(): number {
   return fixedEndingSec ?? performance.now() / 1000 - endingAt;
@@ -624,7 +628,7 @@ function update(): void {
       confirmAt = nowSec();
       scene = 'confirm';
     } else if (sim.status === 'portal') {
-      const target = STAGES[sim.portal!];
+      const target = GAME_STAGES[sim.portal!];
       if (target) {
         scene = 'leaving';
         leaveAt = performance.now() / 1000;
@@ -732,7 +736,7 @@ function frame(): void {
   requestAnimationFrame(frame);
 }
 
-if (params.has('view')) {
+if (import.meta.env.DEV && params.has('view')) {
   const [x, y, t] = params.get('view')!.split(',').map(Number);
   setReveal(stage.def);
   sim = newSim();
@@ -740,7 +744,7 @@ if (params.has('view')) {
   sim.debugPlace(x, y);
   viewTick = t;
   scene = 'view';
-} else if (params.has('clear')) {
+} else if (import.meta.env.DEV && params.has('clear')) {
   // ゴールの隣のマスに置き、ゴールへ歩かせてクリアさせる
   sim = newSim();
   const g = stage.goal;
@@ -753,17 +757,17 @@ if (params.has('view')) {
   for (let i = t0; sim.status === 'playing'; i++) sim.step(i, dir);
   fixedClearSec = Number(params.get('clear'));
   scene = 'result';
-} else if (params.has('ending')) {
+} else if (import.meta.env.DEV && params.has('ending')) {
   fixedEndingSec = Number(params.get('ending'));
   scene = 'ending';
-} else if (params.has('home')) {
+} else if (import.meta.env.DEV && params.has('home')) {
   const name = params.get('home')!;
   cleared.add(name);
   pendingReveal = name;
   homecoming(name, () => goHub(name));
-} else if (params.has('upstairs')) {
+} else if (import.meta.env.DEV && params.has('upstairs')) {
   goHub(UPSTAIRS);
-} else if (params.has('autostart')) {
+} else if (import.meta.env.DEV && params.has('autostart')) {
   startGame();
 }
 

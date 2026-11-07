@@ -18,10 +18,13 @@ const OUT = join(ROOT, 'src', 'assets', 'sound');
 const FFMPEG = process.env.FFMPEG ?? 'ffmpeg';
 const force = process.argv.includes('--force');
 
-/** 形式ごとの FFmpeg の引数。曲は音質を上げ、短い効果音は小さく */
-const FORMATS: Record<string, (music: boolean) => string[]> = {
-  ogg: (music) => ['-c:a', 'libopus', '-b:a', music ? '128k' : '96k', '-ar', '48000'],
-  m4a: (music) => ['-c:a', 'aac', '-b:a', music ? '192k' : '128k', '-movflags', '+faststart'],
+/**
+ * 形式ごとの FFmpeg の引数。リリースの大きさを抑えるため、曲も効果音も Opus 80kbps・AAC 128kbps
+ * （2026-11-07 に決めた。以前は曲が Opus 128k・AAC 192k で、dist が約 32MB だった）
+ */
+const FORMATS: Record<string, string[]> = {
+  ogg: ['-c:a', 'libopus', '-b:a', '80k', '-ar', '48000'],
+  m4a: ['-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart'],
 };
 
 function walk(dir: string, ext: RegExp): string[] {
@@ -43,12 +46,11 @@ let made = 0;
 let failed = 0;
 for (const file of sources) {
   const name = relative(SRC, file).replace(/\\/g, '/').replace(/\.wav$/i, '');
-  const music = name.startsWith('music/');
   for (const [ext, args] of Object.entries(FORMATS)) {
     const out = join(OUT, `${name}.${ext}`);
     if (!force && existsSync(out) && statSync(out).mtimeMs >= statSync(file).mtimeMs) continue;
     mkdirSync(dirname(out), { recursive: true });
-    const r = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', file, '-map_metadata', '-1', ...args(music), out], {
+    const r = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', file, '-map_metadata', '-1', ...args, out], {
       encoding: 'utf8',
     });
     if (r.status !== 0) {

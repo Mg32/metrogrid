@@ -661,7 +661,7 @@ export class Renderer {
   portalNote: (stage: string) => string | null = () => null;
   /** 二階へ昇ると決めてからの秒（拠点が闇に沈んでいくあいだ。少女が階段を昇っていく）。それ以外は null。main.ts が設定する */
   upstairsSec: number | null = null;
-  /** 開発用（?labels）：闇に浮かぶ物・小物・家具の塊に、番号と種類の札を出す（絵の直しを頼むときに物を指すため）。main.ts が設定する */
+  /** 開発用（?labels）：闇に浮かぶ物・小物・家具の塊に、番号と種類の札を出す（絵の直しを頼むときに物を指すため）。main.ts が設定する。リリースビルドでは札を描く処理ごと消える */
   devLabels = false;
   private lot: HTMLCanvasElement;
   /** ステージごとの、各マスの街灯の明るさ */
@@ -672,7 +672,6 @@ export class Renderer {
   private slabs = new Map<number, HTMLCanvasElement>();
   private elevations = new WeakMap<Stage, (x: number, y: number) => number>();
   private thingMaps = new WeakMap<Stage, Map<number, string>>();
-  private devLabelLists = new WeakMap<Stage, { x: number; y: number; text: string; height: number }[]>();
 
   constructor(main: HTMLCanvasElement) {
     this.main = main;
@@ -1457,8 +1456,8 @@ export class Renderer {
       }
     }
     for (const l of labels) this.text(l.text, l.x, l.y, 1, l.color, 'center');
-    if (this.devLabels) {
-      for (const l of this.devLabelList(stage)) {
+    if (import.meta.env.DEV && this.devLabels) {
+      for (const l of devLabelList(stage, this.thingMap(stage))) {
         const { sx, sy } = iso(l.x, l.y);
         const y = sy + TH / 2 - l.height - 6;
         if (!onScreen(sx, y, 40, 8)) continue;
@@ -1696,44 +1695,6 @@ export class Renderer {
       this.elevations.set(stage, f);
     }
     return f;
-  }
-
-  /**
-   * 開発用の札（?labels）の一覧。マスを奥の行から順に見て、闇に浮かぶ物（things）・小物（prop）・家具の塊（scenery。
-   * 平らな面は除く）に 1 から番号を振る。同じ種類が隣り合って並ぶ物（戸、障子、家具の塊など）は、奥の端の1マスにだけ札を付ける。札の字は大文字にし、'_' は '-' にする（/gallery.html の名前と同じ書き方）
-   */
-  private devLabelList(stage: Stage): { x: number; y: number; text: string; height: number }[] {
-    let list = this.devLabelLists.get(stage);
-    if (list) return list;
-    list = [];
-    const things = this.thingMap(stage);
-    const name = (kind: string) => kind.toUpperCase().replace(/_/g, '-');
-    for (let y = 0; y < stage.height; y++) {
-      for (let x = 0; x < stage.width; x++) {
-        const cell = stage.cell(x, y)!;
-        // 奥の隣（x-1 か y-1）が同じ種類なら、並びの続きとして札を付けない
-        const kindAt = (cx: number, cy: number): string | undefined => {
-          const c = stage.cell(cx, cy);
-          if (!c || c.terrain !== 'wall') return undefined;
-          return things.get(stage.index(cx, cy)) ?? (c.obj?.type === 'prop' ? c.obj.kind : undefined);
-        };
-        const continues = (kind: string) => kindAt(x - 1, y) === kind || kindAt(x, y - 1) === kind;
-        const th = things.get(stage.index(x, y));
-        if (th && !continues(th)) list.push({ x, y, text: `${list.length + 1} ${name(th)}`, height: THINGS[th]?.height ?? 8 });
-        const obj = cell.obj;
-        if (cell.terrain === 'wall' && obj?.type === 'prop' && !continues(obj.kind)) {
-          const height = BLOCK_PROPS.has(obj.kind) ? FACADE_H : TALL_PROPS.has(obj.kind) ? POLE_H + 6 : 16;
-          list.push({ x, y, text: `${list.length + 1} ${name(obj.kind)}`, height });
-        }
-        // 平らな面（水面・屋根など）は札を付けない（広くて札が並ぶだけなので）
-        const sc = cell.terrain === 'wall' && cell.scenery && !SURFACES.has(cell.scenery) ? cell.scenery : undefined;
-        if (sc && stage.cell(x - 1, y)?.scenery !== sc && stage.cell(x, y - 1)?.scenery !== sc) {
-          list.push({ x, y, text: `${list.length + 1} ${name(sc)}`, height: Math.round(cell.height * PX_PER_UNIT) });
-        }
-      }
-    }
-    this.devLabelLists.set(stage, list);
-    return list;
   }
 
   /** 闇に浮かぶ物：マスの番号 → 種類 */
@@ -3001,4 +2962,52 @@ export class Renderer {
       y += h;
     }
   }
+}
+
+/** 開発用の札（?labels）の一つ */
+interface DevLabel {
+  x: number;
+  y: number;
+  text: string;
+  height: number;
+}
+/** ステージごとの札の一覧（開発のときだけ作る） */
+let devLabelLists: WeakMap<Stage, DevLabel[]> | null = null;
+
+/**
+ * 開発用の札（?labels）の一覧。マスを奥の行から順に見て、闇に浮かぶ物（things）・小物（prop）・家具の塊（scenery。
+ * 平らな面は除く）に 1 から番号を振る。同じ種類が隣り合って並ぶ物（戸、障子、家具の塊など）は、奥の端の1マスにだけ札を付ける。札の字は大文字にし、'_' は '-' にする（/gallery.html の名前と同じ書き方）
+ */
+function devLabelList(stage: Stage, things: Map<number, string>): DevLabel[] {
+  devLabelLists ??= new WeakMap();
+  let list = devLabelLists.get(stage);
+  if (list) return list;
+  list = [];
+  const name = (kind: string) => kind.toUpperCase().replace(/_/g, '-');
+  for (let y = 0; y < stage.height; y++) {
+    for (let x = 0; x < stage.width; x++) {
+      const cell = stage.cell(x, y)!;
+      // 奥の隣（x-1 か y-1）が同じ種類なら、並びの続きとして札を付けない
+      const kindAt = (cx: number, cy: number): string | undefined => {
+        const c = stage.cell(cx, cy);
+        if (!c || c.terrain !== 'wall') return undefined;
+        return things.get(stage.index(cx, cy)) ?? (c.obj?.type === 'prop' ? c.obj.kind : undefined);
+      };
+      const continues = (kind: string) => kindAt(x - 1, y) === kind || kindAt(x, y - 1) === kind;
+      const th = things.get(stage.index(x, y));
+      if (th && !continues(th)) list.push({ x, y, text: `${list.length + 1} ${name(th)}`, height: THINGS[th]?.height ?? 8 });
+      const obj = cell.obj;
+      if (cell.terrain === 'wall' && obj?.type === 'prop' && !continues(obj.kind)) {
+        const height = BLOCK_PROPS.has(obj.kind) ? FACADE_H : TALL_PROPS.has(obj.kind) ? POLE_H + 6 : 16;
+        list.push({ x, y, text: `${list.length + 1} ${name(obj.kind)}`, height });
+      }
+      // 平らな面（水面・屋根など）は札を付けない（広くて札が並ぶだけなので）
+      const sc = cell.terrain === 'wall' && cell.scenery && !SURFACES.has(cell.scenery) ? cell.scenery : undefined;
+      if (sc && stage.cell(x - 1, y)?.scenery !== sc && stage.cell(x, y - 1)?.scenery !== sc) {
+        list.push({ x, y, text: `${list.length + 1} ${name(sc)}`, height: Math.round(cell.height * PX_PER_UNIT) });
+      }
+    }
+  }
+  devLabelLists.set(stage, list);
+  return list;
 }
