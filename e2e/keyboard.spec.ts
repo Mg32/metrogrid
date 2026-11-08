@@ -36,7 +36,7 @@ test('タイトルの M で音のオン・オフが切り替わり、読み込�
   expect(errors).toEqual([]);
 });
 
-test('はじめてはチュートリアルから。歩けて、Esc でスキップすると拠点へ、拠点の入口から STAGE 1 へ', async ({ page }) => {
+test('はじめてはチュートリアルから。歩けて、X でスキップすると拠点へ、拠点の入口から STAGE 1 へ', async ({ page }) => {
   const errors = collectErrors(page);
   await page.goto('/?seed=1');
   await frames(page);
@@ -52,8 +52,8 @@ test('はじめてはチュートリアルから。歩けて、Esc でスキッ�
   await expect.poll(async () => (await game(page)).sim!.y, { timeout: 3000 }).toBeLessThan(before.y);
   await page.keyboard.up('ArrowUp');
 
-  // チュートリアルの途中の Esc は、飛ばして拠点へ
-  await page.keyboard.press('Escape');
+  // チュートリアルの途中の X は、飛ばして拠点へ
+  await page.keyboard.press('KeyX');
   await expect.poll(async () => (await game(page)).sim?.stage, { timeout: LOAD_MS }).toBe('HUB');
   await expect.poll(async () => (await game(page)).scene, { timeout: LOAD_MS }).toBe('play');
 

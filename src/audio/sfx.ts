@@ -404,7 +404,7 @@ export class Sfx {
     });
   }
 
-  /** Esc で戻る：短く少しだけ下がる「プゥ」（renderer の BACK） */
+  /** X で戻る：短く少しだけ下がる「プゥ」（renderer の BACK） */
   back(): void {
     this.sceneSound('sfx/back', 0.45, (_ctx, out, now) => {
       this.glide(now, 440, 330, 0.18, 'triangle', 0.7, out);

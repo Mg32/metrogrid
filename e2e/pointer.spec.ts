@@ -11,7 +11,7 @@ const POINTERS = [
   { name: 'タッチ', device: MOBILE, type: 'touch' },
 ] as const;
 
-/** 画面の下の隅のボタン（左は Esc、右は R などのボタン）、確認の YES・NO。タイトルのボタンは並びが変わるので btn() で探す */
+/** 画面の下の隅のボタン（左は X、右は R などのボタン）、確認の YES・NO。タイトルのボタンは並びが変わるので btn() で探す */
 const LEFT_BTN = [34, 288 - 15] as const;
 const RIGHT_BTN = [288 - 34, 288 - 15] as const;
 const YES_BTN = [114, 164] as const;

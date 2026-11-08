@@ -361,11 +361,11 @@ const ARRIVE_BEATS = 2;
  */
 export const LOADING = { delay: 0.4, period: 1.6, stagger: 0.07, lift: 0.28, hop: 3 };
 
-/** 拠点とチュートリアルが闇から明るくなる秒（タイトルや、Esc で戻る演出の闇から続けて始まるとき） */
+/** 拠点とチュートリアルが闇から明るくなる秒（タイトルや、X で戻る演出の闇から続けて始まるとき） */
 export const FADE_IN = 0.5;
 
 /**
- * Esc（HOME・SKIP・TITLE のボタン）で画面を戻る演出（秒）。曲が消えていくのに合わせて、道のタイルが少女から遠い順に
+ * X（HOME・SKIP・TITLE のボタン）で画面を戻る演出（秒）。曲が消えていくのに合わせて、道のタイルが少女から遠い順に
  * 沈んで消えていき（reach マスより遠いマスはいっせいに。1マス近づくごとに step 遅れ、1枚が消えきるまで fall）、
  * 最後に少女の立つマスと少女が消える。fade〜end で画面が闇に沈み、end で戻り先へ
  */
@@ -864,7 +864,7 @@ export class Renderer {
   /**
    * songTime はカウント中なら負（足元のハイライトはカウント中も拍に合わせる）。
    * clearSec はゴールしてからの経過秒（クリア演出）。leaveSec は拠点で入口に入ってからの経過秒（LEAVE）。
-   * backSec は Esc で戻り始めてからの経過秒（BACK）。プレイ中は null。
+   * backSec は X で戻り始めてからの経過秒（BACK）。プレイ中は null。
    * ステージ（stage）の曲の頭まで（songTime < 0）は、少女が現れる演出をする。songTime が -Infinity（曲を読み込んでいる
    * あいだ）なら、まだいない
    */
@@ -974,7 +974,7 @@ export class Renderer {
       const k = reveal?.get(stage.index(x, y));
       return k === undefined ? null : REVEAL.delay + k * REVEAL.step + REVEAL.rise;
     };
-    // Esc で戻る演出：少女から遠いマスほど先に沈んで消える（null は消えたあと）
+    // X で戻る演出：少女から遠いマスほど先に沈んで消える（null は消えたあと）
     const sink = (x: number, y: number): { dy: number; alpha: number } | null => {
       if (backSec === null) return { dy: 0, alpha: 1 };
       const d = Math.min(Math.abs(x - sim.x) + Math.abs(y - sim.y), BACK.reach);
@@ -1196,7 +1196,7 @@ export class Renderer {
     }
 
     // 遊具はゴールした瞬間に消える
-    // Esc で戻るときは、通り道のマスのうち少女にいちばん近いマスと一緒に薄れて消える（marks：危険物ごとの最初の立体物）
+    // X で戻るときは、通り道のマスのうち少女にいちばん近いマスと一緒に薄れて消える（marks：危険物ごとの最初の立体物）
     const marks: { from: number; h: (typeof sim.hazards)[number] }[] = [];
     for (const [hazardIndex, h] of (clearSec === null ? sim.hazards : []).entries()) {
       marks.push({ from: sprites.length, h });
@@ -1352,7 +1352,7 @@ export class Renderer {
       }
     }
 
-    // Esc で戻るとき、少女は立っているマスと一緒に消える
+    // X で戻るとき、少女は立っているマスと一緒に消える
     const own = backSec === null ? null : sink(sim.x, sim.y);
     const gone = backSec === null ? 1 : own ? own.alpha : 0;
     if (backSec !== null) {

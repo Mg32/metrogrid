@@ -18,7 +18,7 @@ import { APPEAR_BARS, APPEAR_REST_BEATS, BACK, CLEAR, FADE_IN, LEAVE, Renderer, 
 import { Stick } from './touch.ts';
 
 /**
- * 遊ぶ流れ：タイトル →（はじめてならチュートリアル。Esc でスキップ）→ 拠点（家の中）→ 入口からステージへ → 結果 → 拠点へ戻る
+ * 遊ぶ流れ：タイトル →（はじめてならチュートリアル。X でスキップ）→ 拠点（家の中）→ 入口からステージへ → 結果 → 拠点へ戻る
  * ステージ5をクリアすると拠点に二階への階段が現れ、上り口で「本当に二階へ昇る？」と確かめてエンディングへ（企画書 第2.3節・第4.6節）。
  * エンディングのあとは、ガレキだけが残った画面のまま（崩壊後の画面。第2.4節で暫定合意：操作はできず、案内も出さない）。
  * クリアの記録は書き換えないので、ページを読み込み直すと階段が現れた時点（家がそろった状態）に戻る
@@ -117,7 +117,7 @@ interface Button {
 const BTN_W = 60;
 const BTN_H = 22;
 /** ボタンに添えるキーの名前 */
-const KEY_LABEL: Record<string, string> = { Delete: 'DEL', Escape: 'ESC', KeyR: 'R', KeyT: 'T', KeyY: 'Y', KeyN: 'N', KeyL: 'L', KeyM: 'M' };
+const KEY_LABEL: Record<string, string> = { Delete: 'DEL', KeyX: 'X', KeyR: 'R', KeyT: 'T', KeyY: 'Y', KeyN: 'N', KeyL: 'L', KeyM: 'M' };
 /** ボタンの幅：BTN_W か、キーの名前とラベルが収まる幅（言語でラベルの長さが変わる） */
 const btnW = (label: string, key: string) => Math.max(BTN_W, textWidth(KEY_LABEL[key], 1) + textWidth(label, 1) + 14);
 const left = (label: string, key: string): Button => ({ label, key, keyLabel: KEY_LABEL[key], x: 4, y: 288 - BTN_H - 4, w: btnW(label, key), h: BTN_H });
@@ -161,12 +161,12 @@ function screenButtons(): Button[] {
   }
   // クリアしたあとはホームへ戻るだけ（やり直しは拠点の入口から）。時間切れならやり直せる
   const m = msg();
-  if (scene === 'result') return sim?.status === 'cleared' ? [left(m.home, 'Escape')] : [left(m.home, 'Escape'), right(m.retry, 'KeyR')];
+  if (scene === 'result') return sim?.status === 'cleared' ? [left(m.home, 'KeyX')] : [left(m.home, 'KeyX'), right(m.retry, 'KeyR')];
   // 静止表示（?view）でも、遊んでいるときと同じボタンを出す
   if ((scene === 'play' || scene === 'view') && sim) {
-    if (sim.stage.kind === 'hub') return [left(m.title, 'Escape')];
-    if (sim.stage.kind === 'tutorial') return [left(m.skip, 'Escape'), right(m.retry, 'KeyR')];
-    return [left(m.home, 'Escape'), right(m.retry, 'KeyR')];
+    if (sim.stage.kind === 'hub') return [left(m.title, 'KeyX')];
+    if (sim.stage.kind === 'tutorial') return [left(m.skip, 'KeyX'), right(m.retry, 'KeyR')];
+    return [left(m.home, 'KeyX'), right(m.retry, 'KeyR')];
   }
   return [];
 }
@@ -225,7 +225,7 @@ let leaveAt = 0;
 let leaveTarget: StageDef | null = null;
 const leaveSec = () => performance.now() / 1000 - leaveAt;
 /**
- * Esc（HOME・SKIP・TITLE のボタン）で戻り始めた時刻（performance.now() の秒）と、戻る前の場面、戻り先へ移る処理。
+ * X（HOME・SKIP・TITLE のボタン）で戻り始めた時刻（performance.now() の秒）と、戻る前の場面、戻り先へ移る処理。
  * 曲が消えていき道が沈んで消える演出（BACK）のあと、backTo を呼ぶ
  */
 let backAt = 0;
@@ -459,7 +459,7 @@ function resultContinue(s: Sim): void {
 }
 
 /**
- * 結果画面で Esc（HOME ボタン）：拠点へ戻る。ステージからは、?stage で直接遊んでいたときも拠点へ
+ * 結果画面で X（HOME ボタン）：拠点へ戻る。ステージからは、?stage で直接遊んでいたときも拠点へ
  * （拠点の、そのステージの入口の前に立つ）。?stage で直接遊んでいたチュートリアルなどはタイトルへ
  */
 function resultBack(s: Sim): void {
@@ -527,8 +527,9 @@ canvas.addEventListener('pointercancel', endSteer);
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 function update(): void {
-  const start = input.consumePressed('Enter') || input.consumePressed('Space');
-  const esc = input.consumePressed('Escape');
+  // 決定は Enter・Space・Z、もどるは X（Esc は使わない）
+  const start = input.consumePressed('Enter') || input.consumePressed('Space') || input.consumePressed('KeyZ');
+  const esc = input.consumePressed('KeyX');
   const retry = input.consumePressed('KeyR');
   const tut = input.consumePressed('KeyT');
 
@@ -561,7 +562,7 @@ function update(): void {
     else if (retry && sim.status !== 'cleared') void play(sim.stage.def);
     else if (esc) resultBack(sim);
   } else if (scene === 'confirm') {
-    // 左右で選び、Enter で決める。Esc・N は「いいえ」。Y は YES のボタンと同じ（選んでから、もう一度で決まる）
+    // 左右で選び、Enter・Z で決める。X・N は「いいえ」。Y は YES のボタンと同じ（選んでから、もう一度で決まる）
     const was = confirmYes;
     if (input.consumePressed('ArrowLeft') || input.consumePressed('KeyA')) confirmYes = true;
     if (input.consumePressed('ArrowRight') || input.consumePressed('KeyD')) confirmYes = false;
@@ -656,7 +657,7 @@ function update(): void {
 
 /** タイトル：闇に浮かぶ家と、その前に立つ少女。家は、クリアしたステージに当たる部分が戻っている */
 function drawTitle(): void {
-  // 遊び方は文字で書かず、チュートリアルで覚えてもらう（チュートリアルは途中でも Esc・SKIP で飛ばせる）
+  // 遊び方は文字で書かず、チュートリアルで覚えてもらう（チュートリアルは途中でも X・SKIP で飛ばせる）
   const dev = devDef();
   const go = msg().start;
   renderer.title(scene === 'homecoming' ? performance.now() / 1000 : (fixedTitleSec ?? performance.now() / 1000), {
