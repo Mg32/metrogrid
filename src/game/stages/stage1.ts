@@ -88,7 +88,7 @@ export const stage1: StageDef = {
     '     e                                          ',
     '      ePP                                       ',
     '        e                                       ',
-    '      eP             <                          ',
+    '      eP                                        ',
     '     P                                          ',
     '     e                       d                  ',
     '      PPe                                       ',

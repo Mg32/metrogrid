@@ -242,6 +242,8 @@ const COLORS = {
   stopEdge: '#e0a050',
   stopReady: '#9fc98a',
   arrow: '#26242c',
+  /** 下りられるが戻れない縁（床の高さの一方通行）の印 */
+  dropMark: '#e2d3b4',
   text: '#e8e1d6',
   textDim: '#8d857a',
   accent: '#7fa3c4',
@@ -666,6 +668,7 @@ export class Renderer {
   private lot: HTMLCanvasElement;
   /** ステージごとの、各マスの街灯の明るさ */
   private lightMaps = new WeakMap<Stage, Uint8Array>();
+  private dropMaps = new WeakMap<Stage, Map<number, Dir[]>>();
   private tintedRoads = new Map<string, HTMLCanvasElement>();
   private surfaces = new Map<string, HTMLCanvasElement>();
   /** 高い床の側面（深さごとに、使うときに作って取っておく） */
@@ -1044,6 +1047,7 @@ export class Renderer {
         else ctx.drawImage(this.road(cell, light[stage.index(x, y)]), sx - TW / 2, sy);
         if (springs.has(stage.index(x, y))) this.spring(sx, sy + TH / 2);
         if (cell.climb) this.climbMark(sx, sy, cell.climb, stage, x, y);
+        for (const d of this.dropMap(stage).get(stage.index(x, y)) ?? []) this.dropMark(sx, sy, d);
 
         const obj = cell.obj;
         if (obj?.type === 'bridge') {
@@ -1790,6 +1794,58 @@ export class Renderer {
       ctx.fillStyle = COLORS.snowShade;
       for (const dx of [-4, 0, 4]) ctx.fillRect(sx + dx, sy + TH / 2 - 1, 1, 2);
     }
+  }
+
+  /**
+   * 床の高さの一方通行（企画書 第2.4節）：下りられるが、下りた先から戻れない辺。マスの番号 → その向き。
+   * はしご・雨どいのない段差と斜面がこれに当たる
+   */
+  private dropMap(stage: Stage): Map<number, Dir[]> {
+    let map = this.dropMaps.get(stage);
+    if (map) return map;
+    map = new Map();
+    for (let y = 0; y < stage.height; y++) {
+      for (let x = 0; x < stage.width; x++) {
+        if (stage.cell(x, y)!.terrain !== 'floor') continue;
+        for (const d of Object.keys(DIR_VEC) as Dir[]) {
+          const nx = x + DIR_VEC[d].x;
+          const ny = y + DIR_VEC[d].y;
+          if (stage.cell(nx, ny)?.terrain !== 'floor') continue;
+          if (!stage.canStep(x, y, nx, ny) || stage.canStep(nx, ny, x, y)) continue;
+          const i = stage.index(x, y);
+          map.set(i, [...(map.get(i) ?? []), d]);
+        }
+      }
+    }
+    this.dropMaps.set(stage, map);
+    return map;
+  }
+
+  /**
+   * 下りると戻れない縁の印：マスのその向きの縁の近くに、下る向きを指す山形を2つ（踏み外しそうな縁に引いた注意の線のように）。
+   * 企画書 第2.4節は特殊マスの見た目を場所に合わせるとしているが、段差だけでは戻れるかどうか読めないので印を添える（仮）
+   */
+  private dropMark(sx: number, sy: number, dir: Dir): void {
+    const ctx = this.lctx;
+    const { x: dx, y: dy } = DIR_VEC[dir];
+    // グリッドの向き → 画面上の向き（arrow と同じ。u は下る向き、v は縁に沿う向き）。u × 6 がマスの中心から縁の中ほど
+    const ux = dx - dy;
+    const uy = (dx + dy) / 2;
+    const vx = -dy - dx;
+    const vy = (dx - dy) / 2;
+    const cy = sy + TH / 2;
+    const alpha = ctx.globalAlpha;
+    ctx.globalAlpha = alpha * 0.75;
+    ctx.fillStyle = COLORS.dropMark;
+    for (const tip of [5, 1]) {
+      const tx = sx + ux * tip;
+      const ty = cy + uy * tip;
+      for (let k = 0; k < 3; k++) {
+        ctx.fillRect(Math.round(tx - ux * k + vx * k), Math.round(ty - uy * k + vy * k), 2, 1);
+        ctx.fillRect(Math.round(tx - ux * k - vx * k), Math.round(ty - uy * k - vy * k), 2, 1);
+      }
+    }
+    ctx.globalAlpha = alpha;
   }
 
   /** 各マスの街灯の明るさ（街灯と玄関から 1マス以内: 2、2マス: 1） */
